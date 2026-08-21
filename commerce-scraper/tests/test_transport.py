@@ -2,15 +2,19 @@ import pytest
 
 from mb_commerce_scraper.testing import FakeTransport
 from mb_commerce_scraper.transports import (
+    BrowserBackendUnavailable,
+    BrowserDispatchTransport,
     BrowserHint,
     MemoryRequestBudget,
     MemoryResponseCache,
     MiddlewareTransport,
     RequestPriority,
     RequestPurpose,
+    RotationReason,
     TransportRequest,
     TransportResponse,
 )
+from mb_commerce_scraper.transports.httpx import HttpxTransport
 from mb_commerce_scraper.transports.middleware import BudgetExhausted, RobotsDenied
 from mb_commerce_scraper.transports.url_policy import URLPolicy
 
@@ -119,6 +123,75 @@ def test_cache_key_ignores_credentials_but_distinguishes_rendering() -> None:
     rendered = ordinary.model_copy(update={"browser": BrowserHint.REQUIRED})
     assert MemoryResponseCache.key(ordinary) == MemoryResponseCache.key(changed_secret)
     assert MemoryResponseCache.key(ordinary) != MemoryResponseCache.key(rendered)
+
+
+async def test_http_transport_rejects_browser_required_requests() -> None:
+    transport = HttpxTransport(allowed_origins=("https://shop.test",))
+    request = TransportRequest(
+        url="https://shop.test/data",
+        purpose=RequestPurpose.ENTITY,
+        priority=RequestPriority.IDENTITY,
+        browser=BrowserHint.REQUIRED,
+    )
+    with pytest.raises(BrowserBackendUnavailable, match="browser transport"):
+        await transport.request(request)
+    await transport.aclose()
+
+
+async def test_browser_dispatch_routes_only_required_requests() -> None:
+    http = FakeTransport()
+    browser = FakeTransport()
+    http.add("https://shop.test/plain", body="http")
+    browser.add("https://shop.test/rendered", body="browser")
+    transport = BrowserDispatchTransport(http, browser)
+
+    plain = await transport.request(
+        TransportRequest(
+            url="https://shop.test/plain",
+            purpose=RequestPurpose.ENTITY,
+            priority=RequestPriority.IDENTITY,
+        )
+    )
+    rendered = await transport.request(
+        TransportRequest(
+            url="https://shop.test/rendered",
+            purpose=RequestPurpose.ENTITY,
+            priority=RequestPriority.IDENTITY,
+            browser=BrowserHint.REQUIRED,
+        )
+    )
+
+    assert plain.text() == "http" and plain.route.kind == "direct"
+    assert rendered.text() == "browser" and rendered.route.kind == "browser"
+    assert [request.url for request in http.requests] == ["https://shop.test/plain"]
+    assert [request.url for request in browser.requests] == [
+        "https://shop.test/rendered"
+    ]
+
+
+async def test_browser_dispatch_fails_required_request_without_backend() -> None:
+    transport = BrowserDispatchTransport(FakeTransport())
+
+    with pytest.raises(BrowserBackendUnavailable, match="no browser backend"):
+        await transport.request(
+            TransportRequest(
+                url="https://shop.test/rendered",
+                purpose=RequestPurpose.ENTITY,
+                priority=RequestPriority.IDENTITY,
+                browser=BrowserHint.REQUIRED,
+            )
+        )
+
+
+async def test_browser_dispatch_rotates_both_identities() -> None:
+    http = FakeTransport()
+    browser = FakeTransport()
+    transport = BrowserDispatchTransport(http, browser)
+
+    await transport.rotate_identity(RotationReason.CAPTCHA)
+
+    assert http.rotations == [RotationReason.CAPTCHA]
+    assert browser.rotations == [RotationReason.CAPTCHA]
 
 
 def _response(body: str) -> TransportResponse:

@@ -6,6 +6,7 @@ from mb_commerce_scraper.proxy import (
     ProxyPool,
     ProxyRouting,
 )
+from mb_commerce_scraper.transports import BrowserTransport
 from mb_commerce_scraper.transports.httpx import HttpxTransport
 
 from .client import CommerceScraper
@@ -19,6 +20,8 @@ def build_http_scraper(
     proxy_pool: ProxyPool | None = None,
     routing: ProxyRouting | None = None,
     proxy_maximum_bytes: int | None = None,
+    browser_transport: BrowserTransport | None = None,
+    owns_browser_transport: bool = False,
 ) -> CommerceScraper:
     transport = HttpxTransport(allowed_origins=allowed_origins, timeout=timeout)
     return CommerceScraper(
@@ -36,4 +39,6 @@ def build_http_scraper(
         ),
         proxy_maximum_bytes=proxy_maximum_bytes,
         owns_transport=True,
+        browser_transport=browser_transport,
+        owns_browser_transport=owns_browser_transport,
     )

@@ -54,6 +54,7 @@ def layered_source_config(
     projection_options: dict[str, Any] | None = None,
 ) -> CatalogueSourceConfig:
     """Validate the flat source first, then split collection and application policy."""
+    plan = runtime_plan(config)
     selected_datasets = datasets or (
         "ceramics.catalogue_identity.v2"
         if config.identity_only
@@ -80,5 +81,5 @@ def layered_source_config(
             country=config.country,
         ),
         datasets=selected_datasets,
-        projection_options=projection_options or {},
+        projection_options={**plan.ceramics_projection, **(projection_options or {})},
     )

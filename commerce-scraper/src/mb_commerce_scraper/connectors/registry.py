@@ -81,10 +81,21 @@ class ConnectorRegistry:
 
 
 def register_builtin_connectors(registry: ConnectorRegistry) -> None:
+    from .bigcommerce import BigCommerceFactory
     from .generic_pages import GenericPagesFactory
+    from .prestashop import PrestaShopFactory
     from .shopify import ShopifyFactory
+    from .specialized import NitroSellFactory, ShopwareFactory, StarwebFactory, SumUpFactory
+    from .wix import WixFactory
     from .woocommerce import WooCommerceFactory
 
     registry.register(ShopifyFactory())
     registry.register(GenericPagesFactory())
     registry.register(WooCommerceFactory())
+    registry.register(PrestaShopFactory())
+    registry.register(BigCommerceFactory())
+    registry.register(WixFactory())
+    registry.register(ShopwareFactory())
+    registry.register(StarwebFactory())
+    registry.register(NitroSellFactory())
+    registry.register(SumUpFactory())

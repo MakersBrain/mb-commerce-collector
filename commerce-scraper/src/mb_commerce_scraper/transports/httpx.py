@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .base import (
+    BrowserHint,
     CommerceTransport,
     RotationReason,
     Timer,
@@ -10,6 +11,7 @@ from .base import (
     TransportRequest,
     TransportResponse,
 )
+from .browser import BrowserBackendUnavailable
 from .url_policy import URLPolicy
 
 
@@ -48,6 +50,10 @@ class HttpxTransport(CommerceTransport):
         self._maximum_redirects = maximum_redirects
 
     async def request(self, request: TransportRequest) -> TransportResponse:
+        if request.browser == BrowserHint.REQUIRED:
+            raise BrowserBackendUnavailable(
+                "request requires a browser transport, but only HTTP is configured"
+            )
         current = await self._policy.validate(request.url)
         headers = dict(request.headers)
         timer = Timer()

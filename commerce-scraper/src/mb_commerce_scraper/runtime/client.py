@@ -14,8 +14,19 @@ from mb_commerce_scraper.models import (
     SnapshotField,
     SourceDefinition,
 )
-from mb_commerce_scraper.proxy import ProxyPool, ProxyRouting, ProxyTransportFactory, RoutedTransport
-from mb_commerce_scraper.transports import CommerceTransport
+from mb_commerce_scraper.proxy import (
+    ProxyPool,
+    ProxyRouting,
+    ProxyTransportFactory,
+    RoutedTransport,
+    RoutingMode,
+)
+from mb_commerce_scraper.transports import (
+    BrowserDispatchTransport,
+    BrowserTransport,
+    CommerceTransport,
+    MiddlewareTransport,
+)
 from mb_commerce_scraper.transports.base import RequestBudget, TelemetryHooks
 
 
@@ -32,6 +43,8 @@ class CommerceScraper:
         budget: RequestBudget | None = None,
         telemetry: TelemetryHooks | None = None,
         owns_transport: bool = False,
+        browser_transport: BrowserTransport | None = None,
+        owns_browser_transport: bool = False,
     ) -> None:
         self.registry = registry
         self.transport = transport
@@ -42,6 +55,8 @@ class CommerceScraper:
         self.budget = budget
         self.telemetry = telemetry
         self.owns_transport = owns_transport
+        self.browser_transport = browser_transport
+        self.owns_browser_transport = owns_browser_transport
 
     async def collect(
         self,
@@ -56,6 +71,7 @@ class CommerceScraper:
     ) -> AsyncIterator[EntityPage[CommerceProductSnapshot]]:
         attempt_transport: CommerceTransport = self.transport
         routed: RoutedTransport | None = None
+        selected_routing = self.routing or ProxyRouting()
         if self.proxy_pool is not None or self.routing is not None:
             if self.proxy_pool is None or self.proxy_transport_factory is None:
                 raise ValueError("proxy routing requires both proxy_pool and proxy_transport_factory")
@@ -63,12 +79,25 @@ class CommerceScraper:
                 self.transport,
                 pool=self.proxy_pool,
                 proxy_factory=self.proxy_transport_factory,
-                routing=self.routing or ProxyRouting(),
+                routing=selected_routing,
                 source_id=source.id,
                 base_url=source.base_url,
                 maximum_bytes=self.proxy_maximum_bytes,
             )
             attempt_transport = routed
+        attempt_transport = BrowserDispatchTransport(
+            attempt_transport,
+            self.browser_transport,
+            proxy_browser_supported=(
+                routed is None or selected_routing.mode == RoutingMode.NEVER
+            ),
+        )
+        if self.budget is not None or self.telemetry is not None:
+            attempt_transport = MiddlewareTransport(
+                attempt_transport,
+                budget=self.budget,
+                telemetry=self.telemetry,
+            )
         context = ConnectorContext(budget=self.budget, telemetry=self.telemetry)
         connector = self.registry.build(source.connector, transport=attempt_transport, options=source.connector_options, context=context)
         request = CollectionRequest(
@@ -95,5 +124,13 @@ class CommerceScraper:
         return self
 
     async def __aexit__(self, *_: object) -> None:
-        if self.owns_transport and hasattr(self.transport, "aclose"):
-            await self.transport.aclose()  # type: ignore[attr-defined, unused-ignore]
+        try:
+            if self.owns_transport and hasattr(self.transport, "aclose"):
+                await self.transport.aclose()  # type: ignore[attr-defined, unused-ignore]
+        finally:
+            if (
+                self.owns_browser_transport
+                and self.browser_transport is not self.transport
+                and hasattr(self.browser_transport, "aclose")
+            ):
+                await self.browser_transport.aclose()  # type: ignore[attr-defined, union-attr, unused-ignore]

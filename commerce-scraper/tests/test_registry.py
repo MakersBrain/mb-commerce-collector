@@ -7,7 +7,18 @@ from mb_commerce_scraper.connectors import ConnectorRegistry, ShopifyFactory
 def test_registry_is_isolated_and_does_not_instantiate_for_listing() -> None:
     first = ConnectorRegistry.with_builtins()
     second = ConnectorRegistry()
-    assert first.names() == ("generic-pages", "shopify", "woocommerce")
+    assert first.names() == (
+        "bigcommerce",
+        "generic-pages",
+        "nitrosell",
+        "prestashop",
+        "shopify",
+        "shopware",
+        "starweb",
+        "sumup",
+        "wix",
+        "woocommerce",
+    )
     assert second.names() == ()
     assert first.options_schema("shopify")["additionalProperties"] is False
 

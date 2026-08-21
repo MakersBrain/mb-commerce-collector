@@ -13,6 +13,12 @@ from .base import (
     TransportRequest,
     TransportResponse,
 )
+from .browser import (
+    BrowserBackendUnavailable,
+    BrowserDispatchTransport,
+    BrowserTransport,
+    ProxyBrowserRoutingUnsupported,
+)
 from .middleware import BudgetExhausted, MiddlewareTransport, RobotsDenied
 from .url_policy import URLPolicy
 

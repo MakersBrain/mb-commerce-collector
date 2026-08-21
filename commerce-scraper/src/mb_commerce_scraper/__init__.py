@@ -1,6 +1,8 @@
 """Public contracts. Importing this module performs no I/O or discovery."""
 
 from .connectors import (
+    BigCommerceConnector,
+    BigCommerceOptions,
     BrowserRequirement,
     CommerceConnector,
     ConnectorCapabilities,
@@ -9,8 +11,20 @@ from .connectors import (
     ConnectorRegistry,
     GenericPagesConnector,
     GenericPagesOptions,
+    NitroSellConnector,
+    NitroSellOptions,
+    PrestaShopConnector,
+    PrestaShopOptions,
     ShopifyConnector,
     ShopifyOptions,
+    ShopwareConnector,
+    ShopwareOptions,
+    StarwebConnector,
+    StarwebOptions,
+    SumUpConnector,
+    SumUpOptions,
+    WixConnector,
+    WixOptions,
     WooCommerceConnector,
     WooCommerceOptions,
 )

@@ -24,9 +24,19 @@ async with CommerceScraper(registry=registry, transport=FakeTransport()) as scra
         print(page.items)
 ```
 
-Built-in connector names are `shopify`, `woocommerce`, and `generic-pages`.
-Connector options are validated by the selected factory; unrelated platform
-options are rejected.
+Built-in connector names are `shopify`, `woocommerce`, `prestashop`,
+`bigcommerce`, `wix`, `shopware`, `starweb`, `nitrosell`, `sumup`, and
+`generic-pages`. Sio2 sources use the `prestashop` connector with catalogue
+projection policy applied afterward. Connector options are validated by the
+selected factory; unrelated platform options are rejected.
+
+Connectors may label individual requests as browser-required. Pass a borrowed
+browser transport to `CommerceScraper(browser_transport=...)` to serve those
+requests; ordinary requests continue through HTTP. HTTP-only composition fails
+clearly instead of silently downgrading browser-required work. Until a browser
+proxy factory can bind the browser to the same sticky lease, combining an
+active proxy route with browser-required work is rejected rather than bypassing
+the configured proxy.
 
 For an owned HTTP session and optional sticky residential failover:
 
