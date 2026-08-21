@@ -57,28 +57,16 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Applied once, in filename order, the first time the volume is empty.
-      # The order is load-bearing twice over: the baseline loader rejects a v2
-      # record until the migration has widened it, and the ops schema adds a
-      # foreign key to `catalogue.import_runs`, which the baseline creates.
       #
-      # They live under the package (src/.../storage/schema) rather than beside
+      # One schema file, not the eleven versioned ones it replaces: keeping an
+      # order-sensitive list here in step with `storage.db.SCHEMA_FILES` was a
+      # standing bug, and the compose side had already fallen a version behind.
+      #
+      # It lives under the package (src/.../storage/schema) rather than beside
       # this file so a worker can apply the same DDL from an installed
-      # distribution — see `storage.db.apply_schema`.
+      # distribution - see `storage.db.apply_schema`.
       - ./docker/initdb/00-extensions.sql:/docker-entrypoint-initdb.d/00-extensions.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-reference-schema.sql:/docker-entrypoint-initdb.d/10-catalogue-reference-schema.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-reference-schema-v2.sql:/docker-entrypoint-initdb.d/20-catalogue-reference-schema-v2.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-reference-schema-v3.sql:/docker-entrypoint-initdb.d/25-catalogue-reference-schema-v3.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-reference-schema-v4.sql:/docker-entrypoint-initdb.d/26-catalogue-reference-schema-v4.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-ops-schema.sql:/docker-entrypoint-initdb.d/30-catalogue-ops-schema.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-ops-schema-v2.sql:/docker-entrypoint-initdb.d/35-catalogue-ops-schema-v2.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-ops-schema-v3.sql:/docker-entrypoint-initdb.d/36-catalogue-ops-schema-v3.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-ops-schema-v4.sql:/docker-entrypoint-initdb.d/37-catalogue-ops-schema-v4.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-ops-schema-v5.sql:/docker-entrypoint-initdb.d/38-catalogue-ops-schema-v5.sql:ro
-      # Last, and it was missing entirely: it alters `canonical_products` and
-      # defines `promote_canonical_products`, which a run calls when its last
-      # job lands. A database without it takes every source in and never folds
-      # them into the cross-supplier identities the catalogue exists to serve.
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-canonical-promotion.sql:/docker-entrypoint-initdb.d/40-catalogue-canonical-promotion.sql:ro
+      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-schema.sql:/docker-entrypoint-initdb.d/10-catalogue-schema.sql:ro
     restart: unless-stopped
     healthcheck:
       test:
@@ -86,7 +74,7 @@ services:
         - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
       interval: 10s
       timeout: 3s
-      # initdb replays both schema files before the server accepts connections.
+      # initdb replays the schema before the server accepts connections.
       start_period: 30s
       retries: 10
 

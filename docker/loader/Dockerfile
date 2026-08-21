@@ -8,10 +8,12 @@
 FROM python:3.12-slim
 
 WORKDIR /src
-COPY catalogue-dump/pyproject.toml catalogue-dump/sources.json ./
-COPY catalogue-dump/src ./src
+COPY commerce-scraper/pyproject.toml commerce-scraper/README.md ./commerce-scraper/
+COPY commerce-scraper/src ./commerce-scraper/src
+COPY catalogue-dump/pyproject.toml catalogue-dump/sources.json ./catalogue-dump/
+COPY catalogue-dump/src ./catalogue-dump/src
 
-RUN pip install --no-cache-dir ".[postgres]" \
+RUN pip install --no-cache-dir ./commerce-scraper "./catalogue-dump[postgres]" \
  && rm -rf /root/.cache
 
 # Not root: it reads NDJSON and writes to one database, and needs nothing else.

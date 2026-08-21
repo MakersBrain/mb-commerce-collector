@@ -21,8 +21,10 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-COPY catalogue-dump/pyproject.toml catalogue-dump/sources.json ./
-COPY catalogue-dump/src ./src
+COPY commerce-scraper/pyproject.toml commerce-scraper/README.md ./commerce-scraper/
+COPY commerce-scraper/src ./commerce-scraper/src
+COPY catalogue-dump/pyproject.toml catalogue-dump/sources.json ./catalogue-dump/
+COPY catalogue-dump/src ./catalogue-dump/src
 
 RUN useradd --system --uid 10001 --create-home catalogue
 
@@ -42,7 +44,7 @@ FROM base AS worker
 # without it every source behind a TLS-fingerprinting WAF fails on this worker
 # and only succeeds on the browser one, which is the expensive way to fetch a
 # page that a handshake alone would have opened.
-RUN pip install --no-cache-dir ".[postgres,otel,impersonate]" && rm -rf /root/.cache
+RUN pip install --no-cache-dir ./commerce-scraper "./catalogue-dump[postgres,otel,impersonate]" && rm -rf /root/.cache
 COPY docker/worker/entrypoint.py /usr/local/bin/catalogue-worker-entrypoint.py
 WORKDIR /var/lib/catalogue
 # SIGTERM is handled as a drain: it finishes the current source, requeues
@@ -71,7 +73,7 @@ RUN apt-get update \
       libglib2.0-0 libxkbcommon0 libdrm2 libgbm1 fonts-liberation \
  && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir ".[postgres,otel,browser,impersonate]" \
+RUN pip install --no-cache-dir ./commerce-scraper "./catalogue-dump[postgres,otel,browser,impersonate]" \
  && python -c "import camoufox" \
  && rm -rf /root/.cache
 USER catalogue

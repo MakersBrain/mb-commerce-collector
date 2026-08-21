@@ -5,6 +5,7 @@
 # `make check` is what a change has to pass.
 
 DUMP     := catalogue-dump
+SCRAPER  := commerce-scraper
 CONTROL  := catalogue-control
 SERVICE  := catalogue-service
 EXPLORER := catalogue-explorer
@@ -15,6 +16,8 @@ EXPLORER := catalogue-explorer
 # otherwise warn about it on every single invocation.
 UV       := VIRTUAL_ENV= uv --directory $(DUMP)
 RUN      := $(UV) run --
+UVSCRAPER := VIRTUAL_ENV= uv --directory $(SCRAPER)
+RUNSCRAPER := $(UVSCRAPER) run --extra dev --
 UVC      := VIRTUAL_ENV= uv --directory $(CONTROL)
 RUNC     := $(UVC) run --
 UVS      := VIRTUAL_ENV= uv --directory $(SERVICE)
@@ -29,6 +32,7 @@ help:  ## List the targets
 
 .PHONY: install
 install:  ## Sync every project's virtualenv, including dev groups
+	$(UVSCRAPER) sync --extra dev
 	$(UV) sync --all-groups
 	$(UVC) sync --all-groups
 	$(UVS) sync --all-groups
@@ -36,6 +40,7 @@ install:  ## Sync every project's virtualenv, including dev groups
 
 .PHONY: lint
 lint:  ## ruff, across all three Python projects
+	$(RUNSCRAPER) ruff check .
 	$(RUN) ruff check .
 	$(RUNC) ruff check .
 	$(RUNS) ruff check .
@@ -48,6 +53,7 @@ format:  ## ruff, fixing what it can
 
 .PHONY: typecheck
 typecheck:  ## mypy, and svelte-check for the explorer
+	$(RUNSCRAPER) mypy
 	$(RUN) mypy
 	$(RUNC) mypy
 	$(RUNS) mypy
@@ -55,6 +61,7 @@ typecheck:  ## mypy, and svelte-check for the explorer
 
 .PHONY: test
 test:  ## The fast suites: no network, no database, no cache replay
+	$(RUNSCRAPER) pytest
 	$(RUN) pytest
 	$(RUNC) pytest
 	$(RUNS) pytest
@@ -139,6 +146,19 @@ openapi-check:  ## Fail if a generated contract has drifted from the code
 
 .PHONY: check
 check: lint typecheck test openapi-check  ## What every change has to pass
+
+.PHONY: scraper-lint scraper-typecheck scraper-test scraper-build scraper-contracts scraper-check
+scraper-lint:  ## Lint the reusable scraper distribution
+	$(RUNSCRAPER) ruff check .
+scraper-typecheck:  ## Type-check the reusable scraper distribution
+	$(RUNSCRAPER) mypy
+scraper-test:  ## Run scraper unit and conformance tests
+	$(RUNSCRAPER) pytest
+scraper-build:  ## Build wheel and source distribution
+	$(RUNSCRAPER) python -m build
+scraper-contracts:  ## Run dependency and clean-import contract tests
+	$(RUNSCRAPER) pytest tests/test_boundaries.py
+scraper-check: scraper-lint scraper-typecheck scraper-test scraper-build scraper-contracts  ## All scraper gates
 
 .PHONY: check-all
 check-all: check test-golden  ## check, the replay suite, and the database suite

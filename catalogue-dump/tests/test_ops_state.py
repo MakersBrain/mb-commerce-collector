@@ -970,13 +970,26 @@ class TestScheduleDefault:
 
 
 class TestSchemaMigration:
-    async def test_an_existing_initdb_schema_is_adopted_then_migrations_are_recorded(self, db):
-        first = await storage_db.apply_schema(db)
-        assert "catalogue-reference-schema.sql" not in first
-        assert "catalogue-reference-schema-v3.sql" in first
+    async def test_an_existing_schema_is_adopted_rather_than_reapplied(self, db):
+        # The fixture built the schema from the same file, exactly as initdb
+        # does, so there is nothing to run - only a ledger row to write.
+        assert await storage_db.apply_schema(db) == []
         assert await storage_db.apply_schema(db) == []
         applied = await rows(db, "select filename from catalogue.schema_migrations")
         assert {row["filename"] for row in applied} == set(storage_db.SCHEMA_FILES)
+
+    async def test_a_database_short_of_head_is_refused_rather_than_adopted(self, db):
+        # A database that stopped part-way through the pre-squash sequence has
+        # the early tables and not the late ones. Stamping the baseline over it
+        # would record a schema it does not have.
+        await db.execute(f"drop table {storage_db.HEAD_SENTINEL}")
+        with pytest.raises(RuntimeError, match="stopped part-way"):
+            await storage_db.apply_schema(db)
+
+    async def test_an_empty_database_gets_the_baseline(self, db):
+        await db.execute("drop schema catalogue cascade")
+        assert await storage_db.apply_schema(db) == [storage_db.BASELINE]
+        assert await storage_db.apply_schema(db) == []
 
     async def test_multi_dataset_page_and_artifact_schema_enforces_identity(self, db):
         run_id = await runs.create_run(db)

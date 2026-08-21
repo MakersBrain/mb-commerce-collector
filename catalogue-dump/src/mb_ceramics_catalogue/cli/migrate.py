@@ -1,4 +1,4 @@
-"""Apply the ordered idempotent catalogue schema to an existing database."""
+"""Apply the catalogue schema baseline, or adopt a database that already has it."""
 
 from __future__ import annotations
 

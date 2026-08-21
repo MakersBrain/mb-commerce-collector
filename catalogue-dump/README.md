@@ -468,28 +468,32 @@ record contract and the source configuration. They make no network requests.
 
 ## PostgreSQL reference catalogue
 
-[`catalogue-reference-schema.sql`](catalogue-reference-schema.sql) defines the
-shared PostgreSQL `catalogue` schema used to load the NDJSON exports, and
-[`catalogue-reference-schema-v2.sql`](catalogue-reference-schema-v2.sql) adds
-support for the v2 records. **Apply both, in that order** — the baseline loader
-rejects a v2 record with `unsupported_catalogue_record_format`.
+[`catalogue-schema.sql`](src/mb_ceramics_catalogue/storage/schema/catalogue-schema.sql)
+defines the whole shared PostgreSQL `catalogue` schema used to load the NDJSON
+exports — tables, functions, the promotion rule and the seed rows, in one file.
 
 ```bash
-psql -d ateliera -f catalogue-dump/catalogue-reference-schema.sql
-psql -d ateliera -f catalogue-dump/catalogue-reference-schema-v2.sql
+psql -d ateliera -f catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-schema.sql
 ```
 
-`pgcrypto` must be reachable from the loader's `search_path`
-(`pg_catalog, catalogue`), so install it into the `catalogue` schema or another
-schema on that path — not into `public`, where `digest()` will not resolve.
+It was eleven versioned files applied in a hand-maintained order until they were
+squashed into this baseline, generated as a `pg_dump --schema-only` of a database
+that had applied all of them. Regenerate it the same way rather than editing it
+by hand. `catalogue-migrate` applies it to a database that has none of it and
+adopts one that already does; it cannot migrate a database left part-way through
+the old sequence, and says so rather than guessing.
 
-The migration is additive and idempotent, and v1 records keep loading unchanged.
-It adds `parent_external_id`, `manufacturer_sku` and `supplier_reference` to
-`source_products`, `unit_price`/`unit_price_per` to `offer_observations`, and a
-`catalogue.offer_comparison` view giving the latest offer per source product
-keyed by manufacturer code. Fields not promoted to columns (form, surface,
-effects, colour, claims, documents, technical_attributes, category_path) stay
-queryable in `source_products.attributes`.
+`pgcrypto` must be reachable from the loader's `search_path`
+(`pg_catalog, catalogue`), so the schema installs it into `catalogue` itself —
+not into `public`, where `digest()` will not resolve.
+
+Both the v1 and v2 record formats load unchanged. `source_products` carries
+`parent_external_id`, `manufacturer_sku` and `supplier_reference`,
+`offer_observations` carries `unit_price`/`unit_price_per`, and
+`catalogue.offer_comparison` gives the latest offer per source product keyed by
+manufacturer code. Fields not promoted to columns (form, surface, effects,
+colour, claims, documents, technical_attributes, category_path) stay queryable in
+`source_products.attributes`.
 
 The normalized model deliberately separates:
 
@@ -543,12 +547,11 @@ loader deliberately never fills it: an importer that guessed which similarly
 named supplier rows are the same product would silently merge two different
 glazes, and nothing downstream could tell that it had.
 
-[`catalogue-canonical-promotion.sql`](catalogue-canonical-promotion.sql) supplies
-the missing curation as an explicit rule. Apply it after both schema files, then
-run the promotion; both are idempotent and re-runnable.
+The schema supplies the missing curation as an explicit rule: the manufacturer
+and alias seed rows, and `promote_canonical_products`. Run the promotion once the
+schema is applied; it is idempotent and re-runnable.
 
 ```bash
-psql -d ateliera -f catalogue-dump/catalogue-canonical-promotion.sql
 psql -d ateliera -c 'select * from catalogue.promote_canonical_products();'
 psql -d ateliera -c "select * from catalogue.promote_canonical_products('mayco');"
 ```
@@ -658,40 +661,3 @@ The extractor ignores grayscale masks and surrounding page artwork, converts
 matched tiles to sRGB PNG, and stores them under
 `catalogue-images/<source>/<sku>.png`. The PostgreSQL loader retains
 `image_path` in `source_products.attributes`.
-
-## Explore and compare prices
-
-From the repository root, start the local browser UI:
-
-```bash
-python3 catalogue-compare.py --data catalogue-dumps --serve
-```
-
-Then open `http://127.0.0.1:8080`. Search a manufacturer reference (`PC-47`,
-`CG-1013`, `FN061`) or a product name.
-
-Offers are grouped by **manufacturer code**, which is the only honest
-cross-supplier key, and every offer is normalised to **EUR per litre or per
-kilogram** so different pack sizes become comparable. Within a group the
-cheapest unit price is highlighted. Rows without a manufacturer code group per
-supplier product, which at least collapses that product's own pack sizes.
-
-With an empty query the page lists the products whose price differs most
-between suppliers. That comparison is made **only between similar pack sizes**:
-a 59 ml jar always costs more per litre than a 473 ml pot, so ranking one
-supplier's small jar against another's large pot would misrepresent both.
-
-Filters: products sold by two or more suppliers, in stock only, and family.
-
-A terminal-only search is also available:
-
-```bash
-python3 catalogue-compare.py --data catalogue-dumps "CG-1013"
-```
-
-The tool reads both the v1 and v2 record formats.
-
-A similar name alone does not prove two products are equivalent: compare model
-codes, currency, package size, VAT and shipping before making a purchasing
-decision. EUR conversions use the ECB daily reference rates and are indicative,
-not transaction rates.

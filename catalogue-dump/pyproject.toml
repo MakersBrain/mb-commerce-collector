@@ -4,6 +4,7 @@ version = "0.2.0"
 description = "Collection, loading and scheduled operation of the ceramics reference catalogue"
 requires-python = ">=3.11,<3.14"
 dependencies = [
+  "mb-commerce-scraper==0.1.0",
   # Cron expressions for `catalogue.schedules`. A five-field parser is eighty
   # lines and gets DST wrong in ways nobody notices until the clocks change.
   "croniter>=6.0",
@@ -100,6 +101,9 @@ packages = ["src/mb_ceramics_catalogue"]
 # resolves through the installed distribution rather than through whichever
 # directory happened to be the working one.
 package = true
+
+[tool.uv.sources]
+mb-commerce-scraper = { path = "../commerce-scraper" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

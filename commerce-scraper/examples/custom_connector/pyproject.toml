@@ -1,0 +1,9 @@
+[project]
+name = "example-commerce-connector"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["mb-commerce-scraper==0.1.0"]
+
+[project.entry-points."mb_commerce_scraper.connectors"]
+example = "example_connector:connector_factory"
+
