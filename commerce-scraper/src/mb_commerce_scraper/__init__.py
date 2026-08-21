@@ -11,9 +11,12 @@ from .connectors import (
     GenericPagesOptions,
     ShopifyConnector,
     ShopifyOptions,
+    WooCommerceConnector,
+    WooCommerceOptions,
 )
 from .models import (
     Availability,
+    BrowserPolicy,
     CategoryRef,
     CollectionRequest,
     CommerceOffer,
@@ -26,9 +29,13 @@ from .models import (
     DocumentRef,
     EntityPage,
     Evidence,
+    FetchPolicy,
     MediaRef,
     Money,
+    ProxyMode,
+    ProxyPolicyConfig,
     RefreshMode,
+    RobotsPolicy,
     SnapshotField,
     SourceDefinition,
     StockQuantityKind,
@@ -38,4 +45,3 @@ from .models import (
 
 __version__ = "0.1.0"
 __all__ = [name for name in globals() if not name.startswith("_")]
-

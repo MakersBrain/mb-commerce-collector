@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import CommerceTransport, RotationReason, Timer, TransportRequest, TransportResponse
+from .base import (
+    CommerceTransport,
+    RotationReason,
+    Timer,
+    TransportFailure,
+    TransportRequest,
+    TransportResponse,
+)
 from .url_policy import URLPolicy
 
 
@@ -22,6 +29,7 @@ class HttpxTransport(CommerceTransport):
         allowed_origins: tuple[str, ...],
         timeout: float = 30.0,
         client: Any | None = None,
+        proxy: str | None = None,
         url_policy: URLPolicy | None = None,
         maximum_redirects: int = 10,
     ) -> None:
@@ -30,7 +38,11 @@ class HttpxTransport(CommerceTransport):
         except ImportError as error:  # pragma: no cover - clean environment contract
             raise RuntimeError("HttpxTransport requires mb-commerce-scraper[http]") from error
         self._httpx = httpx
-        self._client = client or httpx.AsyncClient(timeout=timeout, follow_redirects=False)
+        self._client = client or httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=False,
+            proxy=proxy,
+        )
         self._owns_client = client is None
         self._policy = url_policy or URLPolicy(allowed_origins)
         self._maximum_redirects = maximum_redirects
@@ -40,14 +52,17 @@ class HttpxTransport(CommerceTransport):
         headers = dict(request.headers)
         timer = Timer()
         for redirect in range(self._maximum_redirects + 1):
-            response = await self._client.request(
-                request.method,
-                current,
-                params=request.query,
-                headers=headers,
-                json=request.json_body,
-                content=request.body,
-            )
+            try:
+                response = await self._client.request(
+                    request.method,
+                    current,
+                    params=request.query,
+                    headers=headers,
+                    json=request.json_body,
+                    content=request.body,
+                )
+            except self._httpx.HTTPError as error:
+                raise TransportFailure(f"HTTP transport failed: {type(error).__name__}") from error
             if response.is_redirect:
                 if redirect == self._maximum_redirects:
                     raise RuntimeError("maximum redirect count exceeded")
@@ -78,4 +93,3 @@ class HttpxTransport(CommerceTransport):
 
     async def __aexit__(self, *_: object) -> None:
         await self.aclose()
-

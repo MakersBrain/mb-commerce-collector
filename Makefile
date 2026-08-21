@@ -47,6 +47,7 @@ lint:  ## ruff, across all three Python projects
 
 .PHONY: format
 format:  ## ruff, fixing what it can
+	$(RUNSCRAPER) ruff check --fix .
 	$(RUN) ruff check --fix .
 	$(RUNC) ruff check --fix .
 	$(RUNS) ruff check --fix .
@@ -145,7 +146,7 @@ openapi-check:  ## Fail if a generated contract has drifted from the code
 	$(RUNC) catalogue-ops-types --check
 
 .PHONY: check
-check: lint typecheck test openapi-check  ## What every change has to pass
+check: lint typecheck test openapi-check scraper-build scraper-contracts  ## What every change has to pass
 
 .PHONY: scraper-lint scraper-typecheck scraper-test scraper-build scraper-contracts scraper-check
 scraper-lint:  ## Lint the reusable scraper distribution

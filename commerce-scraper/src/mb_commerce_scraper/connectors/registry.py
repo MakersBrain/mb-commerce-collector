@@ -83,7 +83,8 @@ class ConnectorRegistry:
 def register_builtin_connectors(registry: ConnectorRegistry) -> None:
     from .generic_pages import GenericPagesFactory
     from .shopify import ShopifyFactory
+    from .woocommerce import WooCommerceFactory
 
     registry.register(ShopifyFactory())
     registry.register(GenericPagesFactory())
-
+    registry.register(WooCommerceFactory())

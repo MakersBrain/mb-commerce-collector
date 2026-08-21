@@ -9,5 +9,6 @@ from .generic_pages import (
 )
 from .registry import ConnectorRegistry, PluginLoadError, register_builtin_connectors
 from .shopify import ShopifyConnector, ShopifyFactory, ShopifyOptions
+from .woocommerce import WooCommerceConnector, WooCommerceFactory, WooCommerceOptions
 
 __all__ = [name for name in globals() if not name.startswith("_")]

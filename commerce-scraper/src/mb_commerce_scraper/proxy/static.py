@@ -37,6 +37,16 @@ class StaticProxyLease:
     released: bool = False
     used_bytes: int = 0
 
+    def can_start(self, estimated_bytes: int = 0) -> bool:
+        return (
+            not self.released
+            and (self.expires_at is None or self.expires_at > datetime.now(self.expires_at.tzinfo))
+            and (
+                self.maximum_bytes is None
+                or self.used_bytes + estimated_bytes <= self.maximum_bytes
+            )
+        )
+
     def http_credentials(self) -> ProxyCredentials:
         return self._credentials
 
@@ -58,6 +68,10 @@ class StaticProxyPool(ProxyPool):
         self._round_robin = 0
         self._lock = asyncio.Lock()
         self._leases: dict[str, StaticProxyLease] = {}
+
+    @property
+    def active_leases(self) -> int:
+        return len(self._leases)
 
     async def acquire(self, request: ProxyRequest) -> StaticProxyLease:
         async with self._lock:
@@ -115,4 +129,3 @@ class StaticProxyPool(ProxyPool):
         if current is None or current.released:
             raise RuntimeError("proxy lease is not active")
         return current
-

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from enum import IntEnum, StrEnum
 from time import monotonic
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
+
+
+class TransportFailure(RuntimeError):
+    """A typed network/TLS/backend failure eligible for routing policy."""
 
 
 class RequestPurpose(StrEnum):
@@ -96,6 +101,14 @@ class ResponseCache(Protocol):
     async def put(self, request: TransportRequest, response: TransportResponse) -> None: ...
 
 
+class RobotsChecker(Protocol):
+    async def allowed(self, url: str) -> bool: ...
+
+
+class RateLimiter(Protocol):
+    async def wait(self, request: TransportRequest) -> None: ...
+
+
 class RequestBudget(Protocol):
     def affordable(self, request: TransportRequest) -> bool: ...
     def charge(self, request: TransportRequest, response_bytes: int) -> None: ...
@@ -140,3 +153,48 @@ class Timer:
     @property
     def elapsed(self) -> float:
         return monotonic() - self._start
+
+
+class MemoryResponseCache(ResponseCache):
+    """Bounded-process cache useful for embedding and deterministic tests."""
+
+    def __init__(self, *, maximum_entries: int = 1_000) -> None:
+        if maximum_entries < 1:
+            raise ValueError("maximum_entries must be positive")
+        self.maximum_entries = maximum_entries
+        self._entries: dict[str, TransportResponse] = {}
+
+    async def get(self, request: TransportRequest) -> TransportResponse | None:
+        return self._entries.get(self.key(request))
+
+    async def put(self, request: TransportRequest, response: TransportResponse) -> None:
+        key = self.key(request)
+        if key not in self._entries and len(self._entries) >= self.maximum_entries:
+            self._entries.pop(next(iter(self._entries)))
+        self._entries[key] = response
+
+    @staticmethod
+    def key(request: TransportRequest) -> str:
+        relevant_headers = {
+            key.casefold(): value
+            for key, value in request.headers.items()
+            if key.casefold() in {"accept", "accept-language", "content-type"}
+        }
+        body = request.body or b""
+        if request.json_body is not None:
+            body = json.dumps(
+                request.json_body,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        value = {
+            "schema": 1,
+            "method": request.method.upper(),
+            "url": request.url,
+            "query": sorted(request.query.items()),
+            "headers": relevant_headers,
+            "body": hashlib.sha256(body).hexdigest(),
+            "browser": request.browser.value,
+        }
+        serialized = json.dumps(value, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(serialized.encode()).hexdigest()
