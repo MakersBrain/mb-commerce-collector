@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import JsonValue
 
@@ -10,6 +12,8 @@ from mb_commerce_scraper.models.sanitization import sanitize_url as _sanitize_ur
 from .base import TelemetryHooks
 
 _OMITTED = "[omitted]"
+_EVENT_NAME = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
+_INVALID_EVENT = "telemetry.invalid_event"
 _OMITTED_FIELD_KEYS = frozenset(
     {
         "body",
@@ -24,9 +28,20 @@ _OMITTED_FIELD_KEYS = frozenset(
 
 
 def sanitize_url(url: str) -> str:
-    """Apply the package's shared secret-safe URL normalization policy."""
+    """Retain URL structure while redacting all query values and fragments."""
 
-    return _sanitize_url(url)
+    sanitized = _sanitize_url(url)
+    if "://" not in sanitized:
+        return sanitized
+    try:
+        parts = urlsplit(sanitized)
+    except ValueError:
+        return "[invalid-url]"
+    query = urlencode(
+        [(key, "[redacted]") for key, _value in parse_qsl(parts.query, keep_blank_values=True)],
+        doseq=True,
+    )
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, ""))
 
 
 def sanitize_fields(fields: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
@@ -39,7 +54,18 @@ def sanitize_fields(fields: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     sanitized = sanitize_json_value(prepared)
     if not isinstance(sanitized, dict):
         return {}
-    return sanitized
+    strict = _sanitize_telemetry_urls(sanitized)
+    return strict if isinstance(strict, dict) else {}
+
+
+def _sanitize_telemetry_urls(value: JsonValue) -> JsonValue:
+    if isinstance(value, dict):
+        return {key: _sanitize_telemetry_urls(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_telemetry_urls(item) for item in value]
+    if isinstance(value, str) and "://" in value:
+        return sanitize_url(value)
+    return value
 
 
 def _normalized_key(key: str) -> str:
@@ -54,7 +80,10 @@ class SafeTelemetry:
 
     def emit(self, event: str, fields: dict[str, JsonValue]) -> None:
         try:
-            self._sink.emit(event, sanitize_fields(fields))
+            safe_event = (
+                event if len(event) <= 128 and _EVENT_NAME.fullmatch(event) is not None else _INVALID_EVENT
+            )
+            self._sink.emit(safe_event, sanitize_fields(fields))
         except Exception:  # noqa: BLE001 -- observer failures are always non-fatal
             # Observability must never become part of collection correctness.
             return

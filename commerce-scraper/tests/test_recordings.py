@@ -189,4 +189,5 @@ async def test_fake_missing_response_error_sanitizes_url() -> None:
         )
 
     assert "access_token=secret" not in str(caught.value)
-    assert "page=2" in str(caught.value)
+    assert "page=2" not in str(caught.value)
+    assert "page=%5Bredacted%5D" in str(caught.value)

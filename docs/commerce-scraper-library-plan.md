@@ -1,6 +1,6 @@
 # Reusable Commerce Scraper Library Refactor Plan
 
-Status: proposed  
+Status: in progress
 Target repository: `mb-commerce-collector`  
 Proposed library distribution: `mb-commerce-scraper`  
 Proposed Python import package: `mb_commerce_scraper`  
@@ -811,9 +811,12 @@ registry = ConnectorRegistry.with_builtins()
 async with CommerceScraper(
     registry=registry,
     transport=http_transport,
-    browser=browser_transport,
+    browser_transport=browser_transport,
     proxy_pool=proxy_pool,
-    routing=ProxyRouting.fallback(country="FR"),
+    proxy_policy=ProxyPolicyConfig(
+        mode=ProxyMode.FALLBACK,
+        country="FR",
+    ),
 ) as scraper:
     async for page in scraper.collect(
         SourceDefinition(

@@ -11,7 +11,6 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from mb_commerce_scraper import ProxyMode, ProxyPolicyConfig, SourceDefinition
-from mb_commerce_scraper.proxy import ProxyRouting, RoutingMode
 
 from mb_ceramics_catalogue.observability import logging as obs
 from mb_ceramics_catalogue.proxy import (
@@ -36,9 +35,7 @@ class NativeProxyRuntimeSpec:
     source_id: str
     base_url: str
     pool: PostgresDecodoProxyPool
-    routing: ProxyRouting
-    maximum_requests: int | None
-    maximum_bytes: int
+    policy: ProxyPolicyConfig
 
 
 def resolve_native_proxy_runtime(
@@ -80,12 +77,14 @@ def resolve_native_proxy_runtime(
     logical_name = _required_text(proxy_snapshot, "profile")
     protocol = _protocol(proxy_snapshot)
     country = _country(proxy_snapshot)
-    session_minutes = _bounded_int(
-        proxy_snapshot, "session_minutes", minimum=1, maximum=1_440
-    )
-    configured_maximum = _bounded_int(
-        proxy_snapshot, "max_bytes", minimum=1, maximum=25_000_000
-    )
+    if source_policy.country is not None and country != source_policy.country:
+        raise ProxyDenied("snapshotted proxy country is outside source policy")
+    if source_policy.provider_preferences and _PROVIDER not in source_policy.provider_preferences:
+        raise ProxyDenied("snapshotted proxy provider is outside source policy")
+    session_minutes = _bounded_int(proxy_snapshot, "session_minutes", minimum=1, maximum=1_440)
+    configured_maximum = _bounded_int(proxy_snapshot, "max_bytes", minimum=1, maximum=25_000_000)
+    if source_policy.maximum_bytes is not None:
+        configured_maximum = min(configured_maximum, source_policy.maximum_bytes)
     if run_proxy_max_megabytes is not None:
         if (
             isinstance(run_proxy_max_megabytes, bool)
@@ -93,9 +92,7 @@ def resolve_native_proxy_runtime(
             or not 1 <= run_proxy_max_megabytes <= 25
         ):
             raise ProxyDenied("run proxy byte maximum must be between 1 and 25 MB")
-        configured_maximum = min(
-            configured_maximum, run_proxy_max_megabytes * 1_000_000
-        )
+        configured_maximum = min(configured_maximum, run_proxy_max_megabytes * 1_000_000)
     pilot = proxy_snapshot.get("pilot", False)
     if not isinstance(pilot, bool):
         raise ProxyDenied("snapshotted proxy pilot flag must be boolean")
@@ -109,10 +106,12 @@ def resolve_native_proxy_runtime(
     if profile is None:
         raise ProxyDenied(f"unknown logical proxy profile {logical_name!r}")
 
-    routing = ProxyRouting(
-        mode=RoutingMode(policy),
+    effective_policy = ProxyPolicyConfig(
+        mode=ProxyMode(policy),
         country=country,
         provider_preferences=(_PROVIDER,),
+        maximum_requests=source_policy.maximum_requests,
+        maximum_bytes=configured_maximum,
     )
     pool = PostgresDecodoProxyPool(
         database,
@@ -130,9 +129,7 @@ def resolve_native_proxy_runtime(
         source_id=source.id,
         base_url=source.base_url,
         pool=pool,
-        routing=routing,
-        maximum_requests=None,
-        maximum_bytes=configured_maximum,
+        policy=effective_policy,
     )
 
 
@@ -167,9 +164,7 @@ def _uuid(snapshot: Mapping[str, Any], name: str) -> UUID:
     return parsed
 
 
-def _bounded_int(
-    snapshot: Mapping[str, Any], name: str, *, minimum: int, maximum: int
-) -> int:
+def _bounded_int(snapshot: Mapping[str, Any], name: str, *, minimum: int, maximum: int) -> int:
     value = snapshot.get(name)
     if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
         raise ProxyDenied(f"job proxy snapshot has no valid {name}")

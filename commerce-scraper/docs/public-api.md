@@ -5,7 +5,7 @@ The supported Python import surface is the set of modules and names recorded in
 and is verified from the installed wheel. Use package imports such as:
 
 ```python
-from mb_commerce_scraper import SourceDefinition
+from mb_commerce_scraper import ProxyPolicyConfig, SourceDefinition
 from mb_commerce_scraper.connectors import ConnectorFactory, ConnectorRegistry
 from mb_commerce_scraper.proxy import ProxyPool, ProxyRouting
 from mb_commerce_scraper.runtime import CommerceScraper, build_http_scraper
@@ -47,6 +47,11 @@ retention and total-size pruning remain application-owned policy.
 The filesystem artifact format is private and independently versioned. It is
 not one of the frozen JSON contracts, and callers should interact through the
 cache protocol rather than reading its files directly.
+
+`ProxyPolicyConfig` is the high-level runtime contract for proxy mode,
+geography, provider preference, and collection caps. `ProxyRouting` remains a
+supported low-level transport type for direct `RoutedTransport` composition.
+The two configuration styles cannot be mixed in one high-level client.
 
 Every supported namespace remains importable from the base installation. The
 HTTP-facing factory symbols are still importable there, but constructing an

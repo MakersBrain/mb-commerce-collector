@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,46 @@ from .connector_adapters import library_canary_route, runtime_plan
 LOGGER = obs.get_logger("catalogue.commerce_scraper")
 
 
+@dataclass(frozen=True, slots=True)
+class CatalogueCachePolicy:
+    """Collection cache inputs without coupling composition to CLI parameters."""
+
+    directory: Path
+    mode: str
+    maximum_age_seconds: float | None
+    stale_on_error: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class BorrowedBrowserBinding:
+    """A process-owned browser backend bound to one collection identity."""
+
+    backend: BrowserBackend
+    job: BrowserJobContext
+
+
+@dataclass(frozen=True, slots=True)
+class NativeCollectionSpec:
+    configuration: CatalogueSourceConfig
+    request: CollectionRequest
+    checkpoint: ConnectorCheckpoint | None
+    cache: CatalogueCachePolicy
+    cancelled: Callable[[], bool]
+    collection_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class NativeRouteBindings:
+    proxy: NativeProxyRuntimeSpec | None = None
+    browser: BorrowedBrowserBinding | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OpenCatalogueCollection:
+    connector: LibraryPipelineConnector
+    telemetry: LibraryDebugTelemetry
+
+
 class _ContextualTelemetry:
     """Bind connector-originated events to one immutable local collection."""
 
@@ -86,14 +127,10 @@ def local_canary_source_config(config: SourceConfig) -> SourceConfig:
     projected = source_definition("local-canary", config, connector_plan=plan)
     route = library_canary_route(plan, projected.connector)
     if route is None:
-        raise ValueError(
-            f"connector_canary has no approved native route for {config.scraper!r}"
-        )
+        raise ValueError(f"connector_canary has no approved native route for {config.scraper!r}")
     adapter = library_canary_alias(config.scraper)
     if adapter != f"library_{plan.legacy_scraper_adapter}":
-        raise ValueError(
-            f"library canary alias metadata does not match runtime plan for {config.scraper!r}"
-        )
+        raise ValueError(f"library canary alias metadata does not match runtime plan for {config.scraper!r}")
     return config.model_copy(update={"scraper": adapter})
 
 
@@ -173,11 +210,7 @@ class LibraryDebugTelemetry:
     @staticmethod
     def _trace_fields(fields: dict[str, Any]) -> dict[str, str | bool | int | float]:
         """Keep OpenTelemetry attributes bounded to its scalar value contract."""
-        return {
-            name: value
-            for name, value in fields.items()
-            if isinstance(value, (str, bool, int, float))
-        }
+        return {name: value for name, value in fields.items() if isinstance(value, (str, bool, int, float))}
 
     @staticmethod
     def _request_key(fields: dict[str, Any]) -> tuple[str, int] | None:
@@ -222,9 +255,7 @@ class LibraryDebugTelemetry:
 
     @staticmethod
     def _project_request_metrics(event: str, fields: dict[str, Any]) -> None:
-        if event == "request.retry" and LibraryDebugTelemetry._counter(
-            fields.get("physical_requests")
-        ) == 0:
+        if event == "request.retry" and LibraryDebugTelemetry._counter(fields.get("physical_requests")) == 0:
             # A TransportFailure already emitted and counted request.failed;
             # its following classification-only retry is a decision event, not
             # a second physical attempt.
@@ -249,16 +280,107 @@ class LibraryDebugTelemetry:
         )
         metrics.request(source_id, host, outcome)
         elapsed_ms = fields.get("elapsed_ms")
-        if (
-            isinstance(elapsed_ms, (int, float))
-            and not isinstance(elapsed_ms, bool)
-            and elapsed_ms >= 0
-        ):
+        if isinstance(elapsed_ms, (int, float)) and not isinstance(elapsed_ms, bool) and elapsed_ms >= 0:
             metrics.request_duration(host, elapsed_ms / 1_000)
         if isinstance(status, int) and not isinstance(status, bool) and status >= 400:
             metrics.http_error(host, status)
         if fields.get("route") == "browser":
             metrics.browser_render(source_id)
+
+
+class CatalogueCommerceRuntime:
+    """Application-scoped registry and collection-scoped transport root."""
+
+    def __init__(self, registry: ConnectorRegistry | None = None) -> None:
+        self.registry = registry or application_connector_registry()
+
+    @asynccontextmanager
+    async def open_collection(
+        self,
+        spec: NativeCollectionSpec,
+        routes: NativeRouteBindings | None = None,
+    ) -> AsyncIterator[OpenCatalogueCollection]:
+        routes = routes or NativeRouteBindings()
+        source = spec.configuration.source
+        request = spec.request
+        if request.source_id != source.id or request.base_url != source.base_url:
+            raise ValueError(
+                "native collection request identity must match its source definition"
+            )
+        if source.connector not in self.registry.names():
+            raise ValueError(
+                f"native collection connector {source.connector!r} is not registered"
+            )
+        proxy = routes.proxy
+        if proxy is not None and (
+            proxy.source_id != source.id or proxy.base_url != source.base_url
+        ):
+            raise ValueError(
+                "native proxy runtime identity must match its source definition"
+            )
+
+        telemetry = LibraryDebugTelemetry()
+        policy = spec.configuration.fetch
+        browser = routes.browser
+        direct_browser = (
+            BorrowedBrowserTransport(
+                browser.backend,
+                browser.job,
+                allowed_origins=(source.base_url,),
+            )
+            if browser is not None
+            else None
+        )
+        cache = CatalogueResponseCache(
+            DiskResponseCache(
+                spec.cache.directory,
+                mode=spec.cache.mode,
+                max_age=spec.cache.maximum_age_seconds,
+            )
+        )
+        scraper: CommerceScraper = build_http_scraper(
+            allowed_origins=(source.base_url,),
+            registry=self.registry,
+            timeout=policy.timeout_seconds,
+            fetch_policy=policy,
+            cache=cache,
+            stale_on_error=spec.cache.stale_on_error,
+            telemetry=telemetry,
+            retries=3,
+            robots_user_agent=USER_AGENT,
+            robots_transport_failure_policy=RobotsFetchFailurePolicy.ALLOW,
+            robots_server_failure_policy=RobotsFetchFailurePolicy.DENY,
+            proxy_pool=proxy.pool if proxy is not None else None,
+            proxy_policy=proxy.policy if proxy is not None else None,
+            browser_transport=direct_browser,
+            owns_browser_transport=direct_browser is not None,
+            proxy_browser_transport_factory=(
+                CamoufoxProxyBrowserTransportFactory(
+                    allowed_origins=(source.base_url,),
+                )
+                if proxy is not None and policy.browser is not BrowserPolicy.NEVER
+                else None
+            ),
+            require_proxy_browser_subrequest_authorization=True,
+        )
+        async with (
+            scraper,
+            scraper.open_connector(
+                source,
+                collection_id=spec.collection_id,
+                cancelled=spec.cancelled,
+            ) as connector,
+        ):
+            yield OpenCatalogueCollection(
+                connector=LibraryPipelineConnector(
+                    connector,
+                    request,
+                    spec.checkpoint,
+                    telemetry=telemetry,
+                    telemetry_context={"collection_id": spec.collection_id},
+                ),
+                telemetry=telemetry,
+            )
 
 
 def build_library_pipeline_connector(
@@ -352,7 +474,7 @@ async def open_native_library_pipeline_connector(
         robots_transport_failure_policy=RobotsFetchFailurePolicy.ALLOW,
         robots_server_failure_policy=RobotsFetchFailurePolicy.DENY,
         proxy_pool=proxy.pool if proxy is not None else None,
-        routing=proxy.routing if proxy is not None else None,
+        proxy_policy=proxy.policy if proxy is not None else None,
         browser_transport=direct_browser,
         owns_browser_transport=direct_browser is not None,
         proxy_browser_transport_factory=(
@@ -363,16 +485,15 @@ async def open_native_library_pipeline_connector(
             else None
         ),
         require_proxy_browser_subrequest_authorization=True,
-        proxy_maximum_requests=(
-            proxy.maximum_requests if proxy is not None else None
-        ),
-        proxy_maximum_bytes=proxy.maximum_bytes if proxy is not None else None,
     )
-    async with scraper, scraper.open_connector(
-        source,
-        collection_id=collection_id,
-        cancelled=cancelled,
-    ) as connector:
+    async with (
+        scraper,
+        scraper.open_connector(
+            source,
+            collection_id=collection_id,
+            cancelled=cancelled,
+        ) as connector,
+    ):
         yield (
             LibraryPipelineConnector(
                 connector,
@@ -383,6 +504,8 @@ async def open_native_library_pipeline_connector(
             ),
             telemetry,
         )
+
+
 async def apply_library_fetch_policy(
     fetcher: LegacyFetcher,
     config: SourceConfig,
@@ -393,9 +516,7 @@ async def apply_library_fetch_policy(
         fetcher.limiter.join_group(config.url, connector.capabilities.shared_edge)
     if config.delay:
         fetcher.limiter.set_delay(config.url, float(config.delay))
-    if not await fetcher.may_fetch(
-        config.url, bool(config.ignore_robots), bool(config.obey_robots)
-    ):
+    if not await fetcher.may_fetch(config.url, bool(config.ignore_robots), bool(config.obey_robots)):
         raise RuntimeError("robots.txt disallows the library connector")
 
 

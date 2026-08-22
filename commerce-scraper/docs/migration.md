@@ -6,9 +6,10 @@ canary, and an observation window establish behavior—not merely because unit
 tests pass.
 
 The catalogue currently keeps `legacy` as the default and enables the library
-path explicitly with `connector_canary`. Shopify and WooCommerce have native
-library worker routes; other connectors may still pass through compatibility
-adapters. Check the live matrix in
+path explicitly with `connector_canary`. All configured framework families now
+have native library worker routes, while production switching, replay evidence,
+and removal of compatibility adapters remain intentionally incomplete. Check
+the live matrix in
 [`commerce-scraper-library-status.md`](../../docs/commerce-scraper-library-status.md)
 before treating any connector as cut over.
 

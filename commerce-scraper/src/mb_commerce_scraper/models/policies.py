@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class RobotsPolicy(StrEnum):
@@ -42,3 +42,19 @@ class ProxyPolicyConfig(BaseModel):
     provider_preferences: tuple[str, ...] = ()
     maximum_requests: int | None = Field(default=None, ge=1)
     maximum_bytes: int | None = Field(default=None, ge=1)
+
+    @field_validator("country")
+    @classmethod
+    def validate_country(cls, value: str | None) -> str | None:
+        if value is not None and (not value.isascii() or not value.isalpha() or not value.isupper()):
+            raise ValueError("country must be an uppercase ASCII alpha-2 code")
+        return value
+
+    @field_validator("provider_preferences")
+    @classmethod
+    def validate_provider_preferences(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not provider or provider != provider.strip() for provider in value):
+            raise ValueError("provider preferences must be non-empty trimmed names")
+        if len(set(value)) != len(value):
+            raise ValueError("provider preferences must be unique")
+        return value

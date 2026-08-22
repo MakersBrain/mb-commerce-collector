@@ -22,6 +22,8 @@ from mb_commerce_scraper.models import (
     ConnectorCheckpoint,
     EntityPage,
     FetchPolicy,
+    ProxyMode,
+    ProxyPolicyConfig,
     RefreshMode,
     RobotsPolicy,
     SnapshotField,
@@ -64,6 +66,29 @@ from mb_commerce_scraper.transports.base import (
 
 RobotsFactory = Callable[[CommerceTransport], RobotsChecker]
 RateLimiterFactory = Callable[[FetchPolicy], RateLimiter]
+
+
+def _routing_from_policy(policy: ProxyPolicyConfig) -> ProxyRouting:
+    return ProxyRouting(
+        mode=RoutingMode(policy.mode.value),
+        country=policy.country,
+        provider_preferences=policy.provider_preferences,
+    )
+
+
+def _legacy_proxy_policy(
+    routing: ProxyRouting | None,
+    maximum_requests: int | None,
+    maximum_bytes: int | None,
+) -> ProxyPolicyConfig:
+    selected = routing or ProxyRouting()
+    return ProxyPolicyConfig(
+        mode=ProxyMode(selected.mode.value),
+        country=selected.country,
+        provider_preferences=selected.provider_preferences,
+        maximum_requests=maximum_requests,
+        maximum_bytes=maximum_bytes,
+    )
 
 
 class _ContextualTelemetry:
@@ -119,6 +144,8 @@ class _BrowserProxyTransportFactory:
         target_host: str,
         *,
         policy: BrowserPolicy,
+        telemetry: TelemetryHooks | None,
+        telemetry_context: dict[str, JsonValue],
         maximum_response_bytes: int,
     ) -> None:
         self._factory = factory
@@ -126,6 +153,8 @@ class _BrowserProxyTransportFactory:
         self._pool = pool
         self._target_host = target_host
         self._policy = policy
+        self._telemetry = telemetry
+        self._telemetry_context = telemetry_context
         self._maximum_response_bytes = maximum_response_bytes
 
     def build(self, lease: ProxyLease) -> CommerceTransport:
@@ -148,6 +177,8 @@ class _BrowserProxyTransportFactory:
                 browser,
                 policy=self._policy,
                 proxy_browser_supported=browser is not None,
+                telemetry=self._telemetry,
+                telemetry_context=self._telemetry_context,
                 maximum_response_bytes=self._maximum_response_bytes,
             ),
             http=http,
@@ -264,6 +295,7 @@ class CommerceScraper:
         registry: ConnectorRegistry,
         transport: CommerceTransport,
         proxy_pool: ProxyPool | None = None,
+        proxy_policy: ProxyPolicyConfig | None = None,
         routing: ProxyRouting | None = None,
         proxy_transport_factory: ProxyTransportFactory | None = None,
         proxy_browser_transport_factory: ProxyBrowserTransportFactory | None = None,
@@ -286,15 +318,37 @@ class CommerceScraper:
     ) -> None:
         self.registry = registry
         self.transport = transport
+        legacy_proxy_configuration = any(
+            value is not None for value in (routing, proxy_maximum_requests, proxy_maximum_bytes)
+        )
+        if proxy_policy is not None and legacy_proxy_configuration:
+            raise ValueError("proxy_policy cannot be combined with routing or legacy proxy caps")
+        if proxy_policy is None and (
+            (routing is None and (proxy_maximum_requests is not None or proxy_maximum_bytes is not None))
+            or (
+                routing is not None
+                and routing.mode is RoutingMode.NEVER
+                and (proxy_maximum_requests is not None or proxy_maximum_bytes is not None)
+            )
+        ):
+            raise ValueError("legacy proxy caps require active proxy routing")
         self.proxy_pool = proxy_pool
-        self.routing = routing
+        self._legacy_proxy_configuration = legacy_proxy_configuration
+        self.proxy_policy = proxy_policy or _legacy_proxy_policy(
+            routing,
+            proxy_maximum_requests,
+            proxy_maximum_bytes,
+        )
+        self.routing = _routing_from_policy(self.proxy_policy)
         self.proxy_transport_factory = proxy_transport_factory
         self.proxy_browser_transport_factory = proxy_browser_transport_factory
-        self.require_proxy_browser_subrequest_authorization = (
-            require_proxy_browser_subrequest_authorization
-        )
-        self.proxy_maximum_requests = proxy_maximum_requests
-        self.proxy_maximum_bytes = proxy_maximum_bytes
+        self.require_proxy_browser_subrequest_authorization = require_proxy_browser_subrequest_authorization
+        self.proxy_maximum_requests = self.proxy_policy.maximum_requests
+        self.proxy_maximum_bytes = self.proxy_policy.maximum_bytes
+        if self.proxy_policy.mode is not ProxyMode.NEVER and (
+            self.proxy_pool is None or self.proxy_transport_factory is None
+        ):
+            raise ValueError("active proxy_policy requires both proxy_pool and proxy_transport_factory")
         self.budget = budget
         self.telemetry = safe_telemetry(telemetry) if telemetry is not None else None
         self.fetch_policy = fetch_policy
@@ -329,6 +383,7 @@ class CommerceScraper:
         deadline: datetime | None = None,
         checkpoint: ConnectorCheckpoint | None = None,
         fetch_policy: FetchPolicy | None = None,
+        proxy_policy: ProxyPolicyConfig | None = None,
         budget: RequestBudget | None = None,
         browser_transport: BrowserTransport | None = None,
         collection_id: str | None = None,
@@ -346,6 +401,7 @@ class CommerceScraper:
         async with self.open_connector(
             source,
             fetch_policy=fetch_policy,
+            proxy_policy=proxy_policy,
             budget=budget,
             browser_transport=browser_transport,
             collection_id=collection_id,
@@ -360,6 +416,7 @@ class CommerceScraper:
         source: SourceDefinition,
         *,
         fetch_policy: FetchPolicy | None = None,
+        proxy_policy: ProxyPolicyConfig | None = None,
         budget: RequestBudget | None = None,
         browser_transport: BrowserTransport | None = None,
         collection_id: str | None = None,
@@ -373,6 +430,10 @@ class CommerceScraper:
         created here is released exactly once when the context exits.
         """
         selected_policy = fetch_policy or self.fetch_policy
+        if proxy_policy is not None and self._legacy_proxy_configuration:
+            raise ValueError("per-collection proxy_policy cannot override legacy proxy configuration")
+        selected_proxy_policy = proxy_policy or self.proxy_policy
+        selected_routing = _routing_from_policy(selected_proxy_policy)
         selected_budget = budget if budget is not None else self.budget
         selected_browser = browser_transport if browser_transport is not None else self.browser_transport
         trace_id = collection_id or uuid4().hex
@@ -380,15 +441,13 @@ class CommerceScraper:
             "collection_id": trace_id,
             "source_id": source.id,
             "connector": source.connector,
+            "connector_version": self.registry.connector_version(source.connector),
         }
         attempt_transport: CommerceTransport = self.transport
         routed: RoutedTransport | None = None
-        selected_routing = self.routing or ProxyRouting()
         limiter: RateLimiter | None = None
         proxy_factory = self.proxy_transport_factory
-        route_uses_proxy = (
-            self.proxy_pool is not None or self.routing is not None
-        ) and selected_routing.mode is not RoutingMode.NEVER
+        route_uses_proxy = selected_proxy_policy.mode is not ProxyMode.NEVER
         if (
             route_uses_proxy
             and self.require_proxy_browser_subrequest_authorization
@@ -411,19 +470,21 @@ class CommerceScraper:
             proxy_browser_supported=(
                 not route_uses_proxy or self.proxy_browser_transport_factory is not None
             ),
+            telemetry=self.telemetry,
+            telemetry_context=telemetry_context,
             maximum_response_bytes=self.maximum_response_bytes,
         )
         if route_uses_proxy and proxy_factory is not None:
             if self.proxy_pool is None:
-                raise ValueError(
-                    "proxy routing requires both proxy_pool and proxy_transport_factory"
-                )
+                raise ValueError("proxy routing requires both proxy_pool and proxy_transport_factory")
             proxy_factory = _BrowserProxyTransportFactory(
                 proxy_factory,
                 self.proxy_browser_transport_factory,
                 self.proxy_pool,
                 target_host=urlsplit(source.base_url).hostname or "",
                 policy=browser_policy,
+                telemetry=self.telemetry,
+                telemetry_context=telemetry_context,
                 maximum_response_bytes=self.maximum_response_bytes,
             )
         if selected_policy is not None:
@@ -451,7 +512,7 @@ class CommerceScraper:
                     )
             else:
                 limiter = self.rate_limiter_factory(selected_policy)
-        if self.proxy_pool is not None or self.routing is not None:
+        if route_uses_proxy:
             if self.proxy_pool is None or proxy_factory is None:
                 raise ValueError("proxy routing requires both proxy_pool and proxy_transport_factory")
             routed = RoutedTransport(
@@ -461,8 +522,8 @@ class CommerceScraper:
                 routing=selected_routing,
                 source_id=source.id,
                 base_url=source.base_url,
-                maximum_requests=self.proxy_maximum_requests,
-                maximum_bytes=self.proxy_maximum_bytes,
+                maximum_requests=selected_proxy_policy.maximum_requests,
+                maximum_bytes=selected_proxy_policy.maximum_bytes,
                 telemetry=self.telemetry,
                 telemetry_context=telemetry_context,
             )
@@ -571,7 +632,7 @@ class CommerceScraper:
                 "connector.diagnostic",
                 {
                     **context,
-                    "level": "warning",
+                    "level": diagnostic.severity.value,
                     "partition": page.partition_key,
                     "sequence": page.sequence,
                     "code": diagnostic.code.value,

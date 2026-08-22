@@ -20,6 +20,8 @@ from mb_commerce_scraper import (
     DiagnosticSeverity,
     EntityPage,
     FetchPolicy,
+    ProxyMode,
+    ProxyPolicyConfig,
     RefreshMode,
     RobotsPolicy,
     SnapshotField,
@@ -35,6 +37,7 @@ from mb_commerce_scraper.proxy import (
     BrowserSubrequestAuthorizer,
     HttpxProxyTransportFactory,
     ProxyLease,
+    ProxyRequest,
     ProxyRouting,
     RoutingMode,
     StaticProxyLease,
@@ -83,11 +86,17 @@ class LeaseBrowserFactory:
 
 
 def test_http_builder_projects_one_response_limit_to_every_runtime_layer() -> None:
+    proxy_policy = ProxyPolicyConfig(
+        mode=ProxyMode.ALWAYS,
+        country="FR",
+        provider_preferences=("one",),
+        maximum_requests=7,
+        maximum_bytes=8_000,
+    )
     scraper = build_http_scraper(
         allowed_origins=("https://shop.test",),
         proxy_pool=fake_proxy_pool("one"),
-        proxy_maximum_requests=7,
-        proxy_maximum_bytes=8_000,
+        proxy_policy=proxy_policy,
         maximum_response_bytes=1234,
     )
 
@@ -96,8 +105,150 @@ def test_http_builder_projects_one_response_limit_to_every_runtime_layer() -> No
     assert scraper.transport._maximum_response_bytes == 1234
     assert isinstance(scraper.proxy_transport_factory, HttpxProxyTransportFactory)
     assert scraper.proxy_transport_factory.maximum_response_bytes == 1234
+    assert scraper.proxy_policy == proxy_policy
+    assert scraper.routing == ProxyRouting(
+        mode=RoutingMode.ALWAYS,
+        country="FR",
+        provider_preferences=("one",),
+    )
     assert scraper.proxy_maximum_requests == 7
     assert scraper.proxy_maximum_bytes == 8_000
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [
+        {"routing": ProxyRouting(mode=RoutingMode.ALWAYS)},
+        {"proxy_maximum_requests": 1},
+        {"proxy_maximum_bytes": 1},
+    ],
+)
+def test_runtime_rejects_mixed_canonical_and_legacy_proxy_configuration(
+    legacy: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="cannot be combined"):
+        CommerceScraper(
+            registry=ConnectorRegistry.with_builtins(),
+            transport=FakeTransport(),
+            proxy_policy=ProxyPolicyConfig(),
+            **legacy,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [{"proxy_maximum_requests": 1}, {"proxy_maximum_bytes": 1}],
+)
+def test_runtime_rejects_inert_legacy_proxy_caps(
+    legacy: dict[str, int],
+) -> None:
+    with pytest.raises(ValueError, match="require active proxy routing"):
+        CommerceScraper(
+            registry=ConnectorRegistry.with_builtins(),
+            transport=FakeTransport(),
+            **legacy,  # type: ignore[arg-type]
+        )
+
+
+def test_runtime_rejects_active_policy_without_proxy_backend() -> None:
+    with pytest.raises(ValueError, match="active proxy_policy requires"):
+        CommerceScraper(
+            registry=ConnectorRegistry.with_builtins(),
+            transport=FakeTransport(),
+            proxy_policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
+        )
+
+
+async def test_never_proxy_policy_keeps_configured_backend_idle() -> None:
+    pool = fake_proxy_pool("one")
+    direct = FakeTransport()
+    direct.add(
+        "https://shop.test/products.json",
+        json_body={"products": []},
+    )
+    scraper = CommerceScraper(
+        registry=ConnectorRegistry.with_builtins(),
+        transport=direct,
+        proxy_pool=pool,
+        proxy_policy=ProxyPolicyConfig(mode=ProxyMode.NEVER),
+        proxy_transport_factory=Factory(FakeTransport()),
+    )
+
+    pages = [page async for page in scraper.collect(source())]
+
+    assert pages[-1].terminal
+    assert len(direct.requests) == 1
+    assert pool.active_leases == 0
+
+
+async def test_collection_never_policy_overrides_active_default() -> None:
+    pool = fake_proxy_pool("one")
+    direct = FakeTransport()
+    direct.add(
+        "https://shop.test/products.json",
+        json_body={"products": []},
+    )
+    scraper = CommerceScraper(
+        registry=ConnectorRegistry.with_builtins(),
+        transport=direct,
+        proxy_pool=pool,
+        proxy_policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
+        proxy_transport_factory=Factory(FakeTransport()),
+    )
+
+    pages = [
+        page
+        async for page in scraper.collect(
+            source(),
+            proxy_policy=ProxyPolicyConfig(mode=ProxyMode.NEVER),
+        )
+    ]
+
+    assert pages[-1].terminal
+    assert len(direct.requests) == 1
+    assert pool.active_leases == 0
+
+
+async def test_collection_proxy_policy_projects_all_fields_to_pool_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = fake_proxy_pool("one")
+    requests: list[ProxyRequest] = []
+    acquire = pool.acquire
+
+    async def recording_acquire(request: ProxyRequest) -> ProxyLease:
+        requests.append(request)
+        return await acquire(request)
+
+    monkeypatch.setattr(pool, "acquire", recording_acquire)
+    proxy = FakeTransport()
+    proxy.add(
+        "https://shop.test/products.json",
+        json_body={"products": []},
+    )
+    scraper = CommerceScraper(
+        registry=ConnectorRegistry.with_builtins(),
+        transport=FakeTransport(),
+        proxy_pool=pool,
+        proxy_transport_factory=Factory(proxy),
+    )
+    policy = ProxyPolicyConfig(
+        mode=ProxyMode.ALWAYS,
+        country="FR",
+        provider_preferences=("one",),
+        maximum_requests=7,
+        maximum_bytes=8_000_000,
+    )
+
+    pages = [page async for page in scraper.collect(source(), proxy_policy=policy)]
+
+    assert pages[-1].terminal
+    assert len(requests) == 1
+    assert requests[0].country == "FR"
+    assert requests[0].preferred_providers == ("one",)
+    assert requests[0].maximum_requests == 7
+    assert requests[0].maximum_bytes == 8_000_000
+    assert pool.active_leases == 0
 
 
 def test_http_builder_enables_browser_policy_for_proxy_browser_factory() -> None:
@@ -370,15 +521,14 @@ async def test_open_connector_preserves_metadata_and_accepts_caller_request() ->
     assert factory.connector is not None
     assert factory.connector.calls == [(request, checkpoint)]
     assert factory.connector.context.cancelled()
-    [protocol] = [
-        fields for event, fields in telemetry.events if event == "connector.protocol"
-    ]
+    [protocol] = [fields for event, fields in telemetry.events if event == "connector.protocol"]
     assert protocol == {
         "level": "debug",
         "source_id": "open-source",
         "operation": "enumerate",
         "collection_id": "open-123",
         "connector": "open-test",
+        "connector_version": "7",
     }
     assert [event for event, _ in telemetry.events][-2:] == [
         "connector.page_emitted",
@@ -504,7 +654,12 @@ async def test_runtime_releases_proxy_lease_on_success_and_failure() -> None:
 async def test_runtime_sanitizes_unvalidated_plugin_extensions_at_egress() -> None:
     registry = ConnectorRegistry()
     registry.register(UnsafeFactory())
-    scraper = CommerceScraper(registry=registry, transport=FakeTransport())
+    telemetry = RecordingTelemetry()
+    scraper = CommerceScraper(
+        registry=registry,
+        transport=FakeTransport(),
+        telemetry=telemetry,
+    )
     unsafe = SourceDefinition(
         id="unsafe",
         label="Unsafe plugin",
@@ -521,6 +676,8 @@ async def test_runtime_sanitizes_unvalidated_plugin_extensions_at_egress() -> No
     assert len(page.diagnostics[0].message) <= 2_048
     assert page.diagnostics[0].code is DiagnosticCode.ENTITY_FETCH_FAILED
     assert page.diagnostics[0].metadata["stage"] == "plugin"
+    diagnostic = next(fields for event, fields in telemetry.events if event == "connector.diagnostic")
+    assert diagnostic["level"] == "error"
 
 
 class BlockingTransport:
@@ -655,6 +812,9 @@ async def test_runtime_composes_policy_limiter_and_correlated_telemetry() -> Non
     assert {fields["collection_id"] for _, fields in telemetry.events if "collection_id" in fields} == {
         "collection-123"
     }
+    assert {
+        fields["connector_version"] for _, fields in telemetry.events if "connector_version" in fields
+    } == {"1"}
 
 
 async def test_fallback_uses_independent_direct_and_proxy_rate_gates() -> None:
@@ -692,6 +852,26 @@ async def test_fallback_uses_independent_direct_and_proxy_rate_gates() -> None:
     assert all(limiter.released == limiter.waited for limiter in limiters)
     route_waits = {fields["route"] for event, fields in telemetry.events if event == "rate_limit.wait"}
     assert route_waits == {"direct", "proxy"}
+    started = [fields for event, fields in telemetry.events if event == "request.started"]
+    assert [fields["attempt"] for fields in started] == [1, 2]
+    assert len({fields["request_id"] for fields in started}) == 1
+    request_id = started[0]["request_id"]
+    correlated = [
+        (event, fields)
+        for event, fields in telemetry.events
+        if event
+        in {
+            "browser.dispatch",
+            "rate_limit.wait",
+            "proxy.acquire.started",
+            "proxy.acquire.completed",
+            "proxy.outcome",
+        }
+    ]
+    assert correlated
+    assert {fields["request_id"] for _, fields in correlated} == {request_id}
+    assert {fields["attempt"] for event, fields in correlated if event == "proxy.outcome"} == {2}
+    assert {fields["attempt"] for event, fields in correlated if event.startswith("proxy.acquire")} == {1}
     assert len(direct.requests) == len(proxy.requests) == 1
 
 

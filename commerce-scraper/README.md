@@ -41,7 +41,8 @@ the configured proxy.
 For an owned HTTP session and optional sticky residential failover:
 
 ```python
-from mb_commerce_scraper.proxy import ProxyRouting, StaticProxyPool
+from mb_commerce_scraper import ProxyMode, ProxyPolicyConfig
+from mb_commerce_scraper.proxy import StaticProxyPool
 from mb_commerce_scraper.runtime import build_http_scraper
 from mb_commerce_scraper.transports import FileResponseCache
 
@@ -51,8 +52,11 @@ async with build_http_scraper(
     allowed_origins=("https://shop.example",),
     cache=cache,
     proxy_pool=StaticProxyPool(routes),
-    routing=ProxyRouting.fallback(country="FR"),
-    proxy_maximum_bytes=50_000_000,
+    proxy_policy=ProxyPolicyConfig(
+        mode=ProxyMode.FALLBACK,
+        country="FR",
+        maximum_bytes=50_000_000,
+    ),
 ) as scraper:
     async for page in scraper.collect(source):
         consume(page)

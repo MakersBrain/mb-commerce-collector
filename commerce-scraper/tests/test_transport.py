@@ -24,6 +24,7 @@ from mb_commerce_scraper.transports import (
     TransportRequest,
     TransportResponse,
     estimated_transmitted_bytes,
+    safe_telemetry,
     sanitize_fields,
     sanitize_url,
 )
@@ -46,6 +47,47 @@ class BrokenTelemetry:
         raise RuntimeError("observer unavailable")
 
 
+class FailingReleaseLimiter:
+    async def wait(self, request: TransportRequest) -> None:
+        del request
+
+    async def release(self, request: TransportRequest) -> None:
+        del request
+        raise RuntimeError("limiter release failed")
+
+
+class FailingReconcileAuthorization:
+    async def reconcile(self, response_bytes: int) -> None:
+        del response_bytes
+        raise RuntimeError("budget reconcile failed")
+
+    async def release(self) -> None:
+        return None
+
+
+class FailingReconcileBudget:
+    async def authorize(
+        self,
+        request: TransportRequest,
+    ) -> FailingReconcileAuthorization:
+        del request
+        return FailingReconcileAuthorization()
+
+
+class FailingPutCache:
+    async def get(self, request: TransportRequest) -> None:
+        del request
+        return None
+
+    async def put(
+        self,
+        request: TransportRequest,
+        response: TransportResponse,
+    ) -> None:
+        del request, response
+        raise RuntimeError("cache write failed")
+
+
 class StaleCache:
     def __init__(self, stale: TransportResponse) -> None:
         self.response = stale
@@ -59,9 +101,7 @@ class StaleCache:
         del request
         return self.response
 
-    async def put(
-        self, request: TransportRequest, response: TransportResponse
-    ) -> None:
+    async def put(self, request: TransportRequest, response: TransportResponse) -> None:
         self.writes.append((request, response))
 
 
@@ -105,7 +145,11 @@ async def test_retries_are_charged_per_attempt() -> None:
     backend.add("https://shop.test/data", body="ok")
     budget = MemoryRequestBudget(maximum_requests=2)
     transport = MiddlewareTransport(backend, budget=budget, retries=1, backoff=lambda _: 0)
-    response = await transport.request(TransportRequest(url="https://shop.test/data", purpose=RequestPurpose.ENTITY, priority=RequestPriority.IDENTITY))
+    response = await transport.request(
+        TransportRequest(
+            url="https://shop.test/data", purpose=RequestPurpose.ENTITY, priority=RequestPriority.IDENTITY
+        )
+    )
     assert response.text() == "ok"
     assert budget.requests == 2
 
@@ -113,9 +157,15 @@ async def test_retries_are_charged_per_attempt() -> None:
 async def test_budget_prevents_next_attempt() -> None:
     backend = FakeTransport()
     backend.add("https://shop.test/data", status=503)
-    transport = MiddlewareTransport(backend, budget=MemoryRequestBudget(maximum_requests=1), retries=1, backoff=lambda _: 0)
+    transport = MiddlewareTransport(
+        backend, budget=MemoryRequestBudget(maximum_requests=1), retries=1, backoff=lambda _: 0
+    )
     with pytest.raises(BudgetExhausted):
-        await transport.request(TransportRequest(url="https://shop.test/data", purpose=RequestPurpose.ENTITY, priority=RequestPriority.IDENTITY))
+        await transport.request(
+            TransportRequest(
+                url="https://shop.test/data", purpose=RequestPurpose.ENTITY, priority=RequestPriority.IDENTITY
+            )
+        )
 
 
 async def test_budget_denial_telemetry_explains_browser_evaluation_policy() -> None:
@@ -246,9 +296,7 @@ async def test_cancelled_backend_attempt_reconciles_before_next_authorization() 
     backend = BlockingTransport()
     budget = MemoryRequestBudget(maximum_requests=2, maximum_bytes=6)
     telemetry = RecordingTelemetry()
-    transport = MiddlewareTransport(
-        backend, budget=budget, telemetry=telemetry, retries=0
-    )
+    transport = MiddlewareTransport(backend, budget=budget, telemetry=telemetry, retries=0)
     request = TransportRequest(
         url="https://shop.test/data",
         purpose=RequestPurpose.ENTITY,
@@ -348,9 +396,7 @@ async def test_http_transport_connects_to_the_validated_address_with_logical_hos
         ("https://shop.test",),
         resolver=lambda _: _addresses("93.184.216.34"),
     )
-    transport = HttpxTransport(
-        allowed_origins=("https://shop.test",), client=client, url_policy=policy
-    )
+    transport = HttpxTransport(allowed_origins=("https://shop.test",), client=client, url_policy=policy)
 
     response = await transport.request(
         TransportRequest(
@@ -538,9 +584,7 @@ async def test_redirect_is_validated_before_second_connection() -> None:
     transport = HttpxTransport(
         allowed_origins=("https://shop.test", "https://cdn.test"),
         client=client,
-        url_policy=URLPolicy(
-            ("https://shop.test", "https://cdn.test"), resolver=resolver
-        ),
+        url_policy=URLPolicy(("https://shop.test", "https://cdn.test"), resolver=resolver),
     )
 
     with pytest.raises(ValueError, match="non-public"):
@@ -668,7 +712,9 @@ async def test_robots_precedes_cache_and_paid_attempt_layers() -> None:
     events: list[str] = []
     backend = FakeTransport()
     cache = MemoryResponseCache()
-    cached_request = TransportRequest(url="https://shop.test/data", purpose=RequestPurpose.ENTITY, priority=RequestPriority.IDENTITY)
+    cached_request = TransportRequest(
+        url="https://shop.test/data", purpose=RequestPurpose.ENTITY, priority=RequestPriority.IDENTITY
+    )
     await cache.put(cached_request, _response("cached"))
     transport = MiddlewareTransport(
         backend,
@@ -686,7 +732,9 @@ async def test_cache_hit_skips_budget_rate_limit_and_network() -> None:
     events: list[str] = []
     backend = FakeTransport()
     cache = MemoryResponseCache()
-    cached_request = TransportRequest(url="https://shop.test/data", purpose=RequestPurpose.ENTITY, priority=RequestPriority.IDENTITY)
+    cached_request = TransportRequest(
+        url="https://shop.test/data", purpose=RequestPurpose.ENTITY, priority=RequestPriority.IDENTITY
+    )
     await cache.put(cached_request, _response("cached"))
     budget = MemoryRequestBudget(maximum_requests=0)
     transport = MiddlewareTransport(backend, cache=cache, budget=budget, rate_limiter=Limiter(events))
@@ -784,15 +832,13 @@ async def test_stale_on_error_does_not_mask_deterministic_404() -> None:
         purpose=RequestPurpose.ENTITY,
         priority=RequestPriority.IDENTITY,
     )
-    cache = StaleCache(
-        TransportResponse(status=200, content=b"previous", final_url=request.url)
-    )
+    cache = StaleCache(TransportResponse(status=200, content=b"previous", final_url=request.url))
     backend = FakeTransport()
     backend.add(request.url, status=404, body="gone")
 
-    response = await MiddlewareTransport(
-        backend, cache=cache, stale_on_error=True, retries=0
-    ).request(request)
+    response = await MiddlewareTransport(backend, cache=cache, stale_on_error=True, retries=0).request(
+        request
+    )
 
     assert response.status == 404
     assert response.text() == "gone"
@@ -806,16 +852,12 @@ async def test_stale_on_error_does_not_mask_browser_failure() -> None:
         priority=RequestPriority.IDENTITY,
         browser=BrowserHint.REQUIRED,
     )
-    cache = StaleCache(
-        TransportResponse(status=200, content=b"previous", final_url=request.url)
-    )
+    cache = StaleCache(TransportResponse(status=200, content=b"previous", final_url=request.url))
     backend = FakeTransport()
     backend.add(request.url, error=TransportFailure("browser unavailable"))
 
     with pytest.raises(TransportFailure, match="browser unavailable"):
-        await MiddlewareTransport(
-            backend, cache=cache, stale_on_error=True, retries=0
-        ).request(request)
+        await MiddlewareTransport(backend, cache=cache, stale_on_error=True, retries=0).request(request)
 
 
 async def test_oversized_browser_response_is_non_retryable_and_accounted() -> None:
@@ -939,16 +981,21 @@ async def test_every_retry_is_independently_rate_limited_and_rotates_blocks() ->
     backend.add("https://shop.test/data", status=403)
     backend.add("https://shop.test/data", body="ok")
     transport = MiddlewareTransport(backend, retries=1, backoff=lambda _: 0, rate_limiter=Limiter(events))
-    response = await transport.request(TransportRequest(url="https://shop.test/data", purpose=RequestPurpose.ENTITY, priority=RequestPriority.IDENTITY))
+    response = await transport.request(
+        TransportRequest(
+            url="https://shop.test/data", purpose=RequestPurpose.ENTITY, priority=RequestPriority.IDENTITY
+        )
+    )
     assert response.text() == "ok"
     assert events == ["rate", "rate"]
     assert backend.rotations
 
 
 def test_telemetry_sanitizes_urls_credentials_and_bodies() -> None:
-    assert sanitize_url(
-        "https://user:password@shop.test/products?token=secret&page=2#private"
-    ) == "https://redacted@shop.test/products?token=%5Bredacted%5D&page=2#private"
+    assert (
+        sanitize_url("https://user:password@shop.test/products?token=secret&page=2#private")
+        == "https://redacted@shop.test/products?token=%5Bredacted%5D&page=%5Bredacted%5D"
+    )
     assert sanitize_fields(
         {
             "url": "https://shop.test/products?api_key=secret&locale=en",
@@ -957,11 +1004,22 @@ def test_telemetry_sanitizes_urls_credentials_and_bodies() -> None:
             "context": {"password": "secret", "page": 2},
         }
     ) == {
-        "url": "https://shop.test/products?api_key=%5Bredacted%5D&locale=en",
+        "url": "https://shop.test/products?api_key=%5Bredacted%5D&locale=%5Bredacted%5D",
         "headers": "[omitted]",
         "body": "[omitted]",
         "context": {"password": "[redacted]", "page": 2},
     }
+
+
+def test_telemetry_replaces_invalid_event_name_without_echoing_it() -> None:
+    telemetry = RecordingTelemetry()
+
+    safe_telemetry(telemetry).emit(
+        "connector.password=secret",
+        {"level": "debug"},
+    )
+
+    assert telemetry.events == [("telemetry.invalid_event", {"level": "debug"})]
 
 
 async def test_retry_telemetry_correlates_attempts_without_leaking_credentials() -> None:
@@ -970,9 +1028,7 @@ async def test_retry_telemetry_correlates_attempts_without_leaking_credentials()
     backend.add(secret_url, status=503)
     backend.add(secret_url, body="ok")
     telemetry = RecordingTelemetry()
-    transport = MiddlewareTransport(
-        backend, telemetry=telemetry, retries=1, backoff=lambda _: 0
-    )
+    transport = MiddlewareTransport(backend, telemetry=telemetry, retries=1, backoff=lambda _: 0)
 
     response = await transport.request(
         TransportRequest(
@@ -992,15 +1048,14 @@ async def test_retry_telemetry_correlates_attempts_without_leaking_credentials()
         "request.completed",
     ]
     fields = [event_fields for _, event_fields in telemetry.events]
-    assert {event_fields["request_id"] for event_fields in fields} == {
-        fields[0]["request_id"]
-    }
+    assert {event_fields["request_id"] for event_fields in fields} == {fields[0]["request_id"]}
     assert [fields[0]["attempt"], fields[1]["next_attempt"], fields[2]["attempt"]] == [
         1,
         2,
         2,
     ]
     assert fields[1]["status"] == 503
+    assert fields[1]["backoff_ms"] == 0
     expected_transmitted = estimated_transmitted_bytes(backend.requests[0])
     assert fields[1]["transmitted_bytes"] == expected_transmitted
     assert fields[1]["received_bytes"] == 0
@@ -1032,10 +1087,72 @@ async def test_telemetry_failure_does_not_fail_collection_request() -> None:
     assert response.text() == "ok"
 
 
+async def test_disabled_telemetry_avoids_trace_allocation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = FakeTransport()
+    backend.add("https://shop.test/data", body="ok")
+    request = TransportRequest(
+        url="https://shop.test/data",
+        purpose=RequestPurpose.ENTITY,
+        priority=RequestPriority.IDENTITY,
+    )
+    monkeypatch.setattr(
+        "mb_commerce_scraper.transports.middleware.uuid4",
+        lambda: (_ for _ in ()).throw(AssertionError("trace allocation")),
+    )
+
+    response = await MiddlewareTransport(backend).request(request)
+
+    assert response.text() == "ok"
+    assert backend.requests == [request]
+    assert backend.requests[0].trace_request_id is None
+    assert backend.requests[0].trace_attempt is None
+
+
+@pytest.mark.parametrize(
+    ("middleware_options", "failure_stage"),
+    [
+        ({"rate_limiter": FailingReleaseLimiter()}, "rate_limit_release"),
+        ({"budget": FailingReconcileBudget()}, "budget_reconcile"),
+        ({"cache": FailingPutCache()}, "cache_write"),
+    ],
+)
+async def test_post_dispatch_failures_emit_terminal_request_event(
+    middleware_options: dict[str, object],
+    failure_stage: str,
+) -> None:
+    backend = FakeTransport()
+    backend.add("https://shop.test/data", body="ok")
+    telemetry = RecordingTelemetry()
+    transport = MiddlewareTransport(
+        backend,
+        telemetry=telemetry,
+        **middleware_options,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(RuntimeError, match="failed"):
+        await transport.request(
+            TransportRequest(
+                url="https://shop.test/data",
+                purpose=RequestPurpose.ENTITY,
+                priority=RequestPriority.IDENTITY,
+            )
+        )
+
+    terminal = [fields for event, fields in telemetry.events if event == "request.failed"]
+    assert len(terminal) == 1
+    assert terminal[0]["failure_stage"] == failure_stage
+    assert terminal[0]["attempt"] == 1
+    assert terminal[0]["retryable"] is False
+
+
 def test_cache_key_ignores_credentials_but_distinguishes_rendering() -> None:
     ordinary = TransportRequest(
-        url="https://shop.test/data", purpose=RequestPurpose.ENTITY,
-        priority=RequestPriority.IDENTITY, headers={"Authorization": "secret-one"},
+        url="https://shop.test/data",
+        purpose=RequestPurpose.ENTITY,
+        priority=RequestPriority.IDENTITY,
+        headers={"Authorization": "secret-one"},
     )
     changed_secret = ordinary.model_copy(update={"headers": {"Authorization": "secret-two"}})
     rendered = ordinary.model_copy(update={"browser": BrowserHint.REQUIRED})
@@ -1090,11 +1207,7 @@ def test_cache_key_hashes_browser_evaluation_identity_without_exposing_script() 
     )
     assert evaluated.evaluation is not None
     changed = evaluated.model_copy(
-        update={
-            "evaluation": evaluated.evaluation.model_copy(
-                update={"script": "() => 'changed'"}
-            )
-        }
+        update={"evaluation": evaluated.evaluation.model_copy(update={"script": "() => 'changed'"})}
     )
 
     ordinary_key = MemoryResponseCache.key(ordinary)
@@ -1144,9 +1257,7 @@ async def test_browser_dispatch_routes_only_required_requests() -> None:
     assert plain.text() == "http" and plain.route.kind == "direct"
     assert rendered.text() == "browser" and rendered.route.kind == "browser"
     assert [request.url for request in http.requests] == ["https://shop.test/plain"]
-    assert [request.url for request in browser.requests] == [
-        "https://shop.test/rendered"
-    ]
+    assert [request.url for request in browser.requests] == ["https://shop.test/rendered"]
 
 
 async def test_browser_dispatch_fails_required_request_without_backend() -> None:
@@ -1167,9 +1278,7 @@ async def test_browser_never_policy_rejects_required_without_invoking_backends()
     http = FakeTransport()
     browser = FakeTransport()
     http.add("https://shop.test/optional", body="http")
-    transport = BrowserDispatchTransport(
-        http, browser, policy=BrowserPolicy.NEVER
-    )
+    transport = BrowserDispatchTransport(http, browser, policy=BrowserPolicy.NEVER)
 
     with pytest.raises(BrowserBackendUnavailable, match="policy forbids"):
         await transport.request(
@@ -1191,9 +1300,7 @@ async def test_browser_never_policy_rejects_required_without_invoking_backends()
     )
 
     assert optional.text() == "http"
-    assert [request.url for request in http.requests] == [
-        "https://shop.test/optional"
-    ]
+    assert [request.url for request in http.requests] == ["https://shop.test/optional"]
     assert browser.requests == []
 
 
@@ -1202,9 +1309,7 @@ async def test_browser_require_policy_upgrades_only_optional_requests() -> None:
     browser = FakeTransport()
     http.add("https://shop.test/robots.txt", body="robots")
     browser.add("https://shop.test/product", body="rendered")
-    transport = BrowserDispatchTransport(
-        http, browser, policy=BrowserPolicy.REQUIRE
-    )
+    transport = BrowserDispatchTransport(http, browser, policy=BrowserPolicy.REQUIRE)
 
     robots = await transport.request(
         TransportRequest(
@@ -1230,9 +1335,7 @@ async def test_browser_require_policy_upgrades_only_optional_requests() -> None:
 
 
 async def test_browser_require_policy_fails_optional_without_backend() -> None:
-    transport = BrowserDispatchTransport(
-        FakeTransport(), policy=BrowserPolicy.REQUIRE
-    )
+    transport = BrowserDispatchTransport(FakeTransport(), policy=BrowserPolicy.REQUIRE)
 
     with pytest.raises(BrowserBackendUnavailable, match="no browser backend"):
         await transport.request(
@@ -1243,6 +1346,58 @@ async def test_browser_require_policy_fails_optional_without_backend() -> None:
                 browser=BrowserHint.OPTIONAL,
             )
         )
+
+
+async def test_browser_dispatch_traces_typed_selection_and_denial() -> None:
+    telemetry = RecordingTelemetry()
+    browser = FakeTransport()
+    browser.add("https://shop.test/product", body="rendered")
+    traced = TransportRequest(
+        url="https://shop.test/product",
+        purpose=RequestPurpose.ENTITY,
+        priority=RequestPriority.IDENTITY,
+        browser=BrowserHint.OPTIONAL,
+        trace_request_id="request-1",
+        trace_attempt=2,
+    )
+    dispatch = BrowserDispatchTransport(
+        FakeTransport(),
+        browser,
+        policy=BrowserPolicy.REQUIRE,
+        telemetry=telemetry,
+        telemetry_context={"collection_id": "collection-1"},
+    )
+
+    assert (await dispatch.request(traced)).route.kind == "browser"
+
+    denied = BrowserDispatchTransport(
+        FakeTransport(),
+        policy=BrowserPolicy.NEVER,
+        telemetry=telemetry,
+        telemetry_context={"collection_id": "collection-1"},
+    )
+    with pytest.raises(BrowserBackendUnavailable, match="policy forbids"):
+        await denied.request(traced.model_copy(update={"browser": BrowserHint.REQUIRED}))
+
+    assert [event for event, _ in telemetry.events] == [
+        "browser.dispatch",
+        "browser.denied",
+    ]
+    selected = telemetry.events[0][1]
+    assert selected == {
+        "collection_id": "collection-1",
+        "request_id": "request-1",
+        "attempt": 2,
+        "level": "debug",
+        "url": "https://shop.test/product",
+        "purpose": "entity",
+        "selected": "browser",
+        "requested": "optional",
+        "policy": "require",
+        "promoted": True,
+    }
+    assert telemetry.events[1][1]["reason"] == "policy_never"
+    assert telemetry.events[1][1]["level"] == "warning"
 
 
 async def test_browser_require_policy_keeps_proxy_browser_fail_closed() -> None:

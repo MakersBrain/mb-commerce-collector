@@ -96,13 +96,14 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `f9c0401` — extract reusable commerce scraper library.
 - `b49fd50` — add proxy runtime and WooCommerce connector.
 - `7adda2b` — extract remaining framework connectors.
+- `d79cbcb` — complete native connector integration and filesystem caching.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 76 source and test files.
-  - 280 library tests passed.
+  - 304 library tests passed.
   - Wheel and source distribution built.
   - 4 dependency-boundary tests passed.
   - The installed-wheel matrix verified all 231 reviewed public exports across
@@ -120,10 +121,14 @@ architecture rules in the plan and are not separate scope-expansion goals.
   the layered source/run policy, explicit native-route metadata, registry and
   projection boundaries, proxy-runtime composition, and native middleware
   construction without a legacy Fetcher.
+  - Canonical proxy-policy tests prove all five policy fields reach the neutral
+    pool request together, `never` leaves configured infrastructure idle,
+    active policies fail closed without a backend, and catalogue snapshot
+    country/provider constraints are checked before secret or database access.
 - [x] Full catalogue verification:
   - Ruff passed.
   - Mypy passed for 226 source and test files.
-  - 812 tests passed, 6 skipped, and 158 deselected in the latest fast-suite
+  - 815 tests passed, 6 skipped, and 158 deselected in the latest fast-suite
     run; the wider repository fast gate also passed 32 control-plane tests, 14
     service tests, and 2 explorer tests.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
@@ -323,11 +328,16 @@ verification pass, but production checkpoint-migration guarantees are missing.
     credential-bearing headers, URL query fields, and user information rather
     than risking cross-identity response reuse. Entry/read limits are library
     policy; directory retention and total-size pruning remain application-owned.
-- [~] Wire policy models and middleware through the public runtime builder.
+- [x] Wire policy models and middleware through the public runtime builder.
   - Default and per-collection `FetchPolicy`, injected cache/budget/telemetry,
     retries, robots policy, per-origin pacing/concurrency, and browser policy are
     enacted.
-  - Per-source proxy policy remains application composition work.
+  - Default and per-collection `ProxyPolicyConfig` is the canonical high-level
+    proxy contract. Mode, country, provider preferences, request cap, and byte
+    cap project together to the routed transport; `never` does not touch an
+    available backend and active policies fail closed without one.
+  - The guarded legacy routing/cap arguments remain for compatibility, cannot
+    be mixed with the canonical policy, and reject inert cap-only use.
 - [x] Provide concrete bounded/cached robots and per-origin rate-limiter
   implementations.
 - [x] Retry typed transport failures and account failed network attempts.
@@ -537,11 +547,15 @@ but replay/canary migration remains.
 - [x] Add weighted routing.
   - Static routes use validated positive weights and deterministic smooth
     weighted round-robin within the currently eligible provider tier.
-- [~] Adapt the catalogue Decodo lease to the neutral pool interface.
+- [x] Adapt the catalogue Decodo lease to the neutral pool interface.
   - `PostgresDecodoProxyPool` implements the neutral async pool/token contract
     over the existing Decodo reservation and sticky session. The native
     Shopify worker validates the immutable provider/route/profile snapshot and
     constructs the pool lazily only for active eligible policy.
+  - The catalogue now passes one effective `ProxyPolicyConfig` into the
+    library. Checked-in country/provider constraints are enforced before
+    secrets are read, and source/run byte caps only narrow the immutable
+    operator snapshot.
 - [x] Add a second provider gateway adapter.
   - An application-owned Webshare residential-backbone adapter projects the
     officially documented `p.webshare.io` HTTP endpoint, lowercase country,
@@ -904,12 +918,20 @@ Exit criterion: **not met**.
   - Production responses, cache retention, recording archives, fake response
     bodies/errors, JSON decoder context, and catalogue compatibility bridges
     now enforce explicit limits without placing raw bodies in diagnostics.
-- [x] Redact authorization, cookies, tokens, secrets, proxy userinfo, and
-  sensitive URL query values structurally.
+- [x] Redact authorization, cookies, tokens, secrets, proxy userinfo, all URL
+  query values, and URL fragments structurally.
 - [x] Stop emitting raw sensitive URLs, headers, and bodies in telemetry.
 - [x] Isolate telemetry observer failures from collection correctness.
 - [x] Add correlated request tracing with purpose, attempt, outcome, duration,
   route, and provider context across middleware retries.
+  - One bounded request identity now crosses request/retry events, direct and
+    proxy rate gates, typed browser dispatch decisions, proxy
+    acquire/rotation/outcome, and terminal events. Retry events expose the
+    selected backoff; connector version is present in child events.
+  - Disabled telemetry avoids UUID/context allocation. Invalid event names are
+    replaced without echoing them, and limiter release, budget reconciliation,
+    and cache-write failures emit terminal request failures so tracing spans
+    cannot remain open.
 - [x] Add lifecycle events.
   - Rate-limit wait, connector page, diagnostics, collection completion, and
     interruption are implemented with collection correlation.

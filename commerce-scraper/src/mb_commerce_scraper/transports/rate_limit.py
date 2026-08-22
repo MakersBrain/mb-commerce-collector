@@ -17,6 +17,7 @@ from .base import (
     TelemetryHooks,
     TransportRequest,
     TransportResponse,
+    transport_trace_fields,
 )
 from .telemetry import safe_telemetry
 
@@ -125,6 +126,7 @@ class RateLimitedTransport(CommerceTransport):
                 "rate_limit.wait",
                 {
                     **self._telemetry_context,
+                    **transport_trace_fields(request),
                     "level": "debug",
                     "route": self._route,
                     "url": request.url,

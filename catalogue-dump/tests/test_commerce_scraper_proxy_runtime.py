@@ -60,6 +60,10 @@ def resolve(
     run_proxy_max_megabytes: int | None = None,
     proxy_eligible: bool = True,
     base_url: str = "https://shop.test/",
+    source_country: str | None = None,
+    source_providers: tuple[str, ...] = (),
+    source_maximum_requests: int | None = None,
+    source_maximum_bytes: int | None = None,
 ) -> runtime.NativeProxyRuntimeSpec | None:
     source = SourceDefinition(
         id="shop",
@@ -69,6 +73,10 @@ def resolve(
     )
     source_policy = ProxyPolicyConfig(
         mode=ProxyMode.FALLBACK if proxy_eligible else ProxyMode.NEVER,
+        country=source_country,
+        provider_preferences=source_providers,
+        maximum_requests=source_maximum_requests,
+        maximum_bytes=source_maximum_bytes,
     )
     return runtime.resolve_native_proxy_runtime(
         database,
@@ -103,12 +111,15 @@ def test_disabled_routes_do_not_read_secrets(
     )
     database = Database()
 
-    assert resolve(
-        database,
-        proxy_snapshot,
-        settings=settings,
-        run_proxy_policy=run_policy,
-    ) is None
+    assert (
+        resolve(
+            database,
+            proxy_snapshot,
+            settings=settings,
+            run_proxy_policy=run_policy,
+        )
+        is None
+    )
     assert database.connections == 0
 
 
@@ -128,17 +139,17 @@ def test_active_policy_constructs_a_lazy_frozen_runtime(
     spec = resolve(database, snapshot(policy=policy))
 
     assert spec is not None
-    assert spec.routing.mode is mode
-    assert spec.routing.country == "FR"
-    assert spec.routing.provider_preferences == ("decodo",)
-    assert spec.maximum_requests is None
-    assert spec.maximum_bytes == 5_000_000
+    assert spec.policy.mode.value == mode.value
+    assert spec.policy.country == "FR"
+    assert spec.policy.provider_preferences == ("decodo",)
+    assert spec.policy.maximum_requests is None
+    assert spec.policy.maximum_bytes == 5_000_000
     assert spec.source_id == "shop"
     assert spec.base_url == "https://shop.test/"
     assert registered and {"named-user", "secret"} <= registered[0]
     assert database.connections == 0
     with pytest.raises(FrozenInstanceError):
-        spec.maximum_bytes = 1  # type: ignore[misc]
+        spec.policy = ProxyPolicyConfig()  # type: ignore[misc]
 
 
 def test_run_byte_cap_can_only_narrow_operator_snapshot(
@@ -147,9 +158,7 @@ def test_run_byte_cap_can_only_narrow_operator_snapshot(
     monkeypatch.setattr(
         runtime,
         "load_profiles",
-        lambda _path: {
-            "primary": ProxyProfile("primary", "gate.test", 7000, "user", "secret")
-        },
+        lambda _path: {"primary": ProxyProfile("primary", "gate.test", 7000, "user", "secret")},
     )
     monkeypatch.setattr(runtime.obs, "register_secrets", lambda _values: None)
     database = Database()
@@ -157,8 +166,60 @@ def test_run_byte_cap_can_only_narrow_operator_snapshot(
     narrowed = resolve(database, snapshot(), run_proxy_max_megabytes=3)
     unchanged = resolve(database, snapshot(max_bytes=2_000_000), run_proxy_max_megabytes=3)
 
-    assert narrowed is not None and narrowed.maximum_bytes == 3_000_000
-    assert unchanged is not None and unchanged.maximum_bytes == 2_000_000
+    assert narrowed is not None and narrowed.policy.maximum_bytes == 3_000_000
+    assert unchanged is not None and unchanged.policy.maximum_bytes == 2_000_000
+    assert database.connections == 0
+
+
+def test_source_policy_constraints_narrow_effective_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runtime,
+        "load_profiles",
+        lambda _path: {"primary": ProxyProfile("primary", "gate.test", 7000, "user", "secret")},
+    )
+    monkeypatch.setattr(runtime.obs, "register_secrets", lambda _values: None)
+
+    spec = resolve(
+        Database(),
+        snapshot(max_bytes=5_000_000),
+        source_country="FR",
+        source_providers=("decodo", "backup"),
+        source_maximum_requests=9,
+        source_maximum_bytes=2_000_000,
+    )
+
+    assert spec is not None
+    assert spec.policy == ProxyPolicyConfig(
+        mode=ProxyMode.FALLBACK,
+        country="FR",
+        provider_preferences=("decodo",),
+        maximum_requests=9,
+        maximum_bytes=2_000_000,
+    )
+
+
+@pytest.mark.parametrize(
+    "source_constraints",
+    [
+        {"source_country": "US"},
+        {"source_providers": ("backup",)},
+    ],
+)
+def test_snapshot_cannot_broaden_source_route_constraints_before_secret_access(
+    monkeypatch: pytest.MonkeyPatch,
+    source_constraints: dict[str, Any],
+) -> None:
+    monkeypatch.setattr(
+        runtime,
+        "load_profiles",
+        lambda _path: (_ for _ in ()).throw(AssertionError("secret read")),
+    )
+    database = Database()
+
+    with pytest.raises(ProxyDenied, match="outside source policy"):
+        resolve(database, snapshot(), **source_constraints)
     assert database.connections == 0
 
 
@@ -237,9 +298,7 @@ def test_unknown_profile_registers_loaded_secrets_before_safe_denial(
     monkeypatch.setattr(
         runtime,
         "load_profiles",
-        lambda _path: {
-            "other": ProxyProfile("other", "gate.test", 7000, "sensitive-user", "sensitive-pass")
-        },
+        lambda _path: {"other": ProxyProfile("other", "gate.test", 7000, "sensitive-user", "sensitive-pass")},
     )
     monkeypatch.setattr(runtime.obs, "register_secrets", lambda values: registered.append(values))
 

@@ -22,6 +22,12 @@ based on Keep a Changelog, and releases follow the compatibility policy in
 - Public `ResponseCache` extension protocol and a bounded, atomic,
   standard-library `FileResponseCache` with fresh/stale lookup and borrowed,
   stateless runtime ownership.
+- Canonical default and per-collection `ProxyPolicyConfig` runtime composition,
+  keeping route selection, geography, provider preference, and request/byte
+  caps in one validated policy.
+- End-to-end request/attempt correlation across retry, rate-limit, browser, and
+  proxy lifecycle events, typed browser routing decisions, observable retry
+  backoff, and terminal events for cleanup/cache-write failures.
 
 Before tagging the first release, move these notes under
 `## [0.1.0] - YYYY-MM-DD` and retain an empty `## [Unreleased]` section above

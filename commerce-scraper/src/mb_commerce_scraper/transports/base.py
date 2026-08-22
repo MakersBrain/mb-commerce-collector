@@ -128,6 +128,8 @@ class TransportRequest(BaseModel):
     cache: CachePolicy = CachePolicy.DEFAULT
     browser: BrowserHint = BrowserHint.NEVER
     evaluation: BrowserEvaluation | None = None
+    trace_request_id: str | None = Field(default=None, min_length=1, max_length=128)
+    trace_attempt: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def evaluation_is_an_explicit_browser_action(self) -> TransportRequest:
@@ -142,6 +144,17 @@ class TransportRequest(BaseModel):
         if self.purpose in {RequestPurpose.ROBOTS, RequestPurpose.DISCOVERY}:
             raise ValueError("browser evaluation is only valid for entity/detail work")
         return self
+
+
+def transport_trace_fields(request: TransportRequest) -> dict[str, JsonValue]:
+    """Return bounded correlation fields carried across transport layers."""
+
+    fields: dict[str, JsonValue] = {}
+    if request.trace_request_id is not None:
+        fields["request_id"] = request.trace_request_id
+    if request.trace_attempt is not None:
+        fields["attempt"] = request.trace_attempt
+    return fields
 
 
 def estimated_transmitted_bytes(request: TransportRequest) -> int:

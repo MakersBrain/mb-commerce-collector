@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from mb_commerce_scraper.connectors import ConnectorRegistry
-from mb_commerce_scraper.models import BrowserPolicy, FetchPolicy
+from mb_commerce_scraper.models import BrowserPolicy, FetchPolicy, ProxyPolicyConfig
 from mb_commerce_scraper.proxy import (
     HttpxProxyTransportFactory,
     ProxyBrowserTransportFactory,
@@ -42,6 +42,7 @@ def build_http_scraper(
     robots_server_failure_policy: RobotsFetchFailurePolicy | None = None,
     robots_cache_origins: int = 1_000,
     proxy_pool: ProxyPool | None = None,
+    proxy_policy: ProxyPolicyConfig | None = None,
     routing: ProxyRouting | None = None,
     proxy_browser_transport_factory: ProxyBrowserTransportFactory | None = None,
     require_proxy_browser_subrequest_authorization: bool = False,
@@ -55,16 +56,11 @@ def build_http_scraper(
         timeout_seconds=timeout,
         browser=(
             BrowserPolicy.ALLOW
-            if (
-                browser_transport is not None
-                or proxy_browser_transport_factory is not None
-            )
+            if (browser_transport is not None or proxy_browser_transport_factory is not None)
             else BrowserPolicy.NEVER
         ),
     )
-    request_timeout = (
-        selected_policy.timeout_seconds if fetch_policy is not None else timeout
-    )
+    request_timeout = selected_policy.timeout_seconds if fetch_policy is not None else timeout
     transport = HttpxTransport(
         allowed_origins=allowed_origins,
         timeout=request_timeout,
@@ -85,6 +81,7 @@ def build_http_scraper(
         registry=registry or ConnectorRegistry.with_builtins(),
         transport=transport,
         proxy_pool=proxy_pool,
+        proxy_policy=proxy_policy,
         routing=routing,
         proxy_transport_factory=(
             HttpxProxyTransportFactory(
@@ -96,9 +93,7 @@ def build_http_scraper(
             else None
         ),
         proxy_browser_transport_factory=proxy_browser_transport_factory,
-        require_proxy_browser_subrequest_authorization=(
-            require_proxy_browser_subrequest_authorization
-        ),
+        require_proxy_browser_subrequest_authorization=(require_proxy_browser_subrequest_authorization),
         proxy_maximum_requests=proxy_maximum_requests,
         proxy_maximum_bytes=proxy_maximum_bytes,
         budget=budget,

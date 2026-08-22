@@ -21,7 +21,7 @@ from mb_commerce_scraper.transports import (
     estimated_transmitted_bytes,
     safe_telemetry,
 )
-from mb_commerce_scraper.transports.base import TelemetryHooks
+from mb_commerce_scraper.transports.base import TelemetryHooks, transport_trace_fields
 
 from .base import (
     BrowserSubrequestAuthorization,
@@ -87,9 +87,7 @@ class PoolBrowserSubrequestAuthorizer:
     lease: ProxyLease
     target_host: str
 
-    async def authorize(
-        self, estimated_bytes: int
-    ) -> BrowserSubrequestAuthorization | None:
+    async def authorize(self, estimated_bytes: int) -> BrowserSubrequestAuthorization | None:
         authorization = await self.pool.authorize(self.lease, estimated_bytes)
         if authorization is None:
             return None
@@ -160,6 +158,23 @@ class RoutedTransport(CommerceTransport):
         return await self._proxy_request_attempt(request)
 
     async def rotate_identity(self, reason: RotationReason) -> None:
+        await self._rotate_identity(reason, request=None)
+
+    async def rotate_identity_for_request(
+        self,
+        reason: RotationReason,
+        request: TransportRequest,
+    ) -> None:
+        """Rotate while retaining the triggering attempt's trace identity."""
+
+        await self._rotate_identity(reason, request=request)
+
+    async def _rotate_identity(
+        self,
+        reason: RotationReason,
+        *,
+        request: TransportRequest | None,
+    ) -> None:
         async with self._state_changed:
             if self._closed:
                 raise RuntimeError("routed transport is closed")
@@ -173,7 +188,7 @@ class RoutedTransport(CommerceTransport):
             if self._pending_rotation is None:
                 self._pending_rotation = reason
 
-        await self._checkout_proxy_route()
+        await self._checkout_proxy_route(request)
         await asyncio.shield(self._checkin_proxy_route())
 
     async def aclose(self) -> None:
@@ -199,9 +214,7 @@ class RoutedTransport(CommerceTransport):
                     try:
                         await self._pool.release(lease)
                     except BaseException as error:
-                        self._emit_failure(
-                            "proxy.release.failed", error, lease=lease, started=started
-                        )
+                        self._emit_failure("proxy.release.failed", error, lease=lease, started=started)
                         raise
                     self._emit(
                         "proxy.release.completed",
@@ -219,7 +232,7 @@ class RoutedTransport(CommerceTransport):
         self,
         request: TransportRequest,
     ) -> TransportResponse:
-        route = await self._checkout_proxy_route()
+        route = await self._checkout_proxy_route(request)
         authorization = None
         browser_subrequests_authorized = (
             request.browser.value == "required"
@@ -245,11 +258,7 @@ class RoutedTransport(CommerceTransport):
                 cancelled_accounting = getattr(error, "accounting", None)
                 accounting = self._attempt_accounting(
                     request,
-                    (
-                        cancelled_accounting
-                        if isinstance(cancelled_accounting, TransportAccounting)
-                        else None
-                    ),
+                    (cancelled_accounting if isinstance(cancelled_accounting, TransportAccounting) else None),
                 )
                 outcome = ProxyOutcome(
                     target_host=self._proxy_request.target_host,
@@ -272,7 +281,7 @@ class RoutedTransport(CommerceTransport):
                     received_bytes=accounting.received_bytes,
                     classification="response_body_too_large",
                 )
-                await self._report(route, outcome)
+                await self._report(route, outcome, request=request)
                 raise
             except TransportFailure as error:
                 accounting = self._attempt_accounting(request, error.accounting)
@@ -283,7 +292,7 @@ class RoutedTransport(CommerceTransport):
                     received_bytes=accounting.received_bytes,
                     classification="transport_failure",
                 )
-                await self._report(route, outcome)
+                await self._report(route, outcome, request=request)
                 if self._routing.mode == RoutingMode.FAILOVER:
                     await self._schedule_rotation(
                         RotationReason.TRANSPORT_FAILURE,
@@ -312,17 +321,13 @@ class RoutedTransport(CommerceTransport):
                 received_bytes=accounting.received_bytes,
                 classification=classification,
             )
-            await self._report(route, outcome)
+            await self._report(route, outcome, request=request)
             if self._routing.mode == RoutingMode.FAILOVER:
                 await self._remember_blocked_route(response, generation=route.generation)
             return response.model_copy(
                 update={
                     "route": RouteMetadata(
-                        kind=(
-                            "browser"
-                            if response.route.kind == "browser"
-                            else "proxy"
-                        ),
+                        kind=("browser" if response.route.kind == "browser" else "proxy"),
                         provider=route.lease.provider,
                         endpoint_id=route.lease.route.endpoint_id,
                         lease_id=route.lease.lease_id,
@@ -359,9 +364,7 @@ class RoutedTransport(CommerceTransport):
         if accounting is not None:
             return TransportAccounting(
                 physical_requests=max(1, accounting.physical_requests),
-                transmitted_bytes=max(
-                    minimum_transmitted_bytes, accounting.transmitted_bytes
-                ),
+                transmitted_bytes=max(minimum_transmitted_bytes, accounting.transmitted_bytes),
                 received_bytes=max(received_bytes, accounting.received_bytes),
             )
         return TransportAccounting(
@@ -383,7 +386,10 @@ class RoutedTransport(CommerceTransport):
                 return self._generation
             return None
 
-    async def _checkout_proxy_route(self) -> _CheckedOutRoute:
+    async def _checkout_proxy_route(
+        self,
+        request: TransportRequest | None = None,
+    ) -> _CheckedOutRoute:
         while True:
             async with self._state_changed:
                 if self._closed:
@@ -407,7 +413,12 @@ class RoutedTransport(CommerceTransport):
                 self._pending_rotation = None
 
             try:
-                lease, proxy = await self._replace_route(old_lease, old_proxy, reason)
+                lease, proxy = await self._replace_route(
+                    old_lease,
+                    old_proxy,
+                    reason,
+                    request=request,
+                )
             except BaseException:
                 async with self._state_changed:
                     self._transitioning = False
@@ -426,21 +437,33 @@ class RoutedTransport(CommerceTransport):
         old_lease: ProxyLease | None,
         old_proxy: CommerceTransport | None,
         reason: RotationReason | None,
+        *,
+        request: TransportRequest | None,
     ) -> tuple[ProxyLease, CommerceTransport]:
         started = monotonic()
+        trace_fields = transport_trace_fields(request) if request is not None else {}
         if old_lease is None:
             self._emit(
                 "proxy.acquire.started",
-                {"target_host": self._proxy_request.target_host},
+                {
+                    **trace_fields,
+                    "target_host": self._proxy_request.target_host,
+                },
             )
             try:
                 lease = await self._pool.acquire(self._proxy_request)
             except BaseException as error:
-                self._emit_failure("proxy.acquire.failed", error, started=started)
+                self._emit_failure(
+                    "proxy.acquire.failed",
+                    error,
+                    started=started,
+                    request=request,
+                )
                 raise
             self._emit(
                 "proxy.acquire.completed",
                 {
+                    **trace_fields,
                     **self._route_fields(lease),
                     "elapsed_ms": self._elapsed_ms(started),
                 },
@@ -450,6 +473,7 @@ class RoutedTransport(CommerceTransport):
             self._emit(
                 "proxy.rotate.started",
                 {
+                    **trace_fields,
                     **self._route_fields(old_lease),
                     "reason": rotation_reason.value,
                     "level": self._rotation_level(rotation_reason),
@@ -468,6 +492,7 @@ class RoutedTransport(CommerceTransport):
                     lease=old_lease,
                     started=started,
                     reason=rotation_reason,
+                    request=request,
                 )
                 with suppress(Exception):
                     await asyncio.shield(self._pool.release(old_lease))
@@ -475,6 +500,7 @@ class RoutedTransport(CommerceTransport):
             self._emit(
                 "proxy.rotate.completed",
                 {
+                    **trace_fields,
                     **self._route_fields(lease),
                     "previous_provider": old_lease.provider,
                     "reason": rotation_reason.value,
@@ -501,22 +527,27 @@ class RoutedTransport(CommerceTransport):
         self,
         route: _CheckedOutRoute,
         outcome: ProxyOutcome,
+        *,
+        request: TransportRequest,
     ) -> None:
         started = monotonic()
         try:
             await self._pool.report(route.lease, outcome)
         except BaseException as error:
             self._emit_failure(
-                "proxy.report.failed", error, lease=route.lease, started=started
+                "proxy.report.failed",
+                error,
+                lease=route.lease,
+                started=started,
+                request=request,
             )
             raise
         self._emit(
             "proxy.outcome",
             {
+                **transport_trace_fields(request),
                 **self._route_fields(route.lease),
-                "level": (
-                    "debug" if outcome.classification == "success" else "warning"
-                ),
+                "level": ("debug" if outcome.classification == "success" else "warning"),
                 "classification": outcome.classification,
                 "status": outcome.status,
                 "physical_requests": outcome.physical_requests,
@@ -572,8 +603,10 @@ class RoutedTransport(CommerceTransport):
         lease: ProxyLease | None = None,
         started: float | None = None,
         reason: RotationReason | None = None,
+        request: TransportRequest | None = None,
     ) -> None:
         fields: dict[str, JsonValue] = {
+            **(transport_trace_fields(request) if request is not None else {}),
             "level": "warning",
             "error_type": type(error).__name__,
         }
