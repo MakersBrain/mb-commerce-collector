@@ -128,6 +128,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `52425ad` — route native Shopify through durable Webshare locally.
 - `b1479fa` — exercise active routed worker recovery and summaries.
 - `7d0f673` — verify deadline-triggered runtime cleanup.
+- `cfb3add` — require provisioned recorded-replay parity inputs in CI.
 
 ### Verification at last review
 
@@ -284,6 +285,12 @@ architecture rules in the plan and are not separate scope-expansion goals.
     active lease. The outer owned HTTP and browser transports remain valid
     until scraper exit and then both close. The full 318-test scraper release
     gate, schemas, artifacts, isolated consumers, and release checks pass.
+  - The recorded-replay CI gate now becomes strict only after a successful
+    archive pull. It requires a valid manifest, the explicit Shopify and
+    Shopware source identities, their frozen outputs, each declared source
+    host, and at least one compressed response per host. Four focused preflight
+    tests pass; the archive-free golden slice reports one preflight pass and
+    two explicit parity skips instead of treating missing recordings as parity.
 - [x] Source configuration inventory: all 88 configured sources can be
   constructed through the current layered/library mapping.
   - All 21 `pagecrawl` sources now validate through the explicit legacy-to-
@@ -513,6 +520,10 @@ verification pass, but production checkpoint-migration guarantees are missing.
     frozen golden and compares projected count, coverage, sample, full digest,
     errors, truncation, and interruption semantics. Request/discovery totals
     remain review evidence until the archive is restored and observed.
+  - CI sets `CATALOGUE_GOLDEN_ARCHIVE_REQUIRED=1` only after the configured
+    archive pull succeeds. In that mode, missing manifests, source hosts,
+    recordings, or frozen outputs fail before the parity cases can silently
+    skip. Local archive-free runs retain their explicit skips.
 
 Exit criterion: **not met**. Native policy/cache execution works, but recorded
 direct-path parity and migration-wide application composition are incomplete.
@@ -1272,9 +1283,10 @@ Exit criterion: **not met**.
 
 1. Restore or supply the absent raw Shopify response archive, then run the new
    cache-conditional legacy/library replay gate and projected-output shadow
-   comparison. The checkout currently contains output goldens but no `.cache`
-   payload or `catalogue-dump/cache-archive.json`, so its explicit skip must not
-   be reported as recorded parity.
+   comparison. The checkout currently contains output goldens, only two
+   synthetic `shop.test` cache entries, and no
+   `catalogue-dump/cache-archive.json`; this is not production replay evidence,
+   and its explicit skip must not be reported as recorded parity.
 2. Execute a limited production Shopify canary using the tested per-source
    rollback selector after recorded parity passes.
 3. Restore the `keramikbedarf-online` archive, run its implemented Shopware
