@@ -22,12 +22,12 @@ from mb_commerce_scraper.transports import (
     RobotsDenied,
     RotationReason,
     RouteMetadata,
+    TelemetryHooks,
     TransportFailure,
     TransportRequest,
     TransportResponse,
+    safe_telemetry,
 )
-from mb_commerce_scraper.transports.base import TelemetryHooks
-from mb_commerce_scraper.transports.telemetry import safe_telemetry
 from pydantic import JsonValue
 
 from mb_ceramics_catalogue.proxy import ProxyDenied

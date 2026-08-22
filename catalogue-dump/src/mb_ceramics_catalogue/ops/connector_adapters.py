@@ -20,8 +20,8 @@ from mb_commerce_scraper.connectors import (
     SumUpOptions,
     WixOptions,
     WooCommerceOptions,
+    prestashop_partition_keys,
 )
-from mb_commerce_scraper.connectors.prestashop import declared_partition_keys
 
 from mb_ceramics_catalogue.config.sources import SourceConfig
 
@@ -275,7 +275,7 @@ def _prestashop(config: SourceConfig, *, sio2: bool = False) -> ConnectorRuntime
         page_limit=config.page_limit or 500,
         category_page_limit=config.category_page_limit or 120,
     )
-    partitions = declared_partition_keys(options, config.url)
+    partitions = prestashop_partition_keys(options, config.url)
     return ConnectorRuntimePlan(
         connector="prestashop",
         connector_options=options.model_dump(mode="json"),

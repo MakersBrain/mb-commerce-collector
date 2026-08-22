@@ -1177,10 +1177,10 @@ def _partition_key(kind: str, index: int, url: str) -> str:
     return f"{kind}:{index}:{digest}"
 
 
-def declared_partition_keys(
+def prestashop_partition_keys(
     options: PrestaShopOptions, base_url: str
 ) -> tuple[str, ...]:
-    """Return the configured discovery roots using the connector's key format."""
+    """Return configured discovery roots using PrestaShop checkpoint keys."""
     roots = tuple(dict.fromkeys(options.sitemaps))
     if roots:
         return tuple(_partition_key("sitemap", index, root) for index, root in enumerate(roots))
@@ -1190,7 +1190,6 @@ def declared_partition_keys(
     return tuple(
         _partition_key("category", index, root) for index, root in enumerate(categories)
     )
-
 
 def _redact_json(value: Any) -> JsonValue:
     if isinstance(value, dict):

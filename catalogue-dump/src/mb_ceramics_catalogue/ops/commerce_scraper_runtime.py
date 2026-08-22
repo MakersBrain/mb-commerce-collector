@@ -24,8 +24,11 @@ from mb_commerce_scraper import (
 )
 from mb_commerce_scraper import ConnectorContext as LibraryConnectorContext
 from mb_commerce_scraper.runtime import CommerceScraper, build_http_scraper
-from mb_commerce_scraper.transports import RobotsFetchFailurePolicy, safe_telemetry
-from mb_commerce_scraper.transports.base import TelemetryHooks
+from mb_commerce_scraper.transports import (
+    RobotsFetchFailurePolicy,
+    TelemetryHooks,
+    safe_telemetry,
+)
 from pydantic import JsonValue
 
 from mb_ceramics_catalogue.config.settings import CacheMode, CrawlParams

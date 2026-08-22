@@ -9,11 +9,11 @@ import pytest
 from pydantic import ValidationError
 
 from mb_commerce_scraper import CollectionRequest
-from mb_commerce_scraper.connectors.base import ConnectorContext
-from mb_commerce_scraper.connectors.prestashop import (
+from mb_commerce_scraper.connectors import (
+    ConnectorContext,
     PrestaShopConnector,
     PrestaShopOptions,
-    declared_partition_keys,
+    prestashop_partition_keys,
 )
 from mb_commerce_scraper.proxy import ProxyBudgetExhausted
 from mb_commerce_scraper.testing import FakeTransport, assert_connector_pages
@@ -183,7 +183,7 @@ async def test_sio2_category_projection_and_cancellation() -> None:
         variant_combinations=False,
         currency="GBP",
     )
-    assert declared_partition_keys(options, ORIGIN)[0].startswith("category:0:")
+    assert prestashop_partition_keys(options, ORIGIN)[0].startswith("category:0:")
     with pytest.raises(ValidationError):
         PrestaShopOptions.model_validate({"category_urls": [], "unknown": True})
 
@@ -263,7 +263,11 @@ async def test_checkpoint_offset_must_reference_a_discovered_product() -> None:
     checkpoint = connector.checkpoint(
         intent,
         "lineage",
-        {"partition": declared_partition_keys(connector.options, ORIGIN)[0], "offset": 1, "sequence": 1},
+        {
+            "partition": prestashop_partition_keys(connector.options, ORIGIN)[0],
+            "offset": 1,
+            "sequence": 1,
+        },
     )
 
     with pytest.raises(ValueError, match="CHECKPOINT_INVALID"):

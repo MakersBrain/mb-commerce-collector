@@ -12,6 +12,20 @@ RUNTIME_PLAN = (
     / "ops"
     / "connector_adapters.py"
 )
+CATALOGUE_PACKAGE = Path(__file__).parents[1] / "src" / "mb_ceramics_catalogue"
+SUPPORTED_SCRAPER_MODULES = frozenset(
+    {
+        "mb_commerce_scraper",
+        "mb_commerce_scraper.connectors",
+        "mb_commerce_scraper.discovery",
+        "mb_commerce_scraper.models",
+        "mb_commerce_scraper.parsing",
+        "mb_commerce_scraper.proxy",
+        "mb_commerce_scraper.runtime",
+        "mb_commerce_scraper.testing",
+        "mb_commerce_scraper.transports",
+    }
+)
 FORBIDDEN_PREFIXES = (
     "mb_ceramics_catalogue.scrapers",
     "mb_ceramics_catalogue.datasets",
@@ -112,3 +126,24 @@ def test_runtime_plan_remains_data_only() -> None:
     assert declared_fields.isdisjoint(
         {"build", "connector_version", "partitions", "legacy_scraper_adapter"}
     )
+
+
+def test_catalogue_uses_only_supported_scraper_import_namespaces() -> None:
+    violations: list[str] = []
+    for path in sorted(CATALOGUE_PACKAGE.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = tuple(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                modules = (node.module,)
+            else:
+                modules = ()
+            for module in modules:
+                if module.startswith("mb_commerce_scraper") and module not in SUPPORTED_SCRAPER_MODULES:
+                    violations.append(
+                        f"{path.relative_to(CATALOGUE_PACKAGE)}:"
+                        f"{getattr(node, 'lineno', 0)}: {module}"
+                    )
+
+    assert violations == []

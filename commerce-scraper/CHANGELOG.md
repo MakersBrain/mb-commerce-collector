@@ -28,6 +28,8 @@ based on Keep a Changelog, and releases follow the compatibility policy in
 - End-to-end request/attempt correlation across retry, rate-limit, browser, and
   proxy lifecycle events, typed browser routing decisions, observable retry
   backoff, and terminal events for cleanup/cache-write failures.
+- Public telemetry-hook and PrestaShop partition-declaration composition
+  contracts for applications integrating the library without private imports.
 
 Before tagging the first release, move these notes under
 `## [0.1.0] - YYYY-MM-DD` and retain an empty `## [Unreleased]` section above

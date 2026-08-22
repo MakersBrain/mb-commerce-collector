@@ -8,7 +8,12 @@ from .generic_pages import (
     GenericPagesFactory,
     GenericPagesOptions,
 )
-from .prestashop import PrestaShopConnector, PrestaShopFactory, PrestaShopOptions
+from .prestashop import (
+    PrestaShopConnector,
+    PrestaShopFactory,
+    PrestaShopOptions,
+    prestashop_partition_keys,
+)
 from .registry import ConnectorRegistry, PluginLoadError, register_builtin_connectors
 from .shopify import ShopifyConnector, ShopifyFactory, ShopifyOptions
 from .specialized import (
@@ -68,5 +73,6 @@ __all__ = [
     "WooCommerceConnector",
     "WooCommerceFactory",
     "WooCommerceOptions",
+    "prestashop_partition_keys",
     "register_builtin_connectors",
 ]

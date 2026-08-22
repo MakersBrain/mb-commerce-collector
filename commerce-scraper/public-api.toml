@@ -84,7 +84,8 @@ symbols = [
   "StarwebConnector", "StarwebFactory", "StarwebOptions",
   "SumUpConnector", "SumUpFactory", "SumUpOptions", "WixConnector",
   "WixFactory", "WixOptions", "WooCommerceConnector",
-  "WooCommerceFactory", "WooCommerceOptions", "register_builtin_connectors",
+  "WooCommerceFactory", "WooCommerceOptions", "prestashop_partition_keys",
+  "register_builtin_connectors",
 ]
 
 [modules."mb_commerce_scraper.discovery"]
@@ -146,7 +147,7 @@ symbols = [
   "RateLimitedTransport", "RequestBudget", "RequestPriority", "RequestPurpose",
   "ResponseBodyTooLarge", "ResponseCache", "ResponseDecodeFailure", "RobotsDenied",
   "RobotsFetchFailurePolicy", "RotationReason", "RouteMetadata", "SafeTelemetry",
-  "StaleResponseCache", "TransportAccounting", "TransportFailure",
+  "StaleResponseCache", "TelemetryHooks", "TransportAccounting", "TransportFailure",
   "TransportRequest", "TransportResponse", "URLPolicy",
   "enforce_response_body_limit", "estimated_transmitted_bytes", "safe_telemetry",
   "sanitize_fields", "sanitize_url",

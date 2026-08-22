@@ -13,6 +13,7 @@ from mb_commerce_scraper.transports import (
     CommerceTransport,
     FileResponseCache,
     ResponseCache,
+    TelemetryHooks,
     TransportRequest,
 )
 ```
@@ -29,6 +30,12 @@ subpackage surfaces have these roles:
   reusable routing/middleware implementations;
 - `runtime`: the high-level borrowed-resource client and owned HTTP builder;
 - `testing`: supported test helpers for third-party connector conformance.
+
+`TelemetryHooks` is the supported observer protocol for application-owned
+structured tracing and debugging sinks. Connector-specific composition may use
+public helpers such as `prestashop_partition_keys` when it must construct a
+partitioned collection request without depending on connector implementation
+modules.
 
 `ResponseCache` is the supported extension protocol for application-owned
 caches. `FileResponseCache` is the standard-library, directory-backed
