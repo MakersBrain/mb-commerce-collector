@@ -5,10 +5,11 @@ import base64
 import html
 import json
 import os
+import socket
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any, Literal, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -21,9 +22,11 @@ from mb_ceramics_catalogue.config.settings import (
     Settings,
 )
 from mb_ceramics_catalogue.config.sources import SourcesFile
+from mb_ceramics_catalogue.ops import commerce_scraper_proxy as durable
 from mb_ceramics_catalogue.ops import outputs, runs
 from mb_ceramics_catalogue.ops.queue import ClaimedJob
 from mb_ceramics_catalogue.ops.worker import Worker
+from mb_ceramics_catalogue.proxy import ProxyReservationUsage
 from mb_ceramics_catalogue.storage.db import DictPool
 from mb_ceramics_catalogue.transports.browser import (
     BrowserEvaluationResult,
@@ -33,6 +36,12 @@ from mb_ceramics_catalogue.transports.browser import (
 )
 
 from .conftest import requires_postgres
+from .test_commerce_scraper_webshare_runtime_intercall import (
+    LoopbackHTTPGateway,
+    _local_verified_port,
+    _snapshot,
+    _write_secret,
+)
 
 pytestmark = [pytest.mark.postgres, requires_postgres]
 
@@ -259,6 +268,239 @@ class NativeBrowserBackend:
 
     async def shutdown(self) -> None:
         self.shutdowns += 1
+
+
+async def test_active_proxy_worker_intercall_is_accounted_once_and_recovers(
+    db,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from mb_ceramics_catalogue.ops import worker as worker_module
+    from mb_ceramics_catalogue.storage import postgres
+
+    body = json.dumps(
+        {
+            "products": [
+                {
+                    "id": 1,
+                    "handle": "worker-cup",
+                    "title": "Worker cup",
+                    "variants": [
+                        {
+                            "id": 11,
+                            "title": "Default",
+                            "sku": "WORKER-1",
+                            "price": "12.50",
+                            "available": True,
+                        }
+                    ],
+                }
+            ]
+        },
+        separators=(",", ":"),
+    ).encode()
+    gateway = LoopbackHTTPGateway(body)
+    profile_id = uuid4()
+    route_id = uuid4()
+    snapshot = _snapshot(profile_id, route_id)
+    snapshot["max_bytes"] = 2_000_000
+    reservation_id = uuid4()
+    authorization_id = uuid4()
+    reservations: list[dict[str, Any]] = []
+    authorizations: list[tuple[UUID, int, int | None]] = []
+    reconciliations: list[tuple[UUID, int, int]] = []
+    closed: list[tuple[UUID, int, int]] = []
+
+    async def reserve(_connection: Any, **values: Any) -> UUID:
+        reservations.append(values)
+        return reservation_id
+
+    async def authorize(
+        _connection: Any,
+        *,
+        reservation_id: UUID,
+        estimated_bytes: int,
+        maximum_requests: int | None,
+        **_values: Any,
+    ) -> UUID:
+        authorizations.append(
+            (reservation_id, estimated_bytes, maximum_requests)
+        )
+        return authorization_id
+
+    async def reconcile(
+        _connection: Any,
+        *,
+        authorization_id: UUID,
+        actual_bytes: int,
+        physical_requests: int,
+        **_values: Any,
+    ) -> ProxyReservationUsage:
+        reconciliations.append(
+            (authorization_id, actual_bytes, physical_requests)
+        )
+        return ProxyReservationUsage(
+            estimated_bytes=actual_bytes,
+            request_count=physical_requests,
+            revoked=False,
+            exhausted=False,
+        )
+
+    async def close(_connection: Any, lease: Any) -> None:
+        closed.append((lease.reservation_id, lease.used_bytes, lease.requests))
+
+    monkeypatch.setattr(durable, "reserve", reserve)
+    monkeypatch.setattr(durable, "authorize_reservation_attempt", authorize)
+    monkeypatch.setattr(durable, "reconcile_reservation_attempt", reconcile)
+    monkeypatch.setattr(durable, "close_reservation", close)
+
+    sources = SourcesFile.model_validate(
+        {
+            "shop": {
+                "label": "Shop",
+                "url": "https://shop.test/",
+                "scraper": "shopify",
+                "currency": "EUR",
+                "scope": "all",
+                "country": "FR",
+                "proxy_eligible": True,
+            }
+        }
+    )
+    # The loopback gateway intentionally speaks plain HTTP. Production source
+    # validation remains HTTPS-only; this local-only copy changes no checked-in
+    # source and lets HTTPX exercise real absolute-form proxy framing.
+    sources.root["shop"] = sources["shop"].model_copy(
+        update={"url": "http://shop.test/"}
+    )
+    run_id = await runs.create_run(db)
+    assert run_id is not None
+    job_id = (await runs.create_jobs(db, run_id, sources, ["shop"]))["shop"]
+    claimed = ClaimedJob(
+        id=job_id,
+        run_id=run_id,
+        source_id="shop",
+        host="shop.test",
+        attempt=1,
+        max_attempts=3,
+        requires=[],
+        requires_any=[],
+        params={},
+        proxy_snapshot=snapshot,
+        delivery_generation=1,
+        execution_token=uuid4(),
+    )
+    secret_file = tmp_path / "webshare-gateway.json"
+    finished: list[tuple[str, dict[str, Any]]] = []
+    loads: list[tuple[str, bool]] = []
+    resolved: list[Any] = []
+    original_resolver = worker_module.resolve_native_proxy_runtime
+
+    def capture_resolver(*args: Any, **kwargs: Any) -> Any:
+        value = original_resolver(*args, **kwargs)
+        resolved.append(value)
+        return value
+
+    async def forbid_legacy_session(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("native worker must not open a legacy session")
+
+    async def forbid_legacy_proxy(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("native worker must not acquire a legacy proxy lease")
+
+    def forbid_browser(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("Shopify must not resolve a browser")
+
+    def load_artifact(
+        _job: ClaimedJob, location: str, whole: bool
+    ) -> postgres.SourceReport:
+        loads.append((location, whole))
+        return postgres.SourceReport(source="shop", records=1, retired=0)
+
+    async def finish(_job: ClaimedJob, state: str, **kwargs: Any) -> None:
+        finished.append((state, kwargs))
+
+    monkeypatch.setattr(worker_module, "resolve_native_proxy_runtime", capture_resolver)
+    monkeypatch.setattr(worker_module, "open_session", forbid_legacy_session)
+
+    async with _local_verified_port(gateway) as port:
+        _write_secret(secret_file, port=port)
+        worker = Worker(
+            cast(DictPool, Pool(db)),
+            sources,
+            Settings(
+                dsn=os.environ["CATALOGUE_TEST_DSN"],
+                dumps_dir=tmp_path,
+                cache_dir=tmp_path / "cache",
+                proxy_enabled=True,
+                proxy_webshare_data_plane_enabled=True,
+                proxy_webshare_gateway_secret_file=secret_file,
+            ),
+        )
+        worker._cancels[job_id] = asyncio.Event()
+        monkeypatch.setattr(worker, "_proxy_lease", forbid_legacy_proxy)
+        monkeypatch.setattr(worker, "_browser_for_job", forbid_browser)
+        monkeypatch.setattr(worker, "_load_connector_artifact", load_artifact)
+        monkeypatch.setattr(worker, "_finish", finish)
+
+        real_getaddrinfo = socket.getaddrinfo
+
+        def loopback_only(
+            host: str | bytes,
+            service: str | int | None,
+            *args: Any,
+            **kwargs: Any,
+        ) -> list[tuple[Any, ...]]:
+            name = host.decode("ascii") if isinstance(host, bytes) else host
+            address = (
+                "127.0.0.1"
+                if name == "p.webshare.io"
+                else "93.184.216.34"
+                if name == "shop.test"
+                else None
+            )
+            if address is None:
+                raise socket.gaierror(f"unexpected resolution: {name}")
+            return real_getaddrinfo(address, service, *args, **kwargs)
+
+        monkeypatch.setattr(socket, "getaddrinfo", loopback_only)
+        params = CrawlParams(
+            pipeline="connector_canary",
+            datasets=("ceramics.catalogue_item.v2",),
+            cache_mode="off",
+        )
+        await worker._crawl_connector_canary(claimed, params, sources["shop"])
+        await worker._crawl_connector_canary(claimed, params, sources["shop"])
+
+    assert len(gateway.requests) == gateway.closed_connections == 1
+    assert b"/products.json?limit=250&page=1" in gateway.requests[0]
+    assert len(reservations) == len(authorizations) == len(reconciliations) == 1
+    assert authorizations[0][0] == reservation_id
+    assert authorizations[0][1] > 1_000_000
+    assert reconciliations[0][0] == authorization_id
+    assert reconciliations[0][2] == 1
+    assert reconciliations[0][1] > len(body)
+    assert closed == [(reservation_id, reconciliations[0][1], 1)]
+    assert len(resolved) == 1
+    assert resolved[0] is not None
+    assert resolved[0].pool._inner.active_leases == 0
+    assert [state for state, _ in finished] == ["succeeded", "succeeded"]
+    first = finished[0][1]["summary"]
+    recovery = finished[1][1]["summary"]
+    assert first["terminal_recovery"] is False
+    assert first["runtime_format"] == "commerce-scraper-v1"
+    assert (
+        first["requests"]
+        == first["transport"]["physical_requests"]
+        == first["transport"]["proxy_requests"]
+        == 1
+    )
+    assert first["transport"]["direct_requests"] == 0
+    assert recovery["terminal_recovery"] is True
+    assert not any(recovery["transport"].values())
+    assert len(loads) == 2 and all(whole for _, whole in loads)
+    retained_summary = json.dumps(finished, default=str)
+    assert "issued-user" not in retained_summary
+    assert "issued-p@ss" not in retained_summary
 
 
 async def test_native_shopify_result_limit_publishes_usable_sealed_output(
