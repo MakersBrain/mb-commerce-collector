@@ -4,7 +4,7 @@ import asyncio
 import base64
 import json
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import BaseModel, ConfigDict, JsonValue
@@ -1110,6 +1110,68 @@ class ClosingTransport(FakeTransport):
         self.closed = True
         if self.close_error is not None:
             raise self.close_error
+
+
+class ClosingBlockingTransport(BlockingTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+async def test_runtime_releases_proxy_lease_and_owned_resources_on_deadline() -> None:
+    pool = fake_proxy_pool("one")
+    releases = 0
+    release = pool.release
+
+    async def counted_release(lease: ProxyLease) -> None:
+        nonlocal releases
+        releases += 1
+        await release(lease)
+
+    pool.release = counted_release  # type: ignore[method-assign]
+    blocking = ClosingBlockingTransport()
+    owned_http = ClosingTransport()
+    owned_http.add("https://shop.test/products.json", status=403)
+    owned_browser = ClosingTransport()
+    telemetry = RecordingTelemetry()
+    scraper = CommerceScraper(
+        registry=ConnectorRegistry.with_builtins(),
+        transport=owned_http,
+        browser_transport=owned_browser,
+        owns_transport=True,
+        owns_browser_transport=True,
+        proxy_pool=pool,
+        routing=ProxyRouting.fallback(),
+        proxy_transport_factory=Factory(blocking),
+        telemetry=telemetry,
+        backoff=lambda _: 0,
+    )
+
+    async with scraper:
+        with pytest.raises(TimeoutError):
+            _ = [
+                page
+                async for page in scraper.collect(
+                    source(),
+                    deadline=datetime.now(UTC) + timedelta(milliseconds=500),
+                )
+            ]
+
+        assert blocking.started.is_set()
+        assert releases == 1
+        assert pool.active_leases == 0
+        assert blocking.closed
+        assert not owned_http.closed
+        assert not owned_browser.closed
+        interrupted = [fields for event, fields in telemetry.events if event == "collection.interrupted"]
+        assert interrupted[-1]["error_type"] == "TimeoutError"
+        assert not any(event == "collection.completed" for event, _ in telemetry.events)
+
+    assert owned_http.closed
+    assert owned_browser.closed
 
 
 async def test_runtime_closes_browser_only_when_explicitly_owned() -> None:
