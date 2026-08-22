@@ -129,16 +129,19 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `b1479fa` — exercise active routed worker recovery and summaries.
 - `7d0f673` — verify deadline-triggered runtime cleanup.
 - `cfb3add` — require provisioned recorded-replay parity inputs in CI.
+- `7a3a355` — enforce supported scraper composition imports.
+- `dd2093a` — reject unprovable static proxy constraints.
+- `92f97ba` — exercise durable lineage resolution against PostgreSQL.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 76 source and test files.
-  - 318 library tests passed.
+  - 321 library tests passed.
   - Wheel and source distribution built.
   - 4 dependency-boundary tests passed.
-  - The installed-wheel matrix verified all 231 reviewed public exports across
+  - The installed-wheel matrix verified all 233 reviewed public exports across
     nine modules, metadata/source version parity, typed package data, and
     isolated base, HTTP, and development extras; the base install remained
     free of the optional HTTPX dependency.
@@ -149,6 +152,11 @@ architecture rules in the plan and are not separate scope-expansion goals.
     rotation, cleanup, lease release, and credential containment.
   - The release verifier confirmed source, wheel, and source-distribution
     version parity plus the required changelog structure.
+- [x] Catalogue production imports only the nine supported scraper namespaces.
+  `TelemetryHooks` and PrestaShop partition declaration are reviewed public
+  contracts, and an AST architecture gate rejects future imports from private
+  connector or transport implementation modules. The focused catalogue
+  architecture/runtime/pipeline slice passed 54 tests with Ruff and mypy.
 - [x] Targeted catalogue composition and intercall tests passed, covering
   the layered source/run policy, explicit native-route metadata, registry and
   projection boundaries, proxy-runtime composition, and native middleware
@@ -308,7 +316,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 | Phase | Status | Summary |
 |---|---|---|
 | 0. Baseline and decisions | Complete | Baselines, grouped source/transport inventory, bespoke classifications, ADR, frozen schemas, Python policy, and known skips/failures are recorded. |
-| 1. Distribution and contracts | Mostly complete | Package, contracts, workspace integration, typing, builds, and installed-wheel proof exist; production checkpoint composition remains. |
+| 1. Distribution and contracts | Complete | Package, contracts, compatibility decoding, durable lineage composition, public import boundaries, workspace integration, typing, builds, and installed-wheel proof pass. |
 | 2. HTTP transport and runtime | Partial | HTTP/fake transports, hardened middleware, conditional archive revalidation, per-request legacy robots/cache projection, and native Shopify policy composition exist; recorded direct-path parity and wider application rollout remain. |
 | 3. Shopify vertical slice | Partial | Registry/Fetcher/projection synthetic parity exists; recorded replay, production canary, and stable source switch remain. |
 | 4. Generic custom shops | Partial | Composable versioned discovery/parser strategies, sitemap/category/robots discovery, structured-page parsing, safe resume, current pagecrawl option translation, and a native worker gate exist; replay and production migration remain. |
@@ -369,7 +377,7 @@ neutral path; missing replay evidence remains a gate in its owning phases.
 - [x] Add neutral immutable models using `Decimal` for money.
 - [x] Add collection, diagnostics, budget, and checkpoint contracts.
 - [x] Add versioned checkpoint schema and collection fingerprints.
-- [~] Decode compatible legacy catalogue checkpoints or explicitly start a new
+- [x] Decode compatible legacy catalogue checkpoints or explicitly start a new
   lineage when compatibility cannot be proven.
   - The package-level decoder returns typed compatible/restart outcomes,
     validates legacy envelope identity, and derives the version-1 fingerprint
@@ -394,6 +402,12 @@ neutral path; missing replay evidence remains a gate in its owning phases.
   - The resolver is wired into every approved native `connector_canary` worker
     path. The normal legacy worker retains its existing lineage format for
     rollback during incremental migration.
+  - A PostgreSQL resolver-to-storage intercall proves first-lineage creation,
+    durable nonterminal cursor recovery into a typed fingerprinted checkpoint,
+    resumable dataset-state preservation, and option-drift fencing. Drift
+    rejects the prior lineage, persists fresh durable identity, reuses no
+    cursor, and resets dataset counters. The full adjacent PostgreSQL class
+    passed 14 cases.
 - [x] Add public exports and `py.typed`.
 - [x] Add dependency-boundary tests.
   - AST checks prohibit catalogue imports, enforce the documented internal
@@ -413,10 +427,13 @@ neutral path; missing replay evidence remains a gate in its owning phases.
     backup images that were previously omitted from the image job.
   - A local loader image build passed and reported both imports from installed
     `site-packages`; CI applies the same assertion to the other targets.
-- [~] Add catalogue compatibility adapters; legacy contracts remain active.
+- [x] Add catalogue compatibility adapters; legacy contracts remain active only
+  on the retained rollback route until Phase 8 observation gates permit their
+  removal.
 
-Exit criterion: **partially met**. Source-tree and installed-artifact
-verification pass, but production checkpoint-migration guarantees are missing.
+Exit criterion: **met**. Source-tree, installed-artifact, public-boundary, and
+PostgreSQL checkpoint-migration verification pass. Production source promotion
+remains a Phase 7 cutover gate rather than a Phase 1 contract-extraction gap.
 
 ## Phase 2 — HTTP transport and runtime primitives
 
@@ -678,6 +695,10 @@ but replay/canary migration remains.
     current capability.
 - [x] Add direct, always, fallback, failover, and round-robin routing.
 - [x] Add static pool and basic health/cooldown tracking.
+  - Static routes fail closed before selection or lease allocation when a
+    request requires region, city, or session TTL capabilities that the route
+    model cannot prove. Three focused constraint cases and the adjacent
+    23-test static proxy slice pass; empty-country semantics are unchanged.
 - [x] Add received-byte cap support.
 - [x] Add weighted routing.
   - Static routes use validated positive weights and deterministic smooth
@@ -1327,5 +1348,10 @@ After each implementation batch:
 
 ## Accepted plan deviations
 
-None recorded. Current differences are tracked as incomplete work rather than
-accepted deviations.
+- The plan names a separate provider-adapter protocol. The implemented neutral
+  `ProxyPool` lifecycle plus application-owned transport/browser factories is
+  the provider-adapter boundary: Decodo and Webshare both implement it without
+  provider grammar entering the library. A second provider-specific protocol
+  would duplicate acquisition, authorization, accounting, rotation, and
+  cleanup contracts without enabling a current use case. This deviation is
+  accepted under the plan's provider-neutrality and minimal-abstraction goals.
