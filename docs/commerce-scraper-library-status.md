@@ -99,6 +99,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `d79cbcb` — complete native connector integration and filesystem caching.
 - `02de77b` — unify proxy policy and end-to-end request tracing.
 - `f863a66` — share native catalogue composition across worker and local tools.
+- `1b05488` — publish intentional bounded collections as sealed limited output.
 
 ### Verification at last review
 
@@ -129,10 +130,15 @@ architecture rules in the plan and are not separate scope-expansion goals.
     country/provider constraints are checked before secret or database access.
 - [x] Full catalogue verification:
   - Ruff passed.
-  - Mypy passed for 228 source and test files.
-  - 833 tests passed, 6 skipped, and 159 deselected in the latest fast-suite
+  - Mypy passed for 227 source and test files.
+  - 821 tests passed, 6 skipped, and 159 deselected in the latest fast-suite
     run; the wider repository fast gate also passed 32 control-plane tests, 14
     service tests, and 2 explorer tests.
+  - The lower fast-test count reflects deletion of the obsolete specialized
+    Fetcher composition shell and its construction/transport tests. Its native
+    middleware guarantees remain covered at the library/runtime boundaries;
+    an all-source invariant now builds all 88 canonical connector/options pairs
+    through the application registry instead.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
   throwaway PostgreSQL 17 instance, covering concurrent authorization,
   capacity exclusion, and exactly-once reconciliation.
@@ -194,7 +200,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
     DOM action is typed, cacheable, origin-bounded, and accounted through the
     same middleware pipeline as HTTP work on the native worker route. The local
     CLI/probe compatibility shell preserves equivalent policy through the
-    application-owned legacy Fetcher bridge.
+    shared native runtime. Retained direct canary aliases use the compatibility
+    Fetcher bridge only for explicit parity flows.
 
 ## Phase summary
 
@@ -796,6 +803,18 @@ canaries have not run.
     dynamic-partition behavior are now explicit immutable metadata on the
     application runtime plan. Worker selection no longer contains a connector
     allow-list or connector-name partition branches.
+  - `ConnectorRuntimePlan` is now data-only and emits canonical native registry
+    names and option schemas. Executable builders, duplicated connector
+    versions/partitions, legacy-adapter names, catalogue connector imports, and
+    the `pagecommerce`/`keramik_kraft` name switches were removed from the
+    composition metadata and source-definition boundary.
+  - The former Shopware, SumUp, Starweb, and NitroSell specialized Fetcher shell
+    was deleted. Both its retained direct aliases and generated `library_*`
+    aliases now enter `LibraryConnectorScraper`; the stable unsuffixed legacy
+    implementations remain distinct and available for production rollback.
+    An AST architecture test prevents executable construction dependencies
+    from returning, and an all-source test validates every checked-in canonical
+    connector/options pair through the application registry.
   - Library registry membership deliberately does not grant worker
     eligibility: remaining registered connectors stay on their compatibility
     routes until explicit application metadata and their required evidence are

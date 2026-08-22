@@ -223,6 +223,79 @@ def test_local_native_canaries_select_one_shared_library_shell(
     assert scrapers.load(selected.scraper).__name__ == "LibraryConnectorScraper"
 
 
+@pytest.mark.parametrize(
+    ("scraper", "options"),
+    [
+        (
+            "shopware",
+            {
+                "category_urls": ["https://shop.test/category"],
+                "use_advertised_sitemaps": False,
+            },
+        ),
+        ("sumup", {}),
+        (
+            "starweb",
+            {
+                "category_urls": ["https://shop.test/category"],
+                "use_advertised_sitemaps": False,
+            },
+        ),
+        (
+            "nitrosell",
+            {
+                "category_urls": ["https://shop.test/category"],
+                "use_advertised_sitemaps": False,
+                "render": False,
+            },
+        ),
+    ],
+)
+def test_specialized_canary_aliases_use_shared_composition_and_keep_stable_rollback(
+    scraper: str, options: dict[str, Any]
+) -> None:
+    source = SourcesFile.model_validate(
+        {
+            "stable-source": {
+                "label": "Stable source",
+                "url": "https://shop.test/",
+                "scraper": scraper,
+                **options,
+            }
+        }
+    )["stable-source"]
+
+    selected = local_canary_source_config(source)
+    generated_alias = f"library_{scraper}_connector"
+    direct_alias = f"{scraper}_connector"
+    library_type = scrapers.load(generated_alias)
+    direct_type = scrapers.load(direct_alias)
+    rollback_type = scrapers.load(scraper)
+    shell = library_type(
+        "stable-source",
+        selected.as_scraper_config(),
+        cast(Any, SimpleNamespace(limiter=RecordingLimiter())),
+    )
+    library_shell = cast(Any, shell)
+    direct_shell = direct_type(
+        "stable-source",
+        {**source.as_scraper_config(), "scraper": direct_alias},
+        cast(Any, SimpleNamespace(limiter=RecordingLimiter())),
+    )
+
+    assert selected.scraper == generated_alias
+    assert library_type.__name__ == "LibraryConnectorScraper"
+    assert library_type.__module__.endswith(".library_connector")
+    assert library_shell.name == library_shell._definition.id == "stable-source"
+    assert library_shell._source.scraper == scraper
+    assert scrapers.LIBRARY_CANARY_SCRAPERS[generated_alias] == scraper
+    assert scrapers.CONNECTOR_CANARY_SCRAPERS[direct_alias] == scraper
+    assert direct_type is library_type
+    assert cast(Any, direct_shell)._source.scraper == scraper
+    assert scrapers.REGISTRY[scraper] != scrapers.REGISTRY[direct_alias]
+    assert not rollback_type.__module__.endswith(".library_connector")
+
+
 def test_local_bespoke_rollback_adapter_remains_registered() -> None:
     config = SourcesFile.model_validate(
         {

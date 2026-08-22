@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from mb_commerce_scraper.connectors import ConnectorContext
+from mb_commerce_scraper.testing import FakeTransport
 
 from mb_ceramics_catalogue import scrapers
 from mb_ceramics_catalogue.config.sources import SourcesFile
@@ -19,6 +21,8 @@ from mb_ceramics_catalogue.connectors import (
     RefreshMode,
     SnapshotField,
 )
+from mb_ceramics_catalogue.ops.commerce_scraper_adapter import source_definition
+from mb_ceramics_catalogue.ops.commerce_scraper_runtime import application_connector_registry
 from mb_ceramics_catalogue.ops.connector_adapters import RUNTIME_ADAPTERS, runtime_plan
 
 NOW = datetime(2026, 8, 15, 18, 0, tzinfo=UTC)
@@ -29,6 +33,7 @@ def test_every_checked_in_legacy_scraper_has_runtime_canary_and_rollback_key() -
     """Make completion of a migration explicit for every production scraper family."""
     sources = SourcesFile.load(SOURCES)
     legacy_keys = {source.scraper for _, source in sources.items()}
+    registry = application_connector_registry()
 
     assert legacy_keys <= RUNTIME_ADAPTERS.keys()
     assert all(
@@ -39,17 +44,30 @@ def test_every_checked_in_legacy_scraper_has_runtime_canary_and_rollback_key() -
         examples = [source for _, source in sources.items() if source.scraper == key]
         assert examples
         plan = runtime_plan(examples[0])
+        capabilities = scrapers.adapter_capabilities(key)
+        assert capabilities.canary_adapter is not None
         assert key in scrapers.REGISTRY, f"{key} lost its rollback selector"
-        assert plan.legacy_scraper_adapter != key
-        assert plan.legacy_scraper_adapter in scrapers.REGISTRY
+        assert capabilities.canary_adapter != key
+        assert capabilities.canary_adapter in scrapers.REGISTRY
         library_alias = scrapers.library_canary_alias(key)
-        assert library_alias == f"library_{plan.legacy_scraper_adapter}"
+        assert library_alias == f"library_{capabilities.canary_adapter}"
         assert scrapers.LIBRARY_CANARY_SCRAPERS[library_alias] == key
         assert scrapers.REGISTRY[library_alias] == (
             ".library_connector:LibraryConnectorScraper"
         )
-        assert plan.connector_version
-        assert plan.partitions or plan.dynamic_partitions
+        assert plan.connector in registry.names()
+        assert registry.connector_version(plan.connector)
+
+    for source_id, source in sources.items():
+        plan = runtime_plan(source)
+        definition = source_definition(source_id, source, connector_plan=plan)
+        connector = registry.build(
+            definition.connector,
+            transport=FakeTransport(),
+            options=definition.connector_options,
+            context=ConnectorContext(),
+        )
+        assert connector.name == definition.connector == plan.connector
 
 
 class StreamingTransport:

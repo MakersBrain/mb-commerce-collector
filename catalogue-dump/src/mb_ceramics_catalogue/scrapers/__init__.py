@@ -48,6 +48,11 @@ LIBRARY_CANARY_SCRAPERS: dict[str, str] = {
     for scraper, capabilities in ADAPTER_CAPABILITIES.items()
     if capabilities.canary_adapter is not None
 }
+CONNECTOR_CANARY_SCRAPERS: dict[str, str] = {
+    capabilities.canary_adapter: scraper
+    for scraper, capabilities in ADAPTER_CAPABILITIES.items()
+    if capabilities.canary_adapter is not None
+}
 _LIBRARY_CONNECTOR_SCRAPER = ".library_connector:LibraryConnectorScraper"
 
 #: scraper name -> "module:class", imported on demand.
@@ -93,13 +98,15 @@ REGISTRY: dict[str, str] = {
     "ceramicolours_connector": ".bespoke_connectors:CeramicoloursConnectorScraper",
     "keramik_kraft": ".keramik_kraft:KeramikKraftScraper",
     "keramik_kraft_connector": ".bespoke_connectors:KeramikKraftConnectorScraper",
-    "shopware_connector": ".specialized_connectors:ShopwareConnectorScraper",
-    "sumup_connector": ".specialized_connectors:SumUpConnectorScraper",
-    "starweb_connector": ".specialized_connectors:StarwebConnectorScraper",
-    "nitrosell_connector": ".specialized_connectors:NitroSellConnectorScraper",
+    # These former connector-specific shells are now compatibility aliases for
+    # the same registry/runtime/projection composition as local library canaries.
+    "shopware_connector": _LIBRARY_CONNECTOR_SCRAPER,
+    "sumup_connector": _LIBRARY_CONNECTOR_SCRAPER,
+    "starweb_connector": _LIBRARY_CONNECTOR_SCRAPER,
+    "nitrosell_connector": _LIBRARY_CONNECTOR_SCRAPER,
     # Local dump/probe canaries share one registry/runtime/projection shell.
-    # Connector-specific compatibility shells remain available for parity and
-    # rollback tests but are no longer the local canary composition root.
+    # Generated aliases remain available for parity while stable unsuffixed
+    # scraper keys retain the independent rollback implementations.
     **dict.fromkeys(LIBRARY_CANARY_SCRAPERS, _LIBRARY_CONNECTOR_SCRAPER),
 }
 

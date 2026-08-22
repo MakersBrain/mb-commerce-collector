@@ -5,6 +5,13 @@ from pathlib import Path
 
 CONNECTORS = Path(__file__).parents[1] / "src" / "mb_ceramics_catalogue" / "connectors"
 TRANSPORTS = Path(__file__).parents[1] / "src" / "mb_ceramics_catalogue" / "transports"
+RUNTIME_PLAN = (
+    Path(__file__).parents[1]
+    / "src"
+    / "mb_ceramics_catalogue"
+    / "ops"
+    / "connector_adapters.py"
+)
 FORBIDDEN_PREFIXES = (
     "mb_ceramics_catalogue.scrapers",
     "mb_ceramics_catalogue.datasets",
@@ -71,3 +78,37 @@ def test_transports_do_not_import_concrete_higher_layers() -> None:
                         f"{path.name}:{getattr(node, 'lineno', 0)}: {module}"
                     )
     assert violations == []
+
+
+def test_runtime_plan_remains_data_only() -> None:
+    tree = ast.parse(RUNTIME_PLAN.read_text(encoding="utf-8"), filename=str(RUNTIME_PLAN))
+    forbidden = {
+        "mb_ceramics_catalogue.connectors",
+        "mb_ceramics_catalogue.pipeline",
+    }
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules = tuple(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            modules = (node.module,)
+        else:
+            modules = ()
+        for module in modules:
+            if any(module == prefix or module.startswith(prefix + ".") for prefix in forbidden):
+                violations.append(f"{getattr(node, 'lineno', 0)}: {module}")
+
+    plan = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "ConnectorRuntimePlan"
+    )
+    declared_fields = {
+        node.target.id
+        for node in plan.body
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+    }
+    assert violations == []
+    assert declared_fields.isdisjoint(
+        {"build", "connector_version", "partitions", "legacy_scraper_adapter"}
+    )

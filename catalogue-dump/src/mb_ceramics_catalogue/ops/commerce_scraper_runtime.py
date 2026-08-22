@@ -37,7 +37,7 @@ from mb_ceramics_catalogue.connectors import RefreshMode as CatalogueRefreshMode
 from mb_ceramics_catalogue.datasets import ProjectionContext, built_in_registry
 from mb_ceramics_catalogue.observability import logging as obs
 from mb_ceramics_catalogue.observability import metrics, tracing
-from mb_ceramics_catalogue.scrapers import library_canary_alias
+from mb_ceramics_catalogue.scrapers import LIBRARY_CANARY_SCRAPERS, library_canary_alias
 from mb_ceramics_catalogue.scrapers import record as record_module
 from mb_ceramics_catalogue.scrapers.base import (
     USER_AGENT,
@@ -147,8 +147,10 @@ def local_canary_source_config(config: SourceConfig) -> SourceConfig:
     if route is None:
         raise ValueError(f"connector_canary has no approved native route for {config.scraper!r}")
     adapter = library_canary_alias(config.scraper)
-    if adapter != f"library_{plan.legacy_scraper_adapter}":
-        raise ValueError(f"library canary alias metadata does not match runtime plan for {config.scraper!r}")
+    if LIBRARY_CANARY_SCRAPERS.get(adapter) != config.scraper:
+        raise ValueError(
+            f"library canary alias metadata does not match runtime plan for {config.scraper!r}"
+        )
     return config.model_copy(update={"scraper": adapter})
 
 
@@ -497,7 +499,7 @@ class LocalLibraryScraper:
         self._cancel_requested = False
         self._plan = runtime_plan(source)
         self.method = self._plan.extraction_method
-        self.platform = self._plan.name
+        self.platform = self._plan.connector
 
     def cancel(self) -> None:
         self._cancel_requested = True

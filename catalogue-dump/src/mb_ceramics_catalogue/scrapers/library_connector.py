@@ -29,7 +29,7 @@ from mb_ceramics_catalogue.ops.connector_adapters import (
     runtime_plan,
 )
 
-from . import LIBRARY_CANARY_SCRAPERS
+from . import CONNECTOR_CANARY_SCRAPERS, LIBRARY_CANARY_SCRAPERS
 from .base import Scraper
 
 
@@ -139,9 +139,8 @@ class LibraryConnectorScraper(Scraper):
 
     def __init__(self, name: str, config: dict[str, Any], fetcher: Any) -> None:
         alias = str(config.get("scraper", ""))
-        try:
-            original = LIBRARY_CANARY_SCRAPERS[alias]
-        except KeyError:
+        original = LIBRARY_CANARY_SCRAPERS.get(alias) or CONNECTOR_CANARY_SCRAPERS.get(alias)
+        if original is None:
             raise ValueError("unsupported local library connector alias") from None
         source = SourceConfig.model_validate({**config, "scraper": original})
         plan = runtime_plan(source)

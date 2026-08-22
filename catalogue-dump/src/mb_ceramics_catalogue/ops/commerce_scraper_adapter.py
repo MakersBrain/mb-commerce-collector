@@ -42,57 +42,13 @@ def source_definition(
 ) -> SourceDefinition:
     """Preserve every connector option through the existing validated projector."""
     plan = connector_plan or runtime_plan(config)
-    connector = plan.name
-    connector_options = dict(plan.options)
-    if connector == "pagecommerce":
-        connector = "generic-pages"
-        connector_options = _generic_pages_options(connector_options)
-    elif connector == "keramik_kraft":
-        connector = "keramik-kraft"
     return SourceDefinition(
         id=source_id,
         label=config.label,
         base_url=config.url,
-        connector=connector,
-        connector_options=connector_options,
+        connector=plan.connector,
+        connector_options=dict(plan.connector_options),
     )
-
-
-def _generic_pages_options(legacy: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    """Translate the flat pagecrawl contract to the library's layered schema.
-
-    Keeping this compatibility boundary explicit prevents catalogue policy from
-    leaking into the reusable connector while legacy sources are migrated.
-    """
-    discovery_keys = (
-        "sitemaps",
-        "use_advertised_sitemaps",
-        "category_urls",
-        "product_pattern",
-        "pagination_patterns",
-        "card_links_only",
-        "category_page_limit",
-    )
-    connector_keys = (
-        "currency",
-        "brand",
-        "vat_status",
-        "vat_rate",
-        "stock_from_quantity_maximum",
-        "page_limit",
-        "render",
-    )
-    discovery = {key: legacy[key] for key in discovery_keys if key in legacy}
-    # These controls existed in the legacy connector model but were not
-    # configurable in sources.json, so preserve its established defaults.
-    discovery["sitemap_limit"] = 100
-    projected = {key: legacy[key] for key in connector_keys if key in legacy}
-    projected.update(
-        discovery=discovery,
-        parsers=["jsonld", "microdata", "opengraph"],
-        browser_zero_gain_limit=10,
-    )
-    return projected
 
 
 def decode_legacy_source_checkpoint(

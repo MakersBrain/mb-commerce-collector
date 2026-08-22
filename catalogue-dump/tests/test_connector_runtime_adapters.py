@@ -1,140 +1,77 @@
 from __future__ import annotations
 
-import gzip
-
-import httpx
 import pytest
-from mb_commerce_scraper.transports import ResponseBodyTooLarge
+from mb_commerce_scraper.connectors import ConnectorContext
+from mb_commerce_scraper.testing import FakeTransport
 
 from mb_ceramics_catalogue.config.sources import SourceConfig
-from mb_ceramics_catalogue.connectors import (
-    BigCommerceConnector,
-    NitroSellConnector,
-    ShopifyConnector,
-    ShopwareConnector,
-    StarwebConnector,
-    SumUpConnector,
-    WixConnector,
-    WooCommerceConnector,
-)
+from mb_ceramics_catalogue.ops.commerce_scraper_adapter import source_definition
+from mb_ceramics_catalogue.ops.commerce_scraper_runtime import application_connector_registry
 from mb_ceramics_catalogue.ops.connector_adapters import (
     RUNTIME_ADAPTERS,
-    BigCommerceFetcherTransport,
     ConnectorRuntimePlan,
     LibraryCanaryRoute,
-    WixFetcherTransport,
     library_canary_route,
     runtime_plan,
 )
-from mb_ceramics_catalogue.pipeline.budget import RequestBudget, RequestCost
-
-
-class Fetcher:
-    async def response(self, url, **kwargs):
-        del kwargs
-        return httpx.Response(200, content=gzip.compress(b"<urlset/>"), request=httpx.Request("GET", url))
 
 
 @pytest.mark.parametrize(
-    ("scraper", "fields", "connector_type", "partitions"),
+    ("scraper", "fields", "connector_name", "partitions"),
     [
-        ("shopify", {"collections": ["clay"]}, ShopifyConnector, ("clay",)),
+        ("shopify", {"collections": ["clay"]}, "shopify", ("clay",)),
         (
             "woocommerce",
             {"store_categories": ["glazes"], "variation_page_limit": 17},
-            WooCommerceConnector,
+            "woocommerce",
             ("glazes",),
         ),
-        ("bigcommerce", {"category_url": "https://shop.test/token"}, BigCommerceConnector, ("main",)),
-        ("wix", {"sitemaps": ["https://shop.test/sitemap.xml"]}, WixConnector, ("main",)),
+        ("bigcommerce", {"category_url": "https://shop.test/token"}, "bigcommerce", ()),
+        ("wix", {"sitemaps": ["https://shop.test/sitemap.xml"]}, "wix", ()),
         (
             "shopware",
             {"category_urls": ["https://shop.test/clay"], "use_advertised_sitemaps": False},
-            ShopwareConnector, ("category",),
+            "shopware", ("category",),
         ),
         (
             "starweb",
             {"category_urls": ["https://shop.test/clay"], "use_advertised_sitemaps": False},
-            StarwebConnector, ("category",),
+            "starweb", ("category",),
         ),
         (
             "nitrosell",
             {"category_urls": ["https://shop.test/clay"], "use_advertised_sitemaps": False},
-            NitroSellConnector, ("category",),
+            "nitrosell", ("category",),
         ),
-        ("sumup", {}, SumUpConnector, ("sitemap",)),
+        ("sumup", {}, "sumup", ("sitemap",)),
     ],
 )
-def test_runtime_registry_constructs_every_connector(
-    scraper, fields, connector_type, partitions
+def test_runtime_registry_projects_native_connector_metadata(
+    scraper, fields, connector_name, partitions
 ):
     config = SourceConfig(
         label="Shop", url="https://shop.test/", scraper=scraper, **fields
     )
     plan = runtime_plan(config)
-    connector = plan.build(Fetcher(), None)
+    definition = source_definition("shop", config, connector_plan=plan)
+    registry = application_connector_registry()
+    connector = registry.build(
+        definition.connector,
+        transport=FakeTransport(),
+        options=definition.connector_options,
+        context=ConnectorContext(),
+    )
 
     assert set(RUNTIME_ADAPTERS) >= {
         "shopify", "woocommerce", "bigcommerce", "wix",
         "shopware", "starweb", "nitrosell", "sumup",
     }
-    assert plan.name == scraper
-    assert plan.connector_version == connector.version
-    assert plan.partitions == partitions
-    assert plan.legacy_scraper_adapter == f"{scraper}_connector"
-    assert isinstance(connector, connector_type)
-    assert plan.options
-
-
-@pytest.mark.asyncio
-async def test_wix_transport_preserves_compressed_sitemap_decoding():
-    document = await WixFetcherTransport(Fetcher()).document(
-        "https://shop.test/sitemap.xml.gz", accept="application/xml"
-    )
-    assert document == "<urlset/>"
-
-
-@pytest.mark.asyncio
-async def test_wix_transport_bounds_compressed_and_decompressed_documents():
-    class LargeCompressedFetcher:
-        async def response(self, url, **kwargs):
-            del kwargs
-            return httpx.Response(
-                200,
-                content=gzip.compress(b"x" * 128),
-                request=httpx.Request("GET", url),
-            )
-
-    with pytest.raises(ResponseBodyTooLarge, match="32-byte retention limit"):
-        await WixFetcherTransport(
-            LargeCompressedFetcher(),
-            maximum_response_bytes=32,
-        ).document("https://shop.test/sitemap.xml.gz", accept="application/xml")
-
-
-@pytest.mark.asyncio
-async def test_bigcommerce_json_failure_does_not_retain_raw_document():
-    secret = "json-secret-sentinel"
-
-    class InvalidJsonFetcher:
-        async def response(self, url, **kwargs):
-            del kwargs
-            return httpx.Response(
-                200,
-                content=f'{{"token":"{secret}"'.encode(),
-                request=httpx.Request("POST", url),
-            )
-
-    with pytest.raises(ValueError, match="not valid JSON") as caught:
-        await BigCommerceFetcherTransport(InvalidJsonFetcher()).request_json(
-            "https://shop.test/graphql",
-            headers={},
-            body={},
-        )
-
-    assert secret not in str(caught.value)
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
+    assert definition.connector == plan.connector == connector_name
+    assert connector.name == connector_name
+    assert connector.version == registry.connector_version(connector_name)
+    assert plan.connector_options
+    assert plan.library_canary is not None
+    assert plan.library_canary.request_partitions == partitions
 
 
 def test_unknown_runtime_adapter_fails_with_registered_names():
@@ -147,16 +84,6 @@ def test_unknown_runtime_adapter_fails_with_registered_names():
 def test_every_registered_projector_returns_a_complete_plan(scraper):
     config = SourceConfig(label="Shop", url="https://shop.test/", scraper=scraper)
     assert isinstance(runtime_plan(config), ConnectorRuntimePlan)
-
-
-@pytest.mark.parametrize("scraper", sorted(RUNTIME_ADAPTERS))
-def test_every_runtime_forwards_the_shared_request_budget(scraper):
-    config = SourceConfig(label="Shop", url="https://shop.test/", scraper=scraper)
-    budget = RequestBudget(RequestCost(http_requests=10, browser_requests=10))
-
-    connector = runtime_plan(config).build(Fetcher(), budget)
-
-    assert connector._budget.budget is budget
 
 
 def test_library_canary_routes_are_explicit_application_metadata() -> None:
