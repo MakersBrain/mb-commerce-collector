@@ -157,7 +157,11 @@ openapi-check:  ## Fail if a generated contract has drifted from the code
 	$(RUNC) catalogue-ops-types --check
 
 .PHONY: check
-check: lint typecheck test openapi-check scraper-build scraper-contracts  ## What every change has to pass
+check: lint typecheck test openapi-check scraper-build scraper-contracts catalogue-artifact-contracts  ## What every change has to pass
+
+.PHONY: catalogue-artifact-contracts
+catalogue-artifact-contracts:  ## Build both Python wheels and verify installed catalogue composition
+	$(RUN) python scripts/verify_installed_composition.py
 
 .PHONY: scraper-lint scraper-typecheck scraper-test scraper-schemas scraper-build scraper-contracts scraper-example scraper-release-check scraper-check
 scraper-lint:  ## Lint the reusable scraper distribution

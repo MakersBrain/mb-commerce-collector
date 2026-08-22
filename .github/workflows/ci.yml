@@ -71,6 +71,8 @@ jobs:
       - run: make test
       - name: Build and verify the reusable scraper distribution
         run: make scraper-build scraper-contracts
+      - name: Verify installed catalogue and scraper composition
+        run: make catalogue-artifact-contracts
       # Never hand-edit a generated OpenAPI document. This is what stops
       # "regenerate it later" from becoming "the spec is six months old".
       - name: Check the generated contracts have not drifted
