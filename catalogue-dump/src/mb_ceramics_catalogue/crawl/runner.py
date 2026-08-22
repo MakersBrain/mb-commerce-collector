@@ -31,7 +31,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from mb_ceramics_catalogue import scrapers
 from mb_ceramics_catalogue.config.settings import CrawlParams
@@ -46,6 +46,19 @@ from mb_ceramics_catalogue.scrapers.base import BrowserUnavailable
 from mb_ceramics_catalogue.scrapers.record import coverage
 
 LOGGER = obs.get_logger("catalogue.runner")
+
+
+class RunnableScraper(Protocol):
+    """The small scraper surface required by crawl orchestration."""
+
+    method: str
+    result: Any
+
+    async def run(self, limit: int | None = None) -> Any: ...
+
+
+ScraperFactory = Callable[[str, str, dict[str, Any], Any], RunnableScraper]
+"""Construct one scraper without owning its session or orchestration."""
 
 
 @dataclass
@@ -210,10 +223,12 @@ def summarise(
 async def run_source(
     name: str,
     config: SourceConfig,
-    session: CrawlSession,
+    session: CrawlSession | None,
     params: CrawlParams,
     progress: Progress,
     output: Path | None = None,
+    *,
+    scraper_factory: ScraperFactory | None = None,
 ) -> SourceOutcome:
     """Collect one source, write it, and report it. The unit the worker runs.
 
@@ -226,7 +241,17 @@ async def run_source(
     with obs.bound(source=name, scraper=config.scraper), tracing.span(
         "job", **{"catalogue.source": name, "catalogue.scraper": config.scraper}
     ):
-        scraper = scrapers.build(config.scraper, name, scraper_config, session.fetcher)
+        factory: ScraperFactory
+        fetcher: Any
+        if scraper_factory is None:
+            if session is None:
+                raise ValueError("default scraper factory requires a crawl session")
+            factory = scrapers.build
+            fetcher = session.fetcher
+        else:
+            factory = scraper_factory
+            fetcher = session.fetcher if session is not None else None
+        scraper = factory(config.scraper, name, scraper_config, fetcher)
         await progress.started(name, scraper.result, config.scraper, scraper.method)
         started = time.monotonic()
 
@@ -337,16 +362,21 @@ class CrawlRunner:
     def __init__(
         self,
         sources: SourcesFile,
-        session: CrawlSession,
+        session: CrawlSession | None,
         params: CrawlParams,
         progress: Progress,
         output: Path | None = None,
+        *,
+        scraper_factory: ScraperFactory | None = None,
     ) -> None:
+        if session is None and scraper_factory is None:
+            raise ValueError("default scraper factory requires a crawl session")
         self.sources = sources
         self.session = session
         self.params = params
         self.progress = progress
         self.output = output
+        self.scraper_factory = scraper_factory
         self.tasks: dict[str, asyncio.Task[SourceOutcome]] = {}
         self.stopping = False
         self.interrupted = False
@@ -417,7 +447,13 @@ class CrawlRunner:
                     # a source that failed.
                     raise asyncio.CancelledError
                 return await run_source(
-                    name, self.sources[name], self.session, self.params, self.progress, self.output
+                    name,
+                    self.sources[name],
+                    self.session,
+                    self.params,
+                    self.progress,
+                    self.output,
+                    scraper_factory=self.scraper_factory,
                 )
 
         try:
@@ -453,14 +489,23 @@ class CrawlRunner:
 async def crawl(
     sources: SourcesFile,
     selected: Sequence[str],
-    session: CrawlSession,
+    session: CrawlSession | None,
     params: CrawlParams,
     progress: Progress,
     output: Path | None = None,
     on_runner: Callable[[CrawlRunner], None] | None = None,
+    *,
+    scraper_factory: ScraperFactory | None = None,
 ) -> tuple[list[SourceOutcome], bool]:
     """Run a crawl end to end. Returns the outcomes and whether it was cut short."""
-    runner = CrawlRunner(sources, session, params, progress, output)
+    runner = CrawlRunner(
+        sources,
+        session,
+        params,
+        progress,
+        output,
+        scraper_factory=scraper_factory,
+    )
     runner.install_signal_handlers()
     if on_runner is not None:
         on_runner(runner)

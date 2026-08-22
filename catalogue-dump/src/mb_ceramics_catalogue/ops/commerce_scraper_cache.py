@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import time
+from dataclasses import dataclass
 
 from mb_commerce_scraper.transports import (
     BrowserHint,
@@ -18,11 +19,46 @@ from mb_commerce_scraper.transports import (
 from mb_ceramics_catalogue.scrapers.cache import CachedResponse, ResponseCache
 
 
+@dataclass(frozen=True, slots=True)
+class CatalogueCacheStats:
+    """Immutable counters retained after one collection closes."""
+
+    hits: int = 0
+    misses: int = 0
+    writes: int = 0
+    bytes_read: int = 0
+
+    def __add__(self, other: CatalogueCacheStats) -> CatalogueCacheStats:
+        return CatalogueCacheStats(
+            hits=self.hits + other.hits,
+            misses=self.misses + other.misses,
+            writes=self.writes + other.writes,
+            bytes_read=self.bytes_read + other.bytes_read,
+        )
+
+    def summary(self, mode: str) -> str:
+        total = self.hits + self.misses
+        share = self.hits / total * 100 if total else 0.0
+        return (
+            f"cache mode={mode} hits={self.hits} ({share:.0f}%) "
+            f"misses={self.misses} stored={self.writes}"
+        )
+
+
 class CatalogueResponseCache:
     """Preserve legacy cache keys and replay semantics for native connectors."""
 
     def __init__(self, cache: ResponseCache) -> None:
         self._cache = cache
+
+    def stats(self) -> CatalogueCacheStats:
+        """Snapshot counters without exposing the mutable legacy archive."""
+        return CatalogueCacheStats(
+            hits=self._cache.hits,
+            misses=self._cache.misses,
+            writes=self._cache.writes,
+            bytes_read=self._cache.bytes_read,
+        )
 
     async def get(self, request: TransportRequest) -> TransportResponse | None:
         if request.cache is not CachePolicy.DEFAULT:

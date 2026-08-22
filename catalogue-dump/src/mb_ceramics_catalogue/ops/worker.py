@@ -88,9 +88,12 @@ from mb_ceramics_catalogue.ops.commerce_scraper_proxy_runtime import (
     resolve_native_proxy_runtime,
 )
 from mb_ceramics_catalogue.ops.commerce_scraper_runtime import (
-    application_connector_registry,
+    BorrowedBrowserBinding,
+    CatalogueCachePolicy,
+    CatalogueCommerceRuntime,
+    NativeCollectionSpec,
+    NativeRouteBindings,
     fetcher_transport_totals,
-    open_native_library_pipeline_connector,
 )
 from mb_ceramics_catalogue.ops.connector_adapters import (
     library_canary_route,
@@ -206,6 +209,10 @@ class Worker:
         self.pool = pool
         self.sources = sources
         self.settings = settings
+        # The connector registry and transport factories are application
+        # composition. Keep one immutable root for the worker process while
+        # every opened connector and route remains collection-scoped.
+        self._commerce_runtime = CatalogueCommerceRuntime()
         self.state = WorkerState(capabilities=capabilities or [])
         self.once = once
         self._task: asyncio.Task[Any] | None = None
@@ -848,7 +855,7 @@ class Worker:
     async def _crawl_connector_canary(self, job: queue.ClaimedJob, params: CrawlParams, config: Any) -> None:
         """Run a registered reusable connector only when explicitly selected."""
         adapter = runtime_plan(config)
-        library_registry = application_connector_registry()
+        library_registry = self._commerce_runtime.registry
 
         registry = built_in_registry()
         current_ceramics = (
@@ -993,19 +1000,33 @@ class Worker:
                         params,
                         native_proxy is not None,
                     )
-                async with open_native_library_pipeline_connector(
-                    registry=library_registry,
+                browser_binding = (
+                    BorrowedBrowserBinding(browser_backend, browser_job)
+                    if browser_backend is not None and browser_job is not None
+                    else None
+                )
+                collection = NativeCollectionSpec(
                     configuration=configuration,
                     request=library_request,
                     checkpoint=library_checkpoint,
-                    params=params,
-                    cache_directory=self.settings.cache_dir,
-                    proxy=native_proxy,
-                    browser_backend=browser_backend,
-                    browser_job=browser_job,
+                    cache=CatalogueCachePolicy(
+                        directory=self.settings.cache_dir,
+                        mode=params.cache_mode,
+                        maximum_age_seconds=params.cache_max_age_seconds,
+                        stale_on_error=params.stale_on_error,
+                    ),
                     cancelled=self._cancels[job.id].is_set,
                     collection_id=str(lineage),
-                ) as (native_connector, telemetry):
+                )
+                routes = NativeRouteBindings(
+                    proxy=native_proxy,
+                    browser=browser_binding,
+                )
+                async with self._commerce_runtime.open_collection(
+                    collection,
+                    routes,
+                ) as opened:
+                    native_connector = opened.connector
                     committer = ops_outputs.PostgresPageCommitter(
                         connection,
                         job.id,
@@ -1029,7 +1050,7 @@ class Worker:
                             projection_configuration=projection_configuration,
                             initial_states=initial_states,
                         )
-                transport_totals = telemetry.transport_totals()
+                transport_totals = opened.telemetry.transport_totals()
                 traffic_requests = transport_totals["physical_requests"]
                 rendered_pages = transport_totals["browser_requests"]
 

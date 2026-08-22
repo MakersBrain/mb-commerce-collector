@@ -97,6 +97,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `b49fd50` — add proxy runtime and WooCommerce connector.
 - `7adda2b` — extract remaining framework connectors.
 - `d79cbcb` — complete native connector integration and filesystem caching.
+- `02de77b` — unify proxy policy and end-to-end request tracing.
 
 ### Verification at last review
 
@@ -127,8 +128,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
     country/provider constraints are checked before secret or database access.
 - [x] Full catalogue verification:
   - Ruff passed.
-  - Mypy passed for 226 source and test files.
-  - 815 tests passed, 6 skipped, and 158 deselected in the latest fast-suite
+  - Mypy passed for 228 source and test files.
+  - 828 tests passed, 6 skipped, and 158 deselected in the latest fast-suite
     run; the wider repository fast gate also passed 32 control-plane tests, 14
     service tests, and 2 explorer tests.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
@@ -817,20 +818,34 @@ canaries have not run.
     Middleware request events include purpose, named priority, required/browser
     policy, byte estimate, and stable browser action ID; scripts and payloads
     remain excluded.
-  - Local CLI/probe compatibility requests, connector events, lifecycle/page
+  - Local CLI/probe native requests, connector events, lifecycle/page
     events, and ceramics projection now share one `local:<uuid>` collection ID.
-    The legacy bridge exposes the same safe policy fields and browser action ID
-    while omitting scripts, selectors, headers, and payloads.
-- [~] Make worker, CLI, and probes share one composition root.
-  - Worker construction, local dump, `catalogue-probe --pipeline
-    connector_canary`, and the Shopify parity harness share the application
-    registry, canary selector, source-policy layering, and ceramics projection
-    builder. The worker uses the native middleware/runtime composition; local
-    tools and replay parity intentionally remain on the application-owned
-    legacy Fetcher bridge during migration. All fourteen explicitly approved
-    local aliases select one `LibraryConnectorScraper` compatibility shell; the
-    older connector-specific shells remain registered only for parity and
-    rollback. A single transport composition root remains incomplete.
+    The retained parity bridge exposes the same safe policy fields and browser
+    action ID while omitting scripts, selectors, headers, and payloads.
+- [x] Make worker, CLI, and probes share one composition root.
+  - A typed application-owned `CatalogueCommerceRuntime` now owns the connector
+    registry and validates source, request, and proxy-route identity before it
+    constructs collection resources. The worker retains one process-scoped
+    root and opens collection-scoped cache, transport, browser, connector, and
+    telemetry lifecycles through it. The former native opener is only a
+    compatibility wrapper around that root, eliminating its duplicate
+    transport construction path.
+  - Focused contract tests cover fail-fast identity validation and the real
+    connector → runtime → middleware → fake transport intercall, including
+    collection correlation and exactly-once scraper lifecycle cleanup.
+  - Worker construction, local dump, and `catalogue-probe --pipeline
+    connector_canary` now enter the same native middleware/runtime composition.
+    The local runner injects a small runnable-scraper protocol, so canary tools
+    construct no legacy Fetcher/session and retain stable source keys. Local
+    policy is narrowed to direct-only routing, a shared lazy browser is owned
+    by the local session, and cache/transport accounting is projected back into
+    the established result contract. The legacy route and the generated canary
+    aliases remain available only for explicit rollback and parity tests.
+  - CLI routing tests fail if canary dump/probe touch legacy session or scraper
+    construction, and a reciprocal regression test proves legacy mode cannot
+    enter the native local session. Direct/cache/browser integration tests
+    cover canonical material scope, per-collection accounting, replay, and
+    exactly-once browser cleanup.
   - `connector_canary` now fails before database work when an approved native
     route or registry entry is absent and has no unreachable legacy session or
     lineage arm. The normal legacy pipeline remains intact for rollback.

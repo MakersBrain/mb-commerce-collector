@@ -44,6 +44,8 @@ class CeramicsProjectionOptions(BaseModel):
     extraction_method: str | None = None
     source_detail_level: str = "api"
     apply_scope: bool = True
+    material_categories: tuple[str, ...] = ()
+    excluded_categories: tuple[str, ...] = ()
     source_policy: Literal["sio2"] | None = None
     collection_mode: Literal["full", "price"] = "full"
     offer_role_priority: tuple[Literal["sale", "regular", "member", "quantity_tier"], ...] = (
@@ -109,11 +111,65 @@ class _CeramicsProjector:
                 if policy_row is None:
                     continue
                 row = policy_row
-            if not legacy_record.is_valid(row) or not legacy_record.in_scope(
-                row, strict=options.apply_scope and options.scope == "materials"
-            ):
+            if not legacy_record.is_valid(row):
+                continue
+            if not self._in_scope(entity, row, options):
                 continue
             yield self.record_model.model_validate(row)
+
+    @staticmethod
+    def _in_scope(
+        entity: CommerceProductSnapshot,
+        row: dict[str, object],
+        options: CeramicsProjectionOptions,
+    ) -> bool:
+        """Preserve the legacy category overrides at the projection boundary."""
+        if not options.apply_scope or options.scope != "materials":
+            return True
+
+        raw_categories = row.get("category_path")
+        categories = " ".join(
+            str(value)
+            for value in (
+                raw_categories if isinstance(raw_categories, list | tuple) else ()
+            )
+        )
+        excluded_haystack = domain.fold(
+            " ".join(
+                domain.clean(value)
+                for value in (categories, row.get("name"))
+                if value
+            )
+        )
+        if any(
+            domain.fold(category) in excluded_haystack
+            for category in options.excluded_categories
+        ):
+            return False
+
+        if options.material_categories:
+            extensions = entity.platform_extensions
+            raw_tags = extensions.get("tags") or ()
+            tags = raw_tags if isinstance(raw_tags, list | tuple) else (raw_tags,)
+            allowed_haystack = domain.fold(
+                " ".join(
+                    domain.clean(value)
+                    for value in (
+                        *(category.name for category in entity.categories),
+                        *(str(tag) for tag in tags),
+                        extensions.get("handle"),
+                    )
+                    if value
+                )
+            )
+            if not any(
+                domain.fold(category) in allowed_haystack
+                for category in options.material_categories
+            ):
+                return False
+            return not domain.looks_non_material(row.get("name"))
+
+        return legacy_record.in_scope(row, strict=True)
 
     def _build(
         self,

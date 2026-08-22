@@ -205,6 +205,8 @@ def ceramics_projection_configuration(
         "extraction_method": plan.extraction_method,
         "source_detail_level": plan.source_detail_level,
         "apply_scope": True,
+        "material_categories": list(config.material_categories or ()),
+        "excluded_categories": list(config.excluded_categories or ()),
         "collection_mode": collection_mode,
         **plan.ceramics_projection,
     }

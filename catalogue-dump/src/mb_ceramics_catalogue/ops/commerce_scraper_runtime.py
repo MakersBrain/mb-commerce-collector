@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -16,6 +17,9 @@ from mb_commerce_scraper import (
     CollectionRequest,
     ConnectorCheckpoint,
     ConnectorRegistry,
+    ProxyMode,
+    RefreshMode,
+    SnapshotField,
     SourceDefinition,
 )
 from mb_commerce_scraper import ConnectorContext as LibraryConnectorContext
@@ -24,22 +28,36 @@ from mb_commerce_scraper.transports import RobotsFetchFailurePolicy, safe_teleme
 from mb_commerce_scraper.transports.base import TelemetryHooks
 from pydantic import JsonValue
 
-from mb_ceramics_catalogue.config.settings import CrawlParams
+from mb_ceramics_catalogue.config.settings import CacheMode, CrawlParams
 from mb_ceramics_catalogue.config.sources import SourceConfig
+from mb_ceramics_catalogue.connectors import (
+    CollectionRequest as CatalogueCollectionRequest,
+)
+from mb_ceramics_catalogue.connectors import RefreshMode as CatalogueRefreshMode
+from mb_ceramics_catalogue.datasets import ProjectionContext, built_in_registry
 from mb_ceramics_catalogue.observability import logging as obs
 from mb_ceramics_catalogue.observability import metrics, tracing
 from mb_ceramics_catalogue.scrapers import library_canary_alias
-from mb_ceramics_catalogue.scrapers.base import USER_AGENT
+from mb_ceramics_catalogue.scrapers import record as record_module
+from mb_ceramics_catalogue.scrapers.base import (
+    USER_AGENT,
+    BrowserRenderer,
+    ScrapeResult,
+)
 from mb_ceramics_catalogue.scrapers.cache import ResponseCache as DiskResponseCache
 from mb_ceramics_catalogue.transports.browser import BrowserBackend, BrowserJobContext
 
-from .commerce_scraper_adapter import CatalogueSourceConfig, source_definition
+from .commerce_scraper_adapter import (
+    CatalogueSourceConfig,
+    layered_source_config,
+    source_definition,
+)
 from .commerce_scraper_axner import AxnerFactory
 from .commerce_scraper_browser import (
     BorrowedBrowserTransport,
     CamoufoxProxyBrowserTransportFactory,
 )
-from .commerce_scraper_cache import CatalogueResponseCache
+from .commerce_scraper_cache import CatalogueCacheStats, CatalogueResponseCache
 from .commerce_scraper_ceramicolours import CeramicoloursFactory
 from .commerce_scraper_keramik_kraft import KeramikKraftFactory
 from .commerce_scraper_pipeline import LibraryPipelineConnector
@@ -55,7 +73,7 @@ class CatalogueCachePolicy:
     """Collection cache inputs without coupling composition to CLI parameters."""
 
     directory: Path
-    mode: str
+    mode: CacheMode
     maximum_age_seconds: float | None
     stale_on_error: bool = False
 
@@ -88,6 +106,7 @@ class NativeRouteBindings:
 class OpenCatalogueCollection:
     connector: LibraryPipelineConnector
     telemetry: LibraryDebugTelemetry
+    cache: CatalogueResponseCache
 
 
 class _ContextualTelemetry:
@@ -115,13 +134,12 @@ def application_connector_registry() -> ConnectorRegistry:
 
 
 def local_canary_source_config(config: SourceConfig) -> SourceConfig:
-    """Select the explicit Scraper compatibility shell for local CLI tools.
+    """Select the retained legacy-Fetcher shell for parity and rollback tests.
 
-    The PostgreSQL worker enters the atomic pipeline directly. Local dump and
-    probe commands still speak ``ScrapeResult``, so they use a thin registered
-    shell. Every explicitly approved native route delegates back into this
-    module's library registry composition rather than constructing a
-    connector-specific catalogue adapter.
+    Production worker, dump, and probe canary routes enter
+    :class:`CatalogueCommerceRuntime` directly. This alias projection remains
+    temporarily available to compare that path with the former Fetcher bridge
+    without restoring connector-specific construction.
     """
     plan = runtime_plan(config)
     projected = source_definition("local-canary", config, connector_plan=plan)
@@ -152,6 +170,7 @@ class LibraryDebugTelemetry:
 
     def __init__(self) -> None:
         self._totals = dict.fromkeys(self._TOTAL_NAMES, 0)
+        self._outcomes: dict[str, int] = {}
         self._request_spans: dict[tuple[str, int], tuple[Any, Any]] = {}
 
     def emit(self, event: str, fields: dict[str, Any]) -> None:
@@ -184,6 +203,8 @@ class LibraryDebugTelemetry:
         route = fields.get("route")
         provider = fields.get("provider")
         self._totals["physical_requests"] += physical
+        outcome = self._transport_outcome(event, fields)
+        self._outcomes[outcome] = self._outcomes.get(outcome, 0) + physical
         if route == "browser":
             self._totals["browser_requests"] += physical
             self._totals["browser_tx_bytes_estimated"] += transmitted
@@ -202,6 +223,18 @@ class LibraryDebugTelemetry:
 
     def transport_totals(self) -> dict[str, int]:
         return dict(self._totals)
+
+    def outcome_counts(self) -> dict[str, int]:
+        return dict(self._outcomes)
+
+    @staticmethod
+    def _transport_outcome(event: str, fields: dict[str, Any]) -> str:
+        status = fields.get("status")
+        if event == "request.completed" and isinstance(status, int) and not isinstance(status, bool):
+            if status in {403, 429}:
+                return str(status)
+            return f"{status // 100}xx"
+        return "transport_error"
 
     @staticmethod
     def _counter(value: Any) -> int:
@@ -304,20 +337,12 @@ class CatalogueCommerceRuntime:
         source = spec.configuration.source
         request = spec.request
         if request.source_id != source.id or request.base_url != source.base_url:
-            raise ValueError(
-                "native collection request identity must match its source definition"
-            )
+            raise ValueError("native collection request identity must match its source definition")
         if source.connector not in self.registry.names():
-            raise ValueError(
-                f"native collection connector {source.connector!r} is not registered"
-            )
+            raise ValueError(f"native collection connector {source.connector!r} is not registered")
         proxy = routes.proxy
-        if proxy is not None and (
-            proxy.source_id != source.id or proxy.base_url != source.base_url
-        ):
-            raise ValueError(
-                "native proxy runtime identity must match its source definition"
-            )
+        if proxy is not None and (proxy.source_id != source.id or proxy.base_url != source.base_url):
+            raise ValueError("native proxy runtime identity must match its source definition")
 
         telemetry = LibraryDebugTelemetry()
         policy = spec.configuration.fetch
@@ -380,7 +405,306 @@ class CatalogueCommerceRuntime:
                     telemetry_context={"collection_id": spec.collection_id},
                 ),
                 telemetry=telemetry,
+                cache=cache,
             )
+
+
+class LocalCommerceSession:
+    """Native connector session for dump/probe compatibility output.
+
+    Local commands have no durable paid-proxy reservation. This boundary
+    therefore narrows every run to direct transport and never accepts a proxy
+    binding. The browser process is lazy, shared by the local run, and owned by
+    this session rather than by any individual connector.
+    """
+
+    def __init__(
+        self,
+        params: CrawlParams,
+        cache_directory: Path | None,
+        *,
+        runtime: CatalogueCommerceRuntime | None = None,
+        browser: BrowserBackend | None = None,
+    ) -> None:
+        if params.cache_mode != "off" and cache_directory is None:
+            raise ValueError("an enabled local commerce cache requires a directory")
+        self.params = params.model_copy(
+            update={"proxy_policy": "never", "proxy_max_megabytes": None}
+        )
+        self.cache_directory = cache_directory or Path(".cache")
+        self.runtime = runtime or CatalogueCommerceRuntime()
+        self.browser = browser or BrowserRenderer(True)
+        self._owns_browser = browser is None
+        self._cache_stats = CatalogueCacheStats()
+        self._closed = False
+
+    @property
+    def cache_enabled(self) -> bool:
+        return self.params.cache_mode != "off"
+
+    def cache_summary(self) -> str:
+        return self._cache_stats.summary(self.params.cache_mode)
+
+    def build(
+        self,
+        scraper: str,
+        name: str,
+        config: dict[str, Any],
+        fetcher: Any,
+    ) -> LocalLibraryScraper:
+        """Match the crawl runner's scraper factory without a legacy Fetcher."""
+        del fetcher
+        if self._closed:
+            raise RuntimeError("local commerce session is closed")
+        source = SourceConfig.model_validate(config)
+        if scraper != source.scraper:
+            raise ValueError("local native scraper identity does not match its source")
+        return LocalLibraryScraper(self, name, source)
+
+    def retain_cache_stats(self, stats: CatalogueCacheStats) -> None:
+        self._cache_stats = self._cache_stats + stats
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if not self._owns_browser:
+            return
+        try:
+            await self.browser.shutdown()
+        except Exception:
+            LOGGER.warning("local_commerce.browser_close_failed", exc_info=True)
+
+
+class LocalLibraryScraper:
+    """Project one native connector into the established local result shape."""
+
+    platform = "commerce-library"
+    method = "connector"
+
+    def __init__(
+        self,
+        session: LocalCommerceSession,
+        name: str,
+        source: SourceConfig,
+    ) -> None:
+        self.name = name
+        self.config = source.as_scraper_config()
+        self.base_url = source.url
+        self.result = ScrapeResult()
+        self._session = session
+        self._source = source
+        self._cancel_requested = False
+        self._plan = runtime_plan(source)
+        self.method = self._plan.extraction_method
+        self.platform = self._plan.name
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+
+    async def scrape(self, limit: int | None = None) -> ScrapeResult:
+        return await self._collect(limit)
+
+    async def run(self, limit: int | None = None) -> ScrapeResult:
+        try:
+            return await self._collect(limit)
+        finally:
+            merged: dict[tuple[Any, ...], dict[str, Any]] = {}
+            for row in self.result.records:
+                merged.setdefault(record_module.dedupe_key(row), row)
+            self.result.records = list(merged.values())
+
+    async def _collect(self, limit: int | None) -> ScrapeResult:
+        collection_id = f"local:{uuid4().hex}"
+        dataset_registry = built_in_registry()
+        dataset = (
+            "ceramics.catalogue_identity.v2"
+            if self._source.identity_only
+            else "ceramics.catalogue_item.v2"
+        )
+        definition = dataset_registry.get(dataset)
+        requested_fields = dataset_registry.collection_requirements((dataset,))[0]
+        configuration = layered_source_config(
+            self.name,
+            self._source,
+            run=self._session.params,
+            datasets=(dataset,),
+            connector_plan=self._plan,
+        )
+        if configuration.proxy.mode is not ProxyMode.NEVER:
+            raise ValueError("local commerce collection cannot enable a paid proxy")
+        route = library_canary_route(self._plan, configuration.source.connector)
+        if route is None:
+            raise ValueError(
+                f"connector_canary has no approved native route for {self._source.scraper!r}"
+            )
+        if configuration.source.connector not in self._session.runtime.registry.names():
+            raise ValueError(
+                f"approved native connector {configuration.source.connector!r} is not registered"
+            )
+
+        request = CatalogueCollectionRequest(
+            source_id=self.name,
+            base_url=self.base_url,
+            refresh_mode=CatalogueRefreshMode.FULL,
+            requested_fields=requested_fields,
+            result_limit=limit,
+            collections=self._plan.collections,
+            categories=self._plan.categories,
+            cancellation_check=lambda: self._cancel_requested,
+        )
+        library_request = CollectionRequest(
+            source_id=self.name,
+            base_url=self.base_url,
+            refresh_mode=RefreshMode.FULL,
+            requested_fields=frozenset(
+                SnapshotField(field.value) for field in requested_fields
+            ),
+            result_limit=limit,
+            partitions=route.request_partitions,
+        )
+        projection = ProjectionContext(
+            collection_id=collection_id,
+            source_id=self.name,
+            dataset=dataset,
+            dataset_version=definition.version,
+            projector_version=definition.projector_version,
+            configuration=configuration.projection_options,
+        )
+        unfiltered_projection = projection.model_copy(
+            update={
+                "configuration": {
+                    **configuration.projection_options,
+                    "apply_scope": False,
+                }
+            }
+        )
+        browser = (
+            BorrowedBrowserBinding(
+                self._session.browser,
+                BrowserJobContext(
+                    job_id=collection_id,
+                    logical_profile=self.name,
+                ),
+            )
+            if route.uses_browser_transport
+            and configuration.fetch.browser is not BrowserPolicy.NEVER
+            else None
+        )
+        spec = NativeCollectionSpec(
+            configuration=configuration,
+            request=library_request,
+            checkpoint=None,
+            cache=CatalogueCachePolicy(
+                directory=self._session.cache_directory,
+                mode=self._session.params.cache_mode,
+                maximum_age_seconds=self._session.params.cache_max_age_seconds,
+                stale_on_error=self._session.params.stale_on_error,
+            ),
+            cancelled=lambda: self._cancel_requested,
+            collection_id=collection_id,
+        )
+        opened: OpenCatalogueCollection | None = None
+        last_terminal = False
+        try:
+            async with self._session.runtime.open_collection(
+                spec,
+                NativeRouteBindings(proxy=None, browser=browser),
+            ) as active:
+                opened = active
+                async for page in active.connector.collect(request):
+                    self.result.discovered += page.discovered
+                    last_terminal = page.terminal
+                    if not page.enumeration_intact:
+                        self.result.truncated = True
+                    self._retain_diagnostics(page.diagnostics)
+                    for snapshot in page.items:
+                        scoped = tuple(
+                            dataset_registry.project_validated(
+                                dataset, snapshot, projection
+                            )
+                        )
+                        if configuration.projection_options.get("scope") == "materials":
+                            candidates = tuple(
+                                dataset_registry.project_validated(
+                                    dataset, snapshot, unfiltered_projection
+                                )
+                            )
+                            self.result.filtered += max(0, len(candidates) - len(scoped))
+                        self.result.records.extend(
+                            typed.model_dump(mode="json") for typed in scoped
+                        )
+        except asyncio.CancelledError:
+            self.result.truncated = True
+            raise
+        finally:
+            if opened is not None:
+                self._retain_runtime_accounting(opened)
+
+        if self._cancel_requested or not last_terminal:
+            self.result.truncated = True
+        if limit is not None and self.result.discovered >= limit:
+            self.result.truncated = True
+        if self._source.ignore_robots:
+            self.result.notes.append(
+                "robots.txt intentionally not applied for this source (operator decision)"
+            )
+        return self.result
+
+    def _retain_diagnostics(self, diagnostics: tuple[Any, ...]) -> None:
+        for diagnostic in diagnostics:
+            if diagnostic.affects_completeness:
+                self.result.truncated = True
+            if diagnostic.severity == "error":
+                self.result.errors.append(
+                    {
+                        "url": diagnostic.url or self.base_url,
+                        "error": diagnostic.message,
+                    }
+                )
+
+    def _retain_runtime_accounting(self, opened: OpenCatalogueCollection) -> None:
+        totals = opened.telemetry.transport_totals()
+        self.result.requests = totals["physical_requests"]
+        self.result.rendered_pages = totals["browser_requests"]
+        for name in (
+            "direct_requests",
+            "impersonated_requests",
+            "browser_requests",
+            "proxy_requests",
+            "http_tx_bytes_estimated",
+            "http_rx_bytes_estimated",
+            "browser_tx_bytes_estimated",
+            "browser_rx_bytes_estimated",
+        ):
+            setattr(self.result, name, totals[name])
+        self.result.outcome_counts = opened.telemetry.outcome_counts()
+        self.result.outcome_counts["browser_gain"] = self.result.browser_gain
+        self.result.outcome_counts["browser_zero_gain"] = self.result.browser_zero_gain
+        cache_stats = opened.cache.stats()
+        self.result.cache_bytes_read = cache_stats.bytes_read
+        self._session.retain_cache_stats(cache_stats)
+
+
+@asynccontextmanager
+async def open_local_commerce_session(
+    params: CrawlParams,
+    cache_directory: Path | None,
+    *,
+    runtime: CatalogueCommerceRuntime | None = None,
+    browser: BrowserBackend | None = None,
+) -> AsyncIterator[LocalCommerceSession]:
+    """Open the native local compatibility runtime and close owned resources."""
+    session = LocalCommerceSession(
+        params,
+        cache_directory,
+        runtime=runtime,
+        browser=browser,
+    )
+    try:
+        yield session
+    finally:
+        await session.aclose()
 
 
 def build_library_pipeline_connector(
@@ -439,71 +763,33 @@ async def open_native_library_pipeline_connector(
     cancelled: Callable[[], bool],
     collection_id: str,
 ) -> AsyncIterator[tuple[LibraryPipelineConnector, LibraryDebugTelemetry]]:
-    """Compose the native library stack without a legacy Fetcher/session."""
+    """Compatibility wrapper around the application composition root."""
     if (browser_backend is None) != (browser_job is None):
         raise ValueError("browser backend and job context must be supplied together")
-    telemetry = LibraryDebugTelemetry()
-    source = configuration.source
-    policy = configuration.fetch
-    direct_browser = (
-        BorrowedBrowserTransport(
-            browser_backend,
-            browser_job,
-            allowed_origins=(source.base_url,),
-        )
+    browser = (
+        BorrowedBrowserBinding(browser_backend, browser_job)
         if browser_backend is not None and browser_job is not None
         else None
     )
-    cache = CatalogueResponseCache(
-        DiskResponseCache(
-            cache_directory,
+    runtime = CatalogueCommerceRuntime(registry)
+    spec = NativeCollectionSpec(
+        configuration=configuration,
+        request=request,
+        checkpoint=checkpoint,
+        cache=CatalogueCachePolicy(
+            directory=cache_directory,
             mode=params.cache_mode,
-            max_age=params.cache_max_age_seconds,
-        )
-    )
-    scraper: CommerceScraper = build_http_scraper(
-        allowed_origins=(source.base_url,),
-        registry=registry,
-        timeout=policy.timeout_seconds,
-        fetch_policy=policy,
-        cache=cache,
-        stale_on_error=params.stale_on_error,
-        telemetry=telemetry,
-        retries=3,
-        robots_user_agent=USER_AGENT,
-        robots_transport_failure_policy=RobotsFetchFailurePolicy.ALLOW,
-        robots_server_failure_policy=RobotsFetchFailurePolicy.DENY,
-        proxy_pool=proxy.pool if proxy is not None else None,
-        proxy_policy=proxy.policy if proxy is not None else None,
-        browser_transport=direct_browser,
-        owns_browser_transport=direct_browser is not None,
-        proxy_browser_transport_factory=(
-            CamoufoxProxyBrowserTransportFactory(
-                allowed_origins=(source.base_url,),
-            )
-            if proxy is not None and policy.browser is not BrowserPolicy.NEVER
-            else None
+            maximum_age_seconds=params.cache_max_age_seconds,
+            stale_on_error=params.stale_on_error,
         ),
-        require_proxy_browser_subrequest_authorization=True,
+        cancelled=cancelled,
+        collection_id=collection_id,
     )
-    async with (
-        scraper,
-        scraper.open_connector(
-            source,
-            collection_id=collection_id,
-            cancelled=cancelled,
-        ) as connector,
-    ):
-        yield (
-            LibraryPipelineConnector(
-                connector,
-                request,
-                checkpoint,
-                telemetry=telemetry,
-                telemetry_context={"collection_id": collection_id},
-            ),
-            telemetry,
-        )
+    async with runtime.open_collection(
+        spec,
+        NativeRouteBindings(proxy=proxy, browser=browser),
+    ) as opened:
+        yield opened.connector, opened.telemetry
 
 
 async def apply_library_fetch_policy(
