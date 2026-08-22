@@ -1,17 +1,21 @@
-"""Strict, read-only contract for operator-issued Webshare gateway secrets.
+"""Strict contract and local CAS store for operator-issued Webshare secrets.
 
-This module only validates and loads credentials.  It deliberately does not
-install secrets, mutate provider state, or make a profile eligible for paid
+This module validates and atomically stores credentials.  It deliberately does
+not expose an API, mutate provider state, or make a profile eligible for paid
 traffic.
 """
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
+import secrets
 import stat
 import unicodedata
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -211,9 +215,9 @@ def _profile(profile_key: str, value: Any) -> WebshareGatewaySecret:
     )
 
 
-def load_webshare_gateway_secrets(path: Path) -> dict[ProfileKey, WebshareGatewaySecret]:
-    """Load strict v2 records indexed by ``(provider, logical_name)``."""
-    contents = _read_private_file(path)
+def _parse_webshare_gateway_secrets(
+    contents: bytes,
+) -> dict[ProfileKey, WebshareGatewaySecret]:
     try:
         raw = json.loads(
             contents.decode("utf-8"),
@@ -238,6 +242,11 @@ def load_webshare_gateway_secrets(path: Path) -> dict[ProfileKey, WebshareGatewa
     return loaded
 
 
+def load_webshare_gateway_secrets(path: Path) -> dict[ProfileKey, WebshareGatewaySecret]:
+    """Load strict v2 records indexed by ``(provider, logical_name)``."""
+    return _parse_webshare_gateway_secrets(_read_private_file(path))
+
+
 def secret_values(profiles: dict[ProfileKey, WebshareGatewaySecret]) -> set[str]:
     """Return exact credential values for immediate structured-log redaction."""
     return {
@@ -248,3 +257,197 @@ def secret_values(profiles: dict[ProfileKey, WebshareGatewaySecret]) -> set[str]
             profile.password.get_secret_value(),
         )
     }
+
+
+def _profile_record(profile: WebshareGatewaySecret) -> dict[str, Any]:
+    return {
+        "provider": profile.provider,
+        "logical_name": profile.logical_name,
+        "generation": profile.generation,
+        "gateway": {
+            "endpoint_id": profile.endpoint_id,
+            "protocol": profile.protocol,
+            "host": profile.host,
+            "port": profile.port,
+        },
+        "credentials": {
+            "username": profile.username.get_secret_value(),
+            "password": profile.password.get_secret_value(),
+        },
+        "capabilities": {
+            "countries": sorted(profile.countries),
+            "sticky_session_ttl_seconds": profile.sticky_session_ttl_seconds,
+        },
+    }
+
+
+def _validated_profile(profile: WebshareGatewaySecret) -> WebshareGatewaySecret:
+    if not isinstance(profile, WebshareGatewaySecret):
+        raise ProxyDenied("Webshare gateway secret record is invalid")
+    try:
+        return _profile(f"{profile.provider}/{profile.logical_name}", _profile_record(profile))
+    except ProxyDenied:
+        raise
+    except (AttributeError, TypeError, ValueError):
+        raise ProxyDenied("Webshare gateway secret record is invalid") from None
+
+
+def _validated_expected_generation(expected_generation: int) -> int:
+    return _strict_integer(
+        expected_generation,
+        "expected generation",
+        minimum=1,
+        maximum=MAX_GENERATION,
+    )
+
+
+class WebshareGatewaySecretStore:
+    """Whole-file compare-and-swap storage for validated v2 records."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.lock_path = path.with_suffix(path.suffix + ".lock")
+
+    @contextmanager
+    def _lock(self) -> Iterator[None]:
+        try:
+            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            parent = self.path.parent.lstat()
+            if not stat.S_ISDIR(parent.st_mode) or parent.st_mode & 0o077:
+                raise ProxyDenied("Webshare gateway secret directory must be private")
+            flags = (
+                os.O_CREAT
+                | os.O_RDWR
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            descriptor = os.open(self.lock_path, flags, 0o600)
+        except ProxyDenied:
+            raise
+        except OSError:
+            raise ProxyDenied("Webshare gateway secret lock cannot be opened safely") from None
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ProxyDenied("Webshare gateway secret lock must be a regular file")
+            os.fchmod(descriptor, 0o600)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+            except OSError:
+                raise ProxyDenied("Webshare gateway secret lock cannot be acquired") from None
+            yield
+        finally:
+            os.close(descriptor)
+
+    def _read_current(self) -> dict[ProfileKey, WebshareGatewaySecret]:
+        try:
+            self.path.lstat()
+        except FileNotFoundError:
+            return {}
+        return _parse_webshare_gateway_secrets(_read_private_file(self.path))
+
+    def install(
+        self,
+        profile: WebshareGatewaySecret,
+        *,
+        expected_generation: int | None,
+    ) -> int:
+        """Create generation one or replace exactly one expected generation."""
+        candidate = _validated_profile(profile)
+        expected = (
+            None
+            if expected_generation is None
+            else _validated_expected_generation(expected_generation)
+        )
+        with self._lock():
+            profiles = self._read_current()
+            current = profiles.get(candidate.key)
+            if expected is None:
+                if current is not None or candidate.generation != 1:
+                    raise ProxyDenied("Webshare gateway secret create generation conflict")
+            else:
+                if (
+                    current is None
+                    or current.generation != expected
+                    or expected == MAX_GENERATION
+                    or candidate.generation != expected + 1
+                ):
+                    raise ProxyDenied("Webshare gateway secret update generation conflict")
+            if current is None and len(profiles) >= MAX_PROFILES:
+                raise ProxyDenied("Webshare gateway secret contains too many profiles")
+            profiles[candidate.key] = candidate
+            self._replace(profiles)
+        return candidate.generation
+
+    def remove(
+        self,
+        provider: str,
+        logical_name: str,
+        *,
+        expected_generation: int,
+    ) -> None:
+        """Remove only the provider/name record at the expected generation."""
+        expected = _validated_expected_generation(expected_generation)
+        if provider != _PROVIDER or _LOGICAL_NAME.fullmatch(logical_name) is None:
+            raise ProxyDenied("Webshare gateway secret profile identity is invalid")
+        key = provider, logical_name
+        with self._lock():
+            profiles = self._read_current()
+            current = profiles.get(key)
+            if current is None or current.generation != expected:
+                raise ProxyDenied("Webshare gateway secret remove generation conflict")
+            del profiles[key]
+            self._replace(profiles)
+
+    def _replace(self, profiles: dict[ProfileKey, WebshareGatewaySecret]) -> None:
+        raw = {
+            "schema_version": SCHEMA_VERSION,
+            "profiles": {
+                f"{provider}/{logical_name}": _profile_record(profile)
+                for (provider, logical_name), profile in profiles.items()
+            },
+        }
+        contents = (json.dumps(raw, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        if len(contents) > MAX_SECRET_FILE_BYTES:
+            raise ProxyDenied("Webshare gateway secret exceeds the size limit")
+        # Validate the exact generation that will be installed before touching
+        # the destination. This also keeps serialization changes fail closed.
+        _parse_webshare_gateway_secrets(contents)
+
+        temporary = self.path.with_name(f".{self.path.name}.{secrets.token_hex(8)}.tmp")
+        flags = (
+            os.O_CREAT
+            | os.O_EXCL
+            | os.O_WRONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor: int | None = None
+        try:
+            descriptor = os.open(temporary, flags, 0o400)
+            view = memoryview(contents)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise OSError("short write")
+                view = view[written:]
+            os.fchmod(descriptor, 0o400)
+            os.fsync(descriptor)
+            os.close(descriptor)
+            descriptor = None
+            os.replace(temporary, self.path)
+            directory = os.open(
+                self.path.parent,
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0),
+            )
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except OSError:
+            raise ProxyDenied("Webshare gateway secret atomic replacement failed") from None
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            with suppress(FileNotFoundError):
+                temporary.unlink()

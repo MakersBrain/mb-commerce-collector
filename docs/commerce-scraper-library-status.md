@@ -109,6 +109,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `5977d8f` — isolate provider reconciliation and control mutations.
 - `ed429da` — constrain durable provider identity in PostgreSQL.
 - `db25719` — authorize durable provider gateways.
+- `2fd0386` — resolve durable Webshare routes.
 
 ### Verification at last review
 
@@ -139,8 +140,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
     country/provider constraints are checked before secret or database access.
 - [x] Full catalogue verification:
   - Ruff passed.
-  - Mypy passed for 231 source and test files.
-  - 897 tests passed, 2 skipped, 173 deselected, and 284 subtests passed in the
+  - Mypy passed for 232 source and test files.
+  - 915 tests passed, 2 skipped, 173 deselected, and 284 subtests passed in the
     latest fast-suite run; the wider repository fast gate also passed 32
     control-plane tests, 14 service tests, and 2 explorer tests.
   - The lower fast-test count reflects deletion of the obsolete specialized
@@ -205,6 +206,10 @@ architecture rules in the plan and are not separate scope-expansion goals.
   - The strict Webshare gateway-secret contract passed 47 focused tests.
   - Two live PostgreSQL 17 tests passed for the durable Webshare lifecycle and
     unsafe-cycle authorization denial with Decodo ledger isolation.
+  - One local native Webshare intercall loads the strict mounted secret, crosses
+    resolver → routed transport → real HTTP proxy framing, and proves exact
+    sticky credential grammar, one durable authorization/reconciliation/close,
+    no direct request, and complete lease/connection cleanup.
 - [x] Source configuration inventory: all 88 configured sources can be
   constructed through the current layered/library mapping.
   - All 21 `pagecrawl` sources now validate through the explicit legacy-to-
@@ -740,8 +745,17 @@ but replay/canary migration remains.
     provider-keyed lookup, and immediate redaction values.
   - The contract is deliberately isolated from the legacy Decodo secret store;
     loading a Webshare secret neither creates a durable profile nor enables
-    traffic. Authenticated import/rotation with compare-and-swap recovery and
-    provider-specific deployment mounts remain.
+    traffic.
+  - A whole-file local store now installs and removes provider-keyed records
+    with explicit generation compare-and-swap. It uses a private no-follow
+    lock, one validated read under that lock, canonical revalidation, a private
+    same-directory temporary file, file and directory `fsync`, atomic replace,
+    and cleanup. Focused tests cover stale and concurrent rotation, unrelated
+    record preservation, guarded removal, replacement failure, and symlink
+    refusal without exposing credential values.
+  - An authenticated control operation plus durable non-secret recovery intent
+    is still required to coordinate file generation with PostgreSQL lifecycle
+    state. Provider-specific deployment mounts also remain.
 - [x] Bound health state and add reason-specific health counters.
   - Process-local state is keyed per provider/endpoint/target, capped with LRU
     eviction, and exposes detached read-only snapshots. Cooldowns grow
@@ -787,8 +801,9 @@ Exit criterion: **not met**. Hard browser authorization, a verified second
 gateway adapter, provider-isolated control reconciliation, a reusable durable
 provider composition, default-off native single-route Webshare resolution, its
 focused PostgreSQL gate, and local two-provider failover proof are complete.
-Operator-managed Webshare credential writes/rotation, deployment wiring, a
-live Camoufox callback gate, and a production routed canary remain.
+Authenticated operator Webshare import/rotation, deployment wiring, a durable
+file/SQL recovery workflow, a live Camoufox callback gate, and a production
+routed canary remain.
 
 ## Phase 6 — Remaining framework connectors
 
@@ -1127,11 +1142,11 @@ Exit criterion: **not met**.
    limited browser-capable canary with the tested source-level rollback route.
 6. Run representative PrestaShop and Sio2 sources through recorded replay,
    projected output comparison, and limited canaries with independent rollback.
-7. Add authenticated, recoverable import/rotation for Webshare-issued gateway
-   credentials and provider-specific deployment mounts, then exercise the
-   implemented default-off durable native route through a local HTTP/browser
-   integration. Keep Webshare out of production composite selection until
-   those controls pass.
+7. Add authenticated import/rotation and a durable file/SQL recovery intent for
+   Webshare-issued gateway credentials, then add worker-only provider secret
+   mounts. The HTTP resolver-to-wire integration now passes; a live browser
+   callback integration remains. Keep Webshare out of production composite
+   selection until those controls pass.
 8. Run one Shopify and one page-based source through recorded replay, ceramics
    projection parity, and a production canary with rollback.
 9. Migrate configured production sources incrementally through the existing
