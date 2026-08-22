@@ -100,6 +100,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `02de77b` — unify proxy policy and end-to-end request tracing.
 - `f863a66` — share native catalogue composition across worker and local tools.
 - `1b05488` — publish intentional bounded collections as sealed limited output.
+- `de23085` — make catalogue connector runtime plans data-only.
 
 ### Verification at last review
 
@@ -815,6 +816,11 @@ canaries have not run.
     An AST architecture test prevents executable construction dependencies
     from returning, and an all-source test validates every checked-in canonical
     connector/options pair through the application registry.
+  - Static browser-worker placement now comes from scraper-family adapter
+    capabilities rather than a hard-coded pair of source IDs. A PostgreSQL
+    regression uses a renamed Ceramicolours source to prove scheduling follows
+    declared behavior; response-dependent browser escalation remains at the
+    worker boundary.
   - Library registry membership deliberately does not grant worker
     eligibility: remaining registered connectors stay on their compatibility
     routes until explicit application metadata and their required evidence are

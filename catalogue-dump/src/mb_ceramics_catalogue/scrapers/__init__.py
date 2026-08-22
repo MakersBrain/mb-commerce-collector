@@ -21,6 +21,7 @@ class AdapterCapabilities:
 
     canary_adapter: str | None = None
     price_refresh: bool = False
+    required_worker_capabilities: tuple[str, ...] = ()
 
 
 ADAPTER_CAPABILITIES: dict[str, AdapterCapabilities] = {
@@ -36,8 +37,15 @@ ADAPTER_CAPABILITIES: dict[str, AdapterCapabilities] = {
     "sio2": AdapterCapabilities("sio2_connector"),
     "pagecrawl": AdapterCapabilities("pagecrawl_connector"),
     "axner": AdapterCapabilities("axner_connector"),
-    "ceramicolours": AdapterCapabilities("ceramicolours_connector"),
-    "keramik_kraft": AdapterCapabilities("keramik_kraft_connector", price_refresh=True),
+    "ceramicolours": AdapterCapabilities(
+        "ceramicolours_connector",
+        required_worker_capabilities=("browser",),
+    ),
+    "keramik_kraft": AdapterCapabilities(
+        "keramik_kraft_connector",
+        price_refresh=True,
+        required_worker_capabilities=("browser",),
+    ),
 }
 
 # Shared local library shells are derived from the same migration metadata as

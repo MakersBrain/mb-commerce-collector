@@ -1299,8 +1299,8 @@ class Worker:
     async def _requeue_for_browser(self, job: queue.ClaimedJob, error: BrowserUnavailable) -> bool:
         """Send a job that turned out to need a browser to a worker that has one.
 
-        `BROWSER_SOURCES` names the sources whose scrapers always render, but a
-        plain source escalates too: `pagecrawl` retries a page through the
+        Static adapter metadata reserves browser-only sources up front, but a
+        plain source can escalate too: `pagecrawl` retries a page through the
         browser when it parses to nothing, which depends on what the shop
         served today. So the requirement cannot be fully known when the job is
         enqueued, and the honest place to discover it is here.

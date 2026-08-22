@@ -749,6 +749,10 @@ def test_canary_adapters_and_price_refresh_are_capability_driven():
     assert scrapers.adapter_capabilities("bigcommerce_connector").price_refresh
     assert scrapers.adapter_capabilities("wix").canary_adapter == "wix_connector"
     assert scrapers.adapter_capabilities("pagecrawl").canary_adapter == "pagecrawl_connector"
+    assert scrapers.adapter_capabilities("ceramicolours").required_worker_capabilities == (
+        "browser",
+    )
+    assert scrapers.adapter_capabilities("shopify").required_worker_capabilities == ()
 
 
 def test_dataset_selection_is_explicit_validated_and_ordered():

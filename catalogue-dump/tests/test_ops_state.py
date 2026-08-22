@@ -47,7 +47,11 @@ SOURCES = SourcesFile.model_validate(
         "ceradel": {"label": "Ceradel", "url": "https://ceradel.fr/", "scraper": "shopify"},
         # Same host as les-cousins, to exercise the per-host stagger.
         "les-cousins-two": {"label": "LC2", "url": "https://lescousins.fr/other", "scraper": "woocommerce"},
-        "ceramicolours": {"label": "Ceramicolours", "url": "https://www.ceramicolours.it/", "scraper": "ceramicolours"},
+        "browser-shop": {
+            "label": "Ceramicolours",
+            "url": "https://www.ceramicolours.it/",
+            "scraper": "ceramicolours",
+        },
     }
 )
 
@@ -95,9 +99,9 @@ class TestRunsAndJobs:
     async def test_browser_sources_declare_the_capability_they_need(self, db):
         """Only a worker started with `--capabilities browser` may claim these."""
         run_id = await runs.create_run(db)
-        await runs.create_jobs(db, run_id, SOURCES, ["ceramicolours", "ceradel"])
+        await runs.create_jobs(db, run_id, SOURCES, ["browser-shop", "ceradel"])
         stored = {row["source_id"]: row for row in await rows(db, "select * from catalogue.jobs")}
-        assert stored["ceramicolours"]["requires"] == ["browser"]
+        assert stored["browser-shop"]["requires"] == ["browser"]
         assert stored["ceradel"]["requires"] == []
 
     async def test_two_sources_on_one_host_are_staggered(self, db):
