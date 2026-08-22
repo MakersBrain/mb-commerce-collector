@@ -119,6 +119,10 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `d3e15a6` — mount the control-owned writable Webshare gateway store.
 - `3a84514` — fence cancelled Webshare operations and settle late usage.
 - `b85a23d` — expose recent-admin Webshare profile imports.
+- `df82eb4` — reject booleans at strict numeric contract boundaries.
+- `cf89f58` — preserve per-request robots policy and legacy cache provenance.
+- `a39176f` — exercise live Camoufox proxy callback ordering.
+- `97a62e4` — align rootless worker identity and add a rotation smoke.
 
 ### Verification at last review
 
@@ -234,6 +238,19 @@ architecture rules in the plan and are not separate scope-expansion goals.
     durable reserved-pool PostgreSQL slice passed 4 cases.
   - The expanded control-owned/worker-read-only deployment and entrypoint slice
     passed 43 tests, and Compose rendering remained valid.
+  - The legacy Fetcher compatibility bridge passed 271 tests and 274 subtests,
+    including per-request robots enforcement before HTTP/browser I/O and safe
+    fresh/replayed/stale cache-route projection; targeted Ruff passed.
+  - The opt-in live Camoufox gate passed in the packaged browser-worker image.
+    A real browser crossed an authenticated loopback proxy for navigation,
+    script, and fetch requests; blocked images did not dispatch, and callback
+    authorization, reconciliation, request/byte accounting, and credential
+    containment completed successfully.
+  - The candidate worker image passed the executable Docker rootless-identity
+    fallback smoke. The running worker observed an atomic Webshare generation
+    `1 -> 2` replacement through its read-only mount as `10001:10001`, with a
+    mode-`0400` secret, no capabilities, no provider API credential, and the
+    data plane still disabled. This is not evidence of Quadlet activation.
 - [x] Source configuration inventory: all 88 configured sources can be
   constructed through the current layered/library mapping.
   - All 21 `pagecrawl` sources now validate through the explicit legacy-to-
@@ -252,10 +269,10 @@ architecture rules in the plan and are not separate scope-expansion goals.
 |---|---|---|
 | 0. Baseline and decisions | Complete | Baselines, grouped source/transport inventory, bespoke classifications, ADR, frozen schemas, Python policy, and known skips/failures are recorded. |
 | 1. Distribution and contracts | Mostly complete | Package, contracts, workspace integration, typing, builds, and installed-wheel proof exist; production checkpoint composition remains. |
-| 2. HTTP transport and runtime | Partial | HTTP/fake transports, hardened middleware, conditional archive revalidation, and native Shopify policy composition exist; recorded direct-path parity and wider application rollout remain. |
+| 2. HTTP transport and runtime | Partial | HTTP/fake transports, hardened middleware, conditional archive revalidation, per-request legacy robots/cache projection, and native Shopify policy composition exist; recorded direct-path parity and wider application rollout remain. |
 | 3. Shopify vertical slice | Partial | Registry/Fetcher/projection synthetic parity exists; recorded replay, production canary, and stable source switch remain. |
 | 4. Generic custom shops | Partial | Composable versioned discovery/parser strategies, sitemap/category/robots discovery, structured-page parsing, safe resume, current pagecrawl option translation, and a native worker gate exist; replay and production migration remain. |
-| 5. Proxy data plane | Partial | Atomic HTTP and browser-subrequest caps, real local HTTP/SOCKS and two-provider failover gates, provider-isolated Decodo/Webshare reconciliation, gateway adapters, durable default-off single-route native selection, authenticated recoverable Webshare credential writes, control-owned deployment wiring, sticky Camoufox composition, and native direct/optional-browser framework worker composition exist; real rootless activation and live routed canaries remain. |
+| 5. Proxy data plane | Implementation complete, activation pending | The plan's failover, sticky identity, byte-cap, credential-containment, provider-adapter, and PostgreSQL safety criteria pass locally. Durable default-off Webshare control and live Camoufox callback gates also exist; real Quadlet activation and production routed canaries remain operational cutover gates. |
 | 6. Remaining frameworks | Implementation complete, migration pending | Eight framework connectors are extracted; replay, canary, and stable source switching remain. |
 | 7. Catalogue cutover | Partial | Every configured connector family now has an explicit native library/application-plugin route through the atomic projection pipeline; production replay/canary approval and stable switching remain. |
 | 8. Legacy removal and 1.0 | Partial | Public API/schema manifests, SemVer policy, guides, changelog/release automation, and a clean external consumer gate exist; production observation and duplicate removal remain. |
@@ -425,8 +442,10 @@ verification pass, but production checkpoint-migration guarantees are missing.
   - Opaque bodies fail before I/O. Browser JSON POST and typed evaluation now
     retain their method/context/action semantics through the shared local
     bridge. Evaluations use script-hashed replay keys, bounded JSON artifacts,
-    browser accounting, and no script-bearing trace fields. Robots preflight,
-    cache-hit metadata, and recorded direct-path parity remain.
+    browser accounting, and no script-bearing trace fields. Every connector
+    URL now crosses the effective robots policy before HTTP or browser I/O, and
+    fresh, replayed, and stale legacy cache hits project explicit cache-route
+    metadata. Recorded direct-path parity remains.
 - [x] Preserve the catalogue response archive in native runtime composition.
   - An async application adapter preserves legacy HTTP/render cache keys,
     atomic archive writes, cache route metadata, and fail-closed replay misses.
@@ -604,6 +623,11 @@ but replay/canary migration remains.
 ## Phase 5 — Proxy data plane
 
 - [x] Add provider-neutral endpoints, leases, pool protocols, and factories.
+  - `ProxyPool` is the provider-adapter protocol boundary. Application-owned
+    pool/factory implementations translate provider behavior into neutral
+    leases, authorization, rotation, accounting, and cleanup; a second
+    provider-specific protocol would duplicate this boundary without adding a
+    current capability.
 - [x] Add direct, always, fallback, failover, and round-robin routing.
 - [x] Add static pool and basic health/cooldown tracking.
 - [x] Add received-byte cap support.
@@ -628,9 +652,10 @@ but replay/canary migration remains.
     country casing, session duration, and generated identity fail closed.
   - The adapter intentionally accepts operator-installed secrets and verified
     sticky duration rather than reaching into the Webshare management API. It
-    is not enabled in production until a durable secret/profile snapshot and
-    fail-closed billing authorization are defined.
-- [~] Preserve sticky proxy identity across HTTP and browser requests.
+    now composes with a durable secret/profile snapshot and fail-closed billing
+    authorization, but remains default-off pending operational activation and
+    an explicitly approved canary.
+- [x] Preserve sticky proxy identity across HTTP and browser requests.
   - Browser dispatch now lives inside each candidate route. A neutral proxy
     browser factory receives the exact selected lease, and its route-scoped
     HTTP/browser transports close before rotation or release. The catalogue
@@ -670,9 +695,9 @@ but replay/canary migration remains.
     outer authorization.
   - Deterministic callback tests cover authorization order, blocked-resource
     short-circuiting, denial, duplicate finished/failed events, cancellation,
-    and close-time reconciliation. A live Camoufox run is still required to
-    demonstrate Playwright callback ordering, although late resolution is
-    idempotent.
+    and close-time reconciliation. The opt-in packaged-browser gate now also
+    demonstrates real Playwright callback ordering through an authenticated
+    loopback proxy; late resolution remains idempotent.
   - Runtime composition can require this physical-subrequest capability and
     rejects unmarked proxy-browser factories before lease acquisition. Native
     catalogue composition enables the fail-closed requirement explicitly.
@@ -836,8 +861,10 @@ but replay/canary migration remains.
     retains `DropCapability=all`, and validates owner-only bootstrap mode 0600
     and atomically rotated mode 0400 without privileged calls; rootful Compose
     retains private staging and privilege drop. Directory mounts make atomic
-    replacements visible without stale bind-mounted inodes. A real Quadlet
-    activation/readability smoke remains an operational gate.
+    replacements visible without stale bind-mounted inodes. The executable
+    Docker fallback proves the actual worker entrypoint can observe a live
+    generation replacement with the same identity and read-only constraints.
+    A real rootless Podman/Quadlet activation remains an operational gate.
 - [x] Bound health state and add reason-specific health counters.
   - Process-local state is keyed per provider/endpoint/target, capped with LRU
     eviction, and exposes detached read-only snapshots. Cooldowns grow
@@ -879,13 +906,14 @@ but replay/canary migration remains.
     before persistence. Current validation errors retain no raw credential, and
     legacy decoding returns a sanitized new-lineage restart outcome.
 
-Exit criterion: **not met**. Hard browser authorization, a verified second
-gateway adapter, provider-isolated control reconciliation, a reusable durable
-provider composition, default-off native single-route Webshare resolution, its
-focused PostgreSQL gate, and local two-provider failover proof are complete.
-Authenticated operator Webshare import/rotation, its durable file/SQL recovery
-workflow and control-exclusive write mount, a rootless deployment smoke, a live
-Camoufox callback gate, and a production routed canary remain.
+Exit criterion: **met locally**. One scrape fails over across two provider
+adapters; sticky identity crosses HTTP and browser work; request and byte caps
+stop new physical dispatch; credential-containment gates pass; and the existing
+catalogue PostgreSQL safety boundary remains fail closed. The adapter boundary
+is the neutral `ProxyPool` protocol plus application-owned factories rather
+than an additional unused provider protocol. Real Quadlet activation and
+production routed canaries are deployment/cutover evidence and remain pending;
+they do not reopen the Phase 5 library deliverables.
 
 ## Phase 6 — Remaining framework connectors
 
@@ -1216,22 +1244,28 @@ Exit criterion: **not met**.
    projected-output parity gate, review request/discovery totals, and then run
    a limited page-based canary.
 4. Exercise the native Shopify worker through a local routed proxy integration,
-   including a live Camoufox callback-ordering gate, and then a limited
-   production canary. Prove fallback/always selection, durable attempt
-   authorization, lease-bound browser credentials, cleanup, summary
-   accounting, and rollback without legacy lease ownership.
+   then a limited production canary. The live Camoufox callback-ordering gate
+   now passes inside the packaged browser-worker runtime using an authenticated
+   loopback proxy: authorization precedes every forwarded navigation/script/
+   fetch request, blocked images never reach the proxy, and reconciliation and
+   byte/request accounting complete without credential disclosure. Still prove
+   fallback/always selection, durable attempt authorization, lease-bound
+   browser credentials, cleanup, summary accounting, and rollback without
+   legacy lease ownership in the native worker flow.
 5. Run BigCommerce recorded replay and projected-output comparison, then a
    limited browser-capable canary with the tested source-level rollback route.
 6. Run representative PrestaShop and Sio2 sources through recorded replay,
    projected output comparison, and limited canaries with independent rollback.
-7. Run a real rootless Quadlet activation/readability smoke and a live browser
-   callback integration against the default-off Webshare route. The recent-admin
-   import/rotation endpoint, durable replay, control-exclusive write mount,
-   worker read mounts, and HTTP resolver-to-wire integration now pass. Keep
-   Webshare out of production composite selection until the remaining runtime
-   gates and an explicitly approved canary pass.
-8. Run one Shopify and one page-based source through recorded replay, ceramics
-   projection parity, and a production canary with rollback.
+7. Run a real rootless Podman/Quadlet activation/readability smoke, then a
+   default-off native worker integration and explicitly approved Webshare
+   canary. The recent-admin import/rotation endpoint, durable replay,
+   control-exclusive write mount, worker read mounts, HTTP resolver-to-wire
+   integration, Docker rootless-identity fallback, and live Camoufox callback
+   gate now pass. Keep Webshare out of production composite selection until
+   those remaining operational gates pass.
+8. Add an isolated installed-artifact gate that installs both the library and
+   catalogue distributions, constructs a representative checked-in source,
+   and proves catalogue composition does not rely on either source checkout.
 9. Migrate configured production sources incrementally through the existing
    library registry route, and remove legacy implementations only after their
    observation windows.
