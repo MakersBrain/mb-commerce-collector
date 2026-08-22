@@ -20,8 +20,8 @@ from mb_commerce_scraper.connectors.specialized import (
     SumUpConnector,
     SumUpOptions,
 )
-from mb_commerce_scraper.connectors.specialized_parsing import VerifiedDomRules
 from mb_commerce_scraper.models import RefreshMode, SnapshotField
+from mb_commerce_scraper.parsing._structured import VerifiedDomRules
 from mb_commerce_scraper.testing import (
     FakeTransport,
     assert_cancelled_without_requests,

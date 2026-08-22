@@ -19,11 +19,11 @@ from mb_commerce_scraper.models import (
     collection_fingerprint,
 )
 from mb_commerce_scraper.parsing import ProductParser
+from mb_commerce_scraper.parsing._structured import DomFieldSelector, VerifiedDomRules
 from mb_commerce_scraper.transports import CommerceTransport
 
 from .base import BrowserRequirement, ConnectorCapabilities, ConnectorContext
 from .specialized import SpecializedPageConnector, SpecializedPageOptions
-from .specialized_parsing import DomFieldSelector, VerifiedDomRules
 
 
 class DiscoveryOptions(BaseModel):

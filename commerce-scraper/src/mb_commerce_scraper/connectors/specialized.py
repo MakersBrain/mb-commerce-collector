@@ -44,6 +44,16 @@ from mb_commerce_scraper.models import (
     validate_checkpoint,
 )
 from mb_commerce_scraper.parsing import JsonLdProductParser
+from mb_commerce_scraper.parsing._structured import (
+    VerifiedDomRules,
+    dom_product,
+    jsonld_products,
+    microdata_products,
+    opengraph_product,
+    pdf_links,
+    probable_javascript_shell,
+    specification_table,
+)
 from mb_commerce_scraper.transports import (
     BrowserHint,
     BudgetExhausted,
@@ -56,16 +66,6 @@ from mb_commerce_scraper.transports import (
 )
 
 from .base import BrowserRequirement, CommerceConnector, ConnectorCapabilities, ConnectorContext
-from .specialized_parsing import (
-    VerifiedDomRules,
-    dom_product,
-    jsonld_products,
-    microdata_products,
-    opengraph_product,
-    pdf_links,
-    probable_javascript_shell,
-    specification_table,
-)
 
 
 class SpecializedPageOptions(BaseModel):
