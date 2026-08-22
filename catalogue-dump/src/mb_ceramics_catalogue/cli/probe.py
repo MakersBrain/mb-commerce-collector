@@ -19,6 +19,7 @@ from mb_ceramics_catalogue.config.settings import CrawlParams
 from mb_ceramics_catalogue.config.sources import SourcesFile, default_path
 from mb_ceramics_catalogue.crawl.session import open_session
 from mb_ceramics_catalogue.observability import logging as obs
+from mb_ceramics_catalogue.ops.commerce_scraper_runtime import local_canary_source_config
 from mb_ceramics_catalogue.scrapers.cache import MODES as CACHE_MODES
 from mb_ceramics_catalogue.scrapers.record import RecordBuilder, coverage
 
@@ -40,6 +41,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--cache", nargs="?", const=".cache", default=None, metavar="DIR")
     parser.add_argument("--cache-mode", choices=CACHE_MODES, default="auto")
+    parser.add_argument(
+        "--pipeline",
+        choices=("legacy", "connector_canary"),
+        default="legacy",
+        help="explicitly select the reusable connector canary",
+    )
     parser.add_argument("--show", type=int, default=2, help="how many sample rows to print")
     parser.add_argument("--log-level", default="WARNING")
     return parser
@@ -51,6 +58,8 @@ async def run(options: argparse.Namespace) -> int:
     if options.source not in sources:
         raise ValueError(f"unknown source; known: {', '.join(sorted(sources.names()))}")
     config = sources[options.source]
+    if options.pipeline == "connector_canary":
+        config = local_canary_source_config(config)
 
     params = CrawlParams(
         limit=options.limit,
@@ -60,6 +69,7 @@ async def run(options: argparse.Namespace) -> int:
         impersonate=options.impersonate,
         robots=options.robots,
         cache_mode=options.cache_mode if options.cache else "off",
+        pipeline=options.pipeline,
         # A probe wants what is on the site now, not what was there last week.
         cache_max_age_hours=0 if options.cache_mode == "replay" else 1,
     )

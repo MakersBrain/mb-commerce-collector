@@ -186,6 +186,21 @@ def test_catalogue_projector_matches_the_direct_legacy_builder() -> None:
     assert projected.stock_quantity == 7
 
 
+def test_price_projection_marks_loader_preservation_without_changing_full_rows() -> None:
+    projector = CeramicsCatalogueProjector()
+    [price_row] = projector.project(
+        priced_snapshot(),
+        context(projector.name, scope="all", collection_mode="price"),
+    )
+    [full_row] = projector.project(
+        priced_snapshot(),
+        context(projector.name, scope="all"),
+    )
+
+    assert price_row.as_legacy_dict()["collection_mode"] == "price"
+    assert "collection_mode" not in full_row.as_legacy_dict()
+
+
 def test_identity_projector_keeps_a_variantless_manufacturer_product() -> None:
     snapshot = CommerceProductSnapshot(
         connector="woocommerce",

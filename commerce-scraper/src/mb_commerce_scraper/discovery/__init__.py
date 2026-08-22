@@ -1,4 +1,9 @@
 from .base import DiscoveryStrategy
-from .sitemap import SitemapDiscovery
+from .sitemap import DiscoveryFailure, SitemapDiscovery, advertised_sitemaps
 
-__all__ = ["DiscoveryStrategy", "SitemapDiscovery"]
+__all__ = [
+    "DiscoveryFailure",
+    "DiscoveryStrategy",
+    "SitemapDiscovery",
+    "advertised_sitemaps",
+]

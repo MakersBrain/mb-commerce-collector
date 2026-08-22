@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import (
     AwareDatetime,
@@ -16,6 +16,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from .sanitization import sanitize_json_value
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 CurrencyCode = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
@@ -144,6 +146,11 @@ class CommerceVariant(ContractModel):
     published_attributes: dict[str, JsonValue] = Field(default_factory=dict)
     platform_extensions: dict[str, JsonValue] = Field(default_factory=dict)
 
+    @field_validator("platform_extensions", mode="before")
+    @classmethod
+    def sanitize_platform_extensions(cls, value: Any) -> Any:
+        return sanitize_json_value(cast(JsonValue, value))
+
 
 class CommerceProductSnapshot(ContractModel):
     contract_version: Literal["commerce.product_snapshot.v1"] = "commerce.product_snapshot.v1"
@@ -163,3 +170,32 @@ class CommerceProductSnapshot(ContractModel):
     published_attributes: dict[str, JsonValue] = Field(default_factory=dict)
     platform_extensions: dict[str, JsonValue] = Field(default_factory=dict)
 
+    @field_validator("platform_extensions", mode="before")
+    @classmethod
+    def sanitize_platform_extensions(cls, value: Any) -> Any:
+        return sanitize_json_value(cast(JsonValue, value))
+
+
+def sanitize_commerce_snapshot(
+    snapshot: CommerceProductSnapshot,
+) -> CommerceProductSnapshot:
+    """Reapply extension safety after unvalidated Pydantic copy/construct paths."""
+
+    variants = tuple(
+        variant.model_copy(
+            update={
+                "platform_extensions": sanitize_json_value(
+                    cast(JsonValue, variant.platform_extensions)
+                )
+            }
+        )
+        for variant in snapshot.variants
+    )
+    return snapshot.model_copy(
+        update={
+            "variants": variants,
+            "platform_extensions": sanitize_json_value(
+                cast(JsonValue, snapshot.platform_extensions)
+            ),
+        }
+    )

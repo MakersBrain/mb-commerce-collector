@@ -5,9 +5,11 @@ from pydantic import ValidationError
 
 from mb_commerce_scraper import (
     CollectionRequest,
+    ConnectorCapabilities,
     ConnectorCheckpoint,
     Money,
     RefreshMode,
+    ShopifyConnector,
     SnapshotField,
     collection_fingerprint,
 )
@@ -39,3 +41,33 @@ def test_checkpoint_is_versioned_and_cursor_required() -> None:
     assert checkpoint.checkpoint_schema_version == 1
     with pytest.raises(ValidationError):
         ConnectorCheckpoint(connector="shopify", connector_version="1", source_id="shop", lineage="run-1", collection_fingerprint=fingerprint, resume_after=None)
+
+
+def test_checkpoint_rejects_credentials_without_retaining_the_value() -> None:
+    secret = "checkpoint-secret-sentinel"
+    fingerprint = collection_fingerprint(request(), "shopify", {})
+
+    with pytest.raises(ValueError) as caught:
+        ConnectorCheckpoint(
+            connector="shopify",
+            connector_version="1",
+            source_id="shop",
+            lineage="run-1",
+            collection_fingerprint=fingerprint,
+            resume_after={"page": 2, "access_token": secret},
+        )
+
+    assert "credential-bearing or unsafe data" in str(caught.value)
+    assert secret not in str(caught.value)
+    assert caught.value.__context__ is None
+
+
+def test_shared_edge_is_typed_and_exposed_as_a_named_capability() -> None:
+    assert ShopifyConnector.capabilities.shared_edge == "edge:shopify"
+    assert "shared_edge:edge:shopify" in ShopifyConnector.capabilities.named_capabilities()
+    with pytest.raises(ValidationError, match="shared edge"):
+        ConnectorCapabilities(
+            snapshot_fields=frozenset({SnapshotField.IDENTITY}),
+            refresh_modes=frozenset({RefreshMode.FULL}),
+            shared_edge="  ",
+        )

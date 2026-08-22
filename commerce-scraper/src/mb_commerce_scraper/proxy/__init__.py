@@ -1,5 +1,10 @@
 from .base import (
     BrowserProxyCredentials,
+    BrowserSubrequestAuthorization,
+    BrowserSubrequestAuthorizer,
+    BrowserSubrequestOutcome,
+    ProxyAttemptAuthorization,
+    ProxyBudgetExhausted,
     ProxyCredentials,
     ProxyEndpoint,
     ProxyKind,
@@ -8,10 +13,44 @@ from .base import (
     ProxyPool,
     ProxyRequest,
 )
-from .health import InMemoryProxyHealth
+from .health import InMemoryProxyHealth, ProxyFailureReason, ProxyHealthState
 from .httpx import HttpxProxyTransportFactory
 from .routing import ProxyRouting, RoutingMode
 from .static import StaticProxyLease, StaticProxyPool, StaticRoute
-from .transport import ProxyBudgetExhausted, ProxyTransportFactory, RoutedTransport
+from .transport import (
+    BrowserSubrequestAuthorizedTransport,
+    PoolBrowserSubrequestAuthorizer,
+    ProxyBrowserTransportFactory,
+    ProxyTransportFactory,
+    RoutedTransport,
+)
 
-__all__ = [name for name in globals() if not name.startswith("_")]
+__all__ = [
+    "BrowserProxyCredentials",
+    "BrowserSubrequestAuthorization",
+    "BrowserSubrequestAuthorizedTransport",
+    "BrowserSubrequestAuthorizer",
+    "BrowserSubrequestOutcome",
+    "HttpxProxyTransportFactory",
+    "InMemoryProxyHealth",
+    "PoolBrowserSubrequestAuthorizer",
+    "ProxyAttemptAuthorization",
+    "ProxyBrowserTransportFactory",
+    "ProxyBudgetExhausted",
+    "ProxyCredentials",
+    "ProxyEndpoint",
+    "ProxyFailureReason",
+    "ProxyHealthState",
+    "ProxyKind",
+    "ProxyLease",
+    "ProxyOutcome",
+    "ProxyPool",
+    "ProxyRequest",
+    "ProxyRouting",
+    "ProxyTransportFactory",
+    "RoutedTransport",
+    "RoutingMode",
+    "StaticProxyLease",
+    "StaticProxyPool",
+    "StaticRoute",
+]

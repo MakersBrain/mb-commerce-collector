@@ -5,7 +5,9 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from psycopg.types.json import Jsonb
 
+from mb_ceramics_catalogue.config.settings import CrawlParams
 from mb_ceramics_catalogue.config.sources import SourcesFile
 from mb_ceramics_catalogue.ops import leases, outbox, queue, runs
 
@@ -18,6 +20,18 @@ SOURCES = SourcesFile.model_validate(
         "plain": {"label": "Plain", "url": "https://plain.test/", "scraper": "shopify"},
         "ceramicolours": {"label": "Browser", "url": "https://browser.test/", "scraper": "ceramicolours"},
         "same-host": {"label": "Same", "url": "https://plain.test/other", "scraper": "shopify"},
+    }
+)
+
+PROXY_SOURCES = SourcesFile.model_validate(
+    {
+        "proxy-shop": {
+            "label": "Proxy shop",
+            "url": "https://proxy-shop.test/",
+            "scraper": "shopify",
+            "country": "fr",
+            "proxy_eligible": True,
+        }
     }
 )
 
@@ -60,6 +74,103 @@ async def test_job_creation_and_outbox_are_atomic(db):
     assert envelope.route == "plain.normal"
 
 
+async def test_proxy_snapshot_is_immutable_after_control_plane_changes(db):
+    profile = await one(
+        db,
+        """
+        insert into catalogue.proxy_profiles
+               (provider, logical_name, display_name, enabled, lifecycle, created_by, updated_by)
+        values ('decodo', 'snapshot-profile', 'Snapshot profile', true, 'enabled', 'test', 'test')
+        returning id
+        """,
+    )
+    assert profile is not None
+    route = await one(
+        db,
+        """
+        insert into catalogue.proxy_routes
+               (label, profile_id, protocol, country, state, city, session_mode,
+                session_minutes, max_bytes, pilot, enabled, created_by, updated_by)
+        values ('Snapshot route', %(profile_id)s, 'https', 'FR', 'IDF', 'Paris', 'sticky',
+                45, 9000, false, true, 'test', 'test')
+        returning id
+        """,
+        {"profile_id": profile["id"]},
+    )
+    assert route is not None
+    await db.execute(
+        """
+        insert into catalogue.source_proxy_policies
+               (source_id, policy, route_id, max_bytes, pilot, evidence_state, revision, updated_by)
+        values ('proxy-shop', 'fallback', %(route_id)s, 7000, true, 'eligible', 7, 'test')
+        """,
+        {"route_id": route["id"]},
+    )
+
+    run_id = await runs.create_run(db)
+    assert run_id is not None
+    job_id = (await runs.create_jobs(db, run_id, PROXY_SOURCES, ["proxy-shop"]))["proxy-shop"]
+    await db.execute(
+        "update catalogue.jobs set scheduled_for = now() where id = %(id)s",
+        {"id": job_id},
+    )
+    stored = await one(db, "select proxy_snapshot from catalogue.jobs where id = %(id)s", {"id": job_id})
+    assert stored is not None
+    original = stored["proxy_snapshot"]
+    assert original == {
+        "policy": "fallback",
+        "policy_revision": 7,
+        "route_id": str(route["id"]),
+        "profile_id": str(profile["id"]),
+        "provider": "decodo",
+        "profile": "snapshot-profile",
+        "protocol": "https",
+        "country": "FR",
+        "state": "IDF",
+        "city": "Paris",
+        "session_mode": "sticky",
+        "session_minutes": 45,
+        "max_bytes": 7000,
+        "pilot": True,
+    }
+
+    await db.execute(
+        "update catalogue.proxy_profiles set provider = 'replacement', "
+        "logical_name = 'replacement-profile', enabled = false, lifecycle = 'disabled' "
+        "where id = %(id)s",
+        {"id": profile["id"]},
+    )
+    await db.execute(
+        "update catalogue.proxy_routes set protocol = 'socks5', country = 'DE', state = null, "
+        "city = 'Berlin', session_mode = 'random', session_minutes = 10, max_bytes = 5000, "
+        "pilot = true, enabled = false where id = %(id)s",
+        {"id": route["id"]},
+    )
+    await db.execute(
+        "update catalogue.source_proxy_policies set policy = 'never', route_id = null, "
+        "max_bytes = 3000, pilot = false, revision = 8 where source_id = 'proxy-shop'"
+    )
+
+    stored_after = await one(
+        db, "select proxy_snapshot from catalogue.jobs where id = %(id)s", {"id": job_id}
+    )
+    assert stored_after is not None
+    assert stored_after["proxy_snapshot"] == original
+
+    outbox_row = await one(
+        db,
+        "select * from catalogue.queue_outbox where job_id = %(id)s order by generation desc limit 1",
+        {"id": job_id},
+    )
+    assert outbox_row is not None
+    reservation = await queue.reserve(
+        db, outbox.envelope(outbox_row), await registered(db), []
+    )
+    assert reservation.disposition == "run"
+    assert reservation.job is not None
+    assert reservation.job.proxy_snapshot == original
+
+
 async def test_provider_retry_exhaustion_redrives_only_the_current_generation(db):
     job_id, exhausted = await planned(db)
     assert await outbox.redrive_exhausted(db, exhausted)
@@ -91,6 +202,68 @@ async def test_reservation_does_not_consume_attempt_and_start_does(db):
         db, "select state, attempt from catalogue.jobs where id = %(id)s", {"id": envelope.job_id}
     )
     assert row == {"state": "running", "attempt": 1}
+
+
+@pytest.mark.parametrize(
+    "rollback_params",
+    ({"pipeline": "legacy"}, {}),
+    ids=("explicit-legacy", "remove-override"),
+)
+async def test_source_pipeline_override_is_isolated_and_rollback_applies_on_reservation(
+    db, rollback_params
+):
+    run_id = await runs.create_run(db, params={"pipeline": "legacy"})
+    assert run_id is not None
+    jobs = await runs.create_jobs(db, run_id, SOURCES, ["plain", "same-host"])
+    await db.execute(
+        "update catalogue.jobs set scheduled_for = now() where run_id = %(run)s",
+        {"run": run_id},
+    )
+    await db.execute(
+        "insert into catalogue.source_settings (source_id, params) "
+        "values ('plain', %(params)s)",
+        {"params": Jsonb({"pipeline": "connector_canary"})},
+    )
+
+    envelopes = {}
+    for source, job_id in jobs.items():
+        row = await one(
+            db,
+            "select * from catalogue.queue_outbox "
+            "where job_id = %(id)s order by generation desc limit 1",
+            {"id": job_id},
+        )
+        assert row is not None
+        envelopes[source] = outbox.envelope(row)
+
+    canary_owner = await registered(db)
+    canary = await queue.reserve(db, envelopes["plain"], canary_owner, [])
+    unaffected = await queue.reserve(
+        db, envelopes["same-host"], await registered(db), []
+    )
+    assert canary.job is not None
+    assert unaffected.job is not None
+    assert CrawlParams.from_job(canary.job.params).pipeline == "connector_canary"
+    assert CrawlParams.from_job(unaffected.job.params).pipeline == "legacy"
+
+    assert await queue.release(
+        db,
+        canary.job,
+        canary_owner,
+        delay=0,
+        reason="pipeline rollback test",
+    )
+    await db.execute(
+        "update catalogue.source_settings set params = %(params)s "
+        "where source_id = 'plain'",
+        {"params": Jsonb(rollback_params)},
+    )
+
+    rolled_back = await queue.reserve(
+        db, envelopes["plain"], await registered(db), []
+    )
+    assert rolled_back.job is not None
+    assert CrawlParams.from_job(rolled_back.job.params).pipeline == "legacy"
 
 
 async def test_a_released_job_spends_an_attempt_when_it_starts_again(db):

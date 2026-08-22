@@ -29,6 +29,14 @@ class ProxyDenied(RuntimeError):
     """No new paid traffic may start under the current safety state."""
 
 
+@dataclass(frozen=True)
+class ProxyReservationUsage:
+    estimated_bytes: int
+    request_count: int
+    revoked: bool
+    exhausted: bool
+
+
 def redact_url(value: str) -> str:
     """Remove URL userinfo without changing the useful endpoint identity."""
     return _USERINFO.sub(r"\g<scheme>[REDACTED]@", value)
@@ -326,6 +334,175 @@ async def close_reservation(connection: AsyncConnection[Any], lease: ProxyLease)
                 """,
                 {"provider": row["provider"], "reservation": lease.reservation_id},
             )
+
+
+async def authorize_reservation_attempt(
+    connection: AsyncConnection[Any],
+    *,
+    reservation_id: UUID,
+    estimated_bytes: int,
+    maximum_requests: int | None,
+) -> UUID | None:
+    """Atomically retain capacity for one physical attempt.
+
+    The reservation row lock serializes authorizations across workers. The
+    separate attempt row lets an undispatched authorization return its estimate
+    without ever counting that estimate as paid usage.
+    """
+    if estimated_bytes < 0:
+        raise ValueError("proxy attempt estimate must be non-negative")
+    if maximum_requests is not None and maximum_requests < 1:
+        raise ValueError("proxy request cap must be positive")
+    async with connection.transaction():
+        cursor = await connection.execute(
+            """
+            select reserved_bytes, estimated_bytes, request_count,
+                   revocation_requested or state = 'revocation_requested' as revoked
+              from catalogue.proxy_reservations
+             where id = %(id)s and state in ('active', 'revocation_requested')
+             for update
+            """,
+            {"id": reservation_id},
+        )
+        reservation = await cursor.fetchone()
+        if reservation is None:
+            raise ProxyDenied("proxy reservation is not active")
+        if reservation["revoked"]:
+            raise ProxyDenied("proxy reservation was revoked")
+        pending_cursor = await connection.execute(
+            """
+            select coalesce(sum(estimated_bytes), 0) as bytes, count(*) as requests
+              from catalogue.proxy_attempt_authorizations
+             where reservation_id = %(id)s and state = 'authorized'
+            """,
+            {"id": reservation_id},
+        )
+        pending = await pending_cursor.fetchone()
+        assert pending is not None
+        if (
+            reservation["estimated_bytes"] + pending["bytes"] + estimated_bytes
+            > reservation["reserved_bytes"]
+        ) or (
+            maximum_requests is not None
+            and reservation["request_count"] + pending["requests"] >= maximum_requests
+        ):
+            return None
+        inserted = await connection.execute(
+            """
+            insert into catalogue.proxy_attempt_authorizations
+                   (reservation_id, estimated_bytes)
+            values (%(reservation)s, %(bytes)s)
+            returning id
+            """,
+            {"reservation": reservation_id, "bytes": estimated_bytes},
+        )
+        row = await inserted.fetchone()
+        assert row is not None
+        return row["id"]
+
+
+async def reconcile_reservation_attempt(
+    connection: AsyncConnection[Any],
+    *,
+    authorization_id: UUID,
+    actual_bytes: int,
+    physical_requests: int,
+) -> ProxyReservationUsage:
+    """Exactly once reconcile a dispatched attempt into durable actuals."""
+    if actual_bytes < 0 or physical_requests < 0:
+        raise ValueError("proxy attempt actual counters must be non-negative")
+    async with connection.transaction():
+        cursor = await connection.execute(
+            """
+            select reservation_id, state, actual_bytes, physical_requests
+              from catalogue.proxy_attempt_authorizations
+             where id = %(id)s
+             for update
+            """,
+            {"id": authorization_id},
+        )
+        authorization = await cursor.fetchone()
+        if authorization is None:
+            raise ProxyDenied("proxy attempt authorization does not exist")
+        if authorization["state"] == "released":
+            raise ProxyDenied("proxy attempt authorization was released")
+        if authorization["state"] == "authorized":
+            await connection.execute(
+                """
+                update catalogue.proxy_attempt_authorizations
+                   set state = 'reconciled', actual_bytes = %(bytes)s,
+                       physical_requests = %(requests)s, resolved_at = now()
+                 where id = %(id)s
+                """,
+                {
+                    "id": authorization_id,
+                    "bytes": actual_bytes,
+                    "requests": physical_requests,
+                },
+            )
+            await connection.execute(
+                """
+                update catalogue.proxy_reservations
+                   set estimated_bytes = estimated_bytes + %(bytes)s,
+                       request_count = request_count + %(requests)s
+                 where id = %(reservation)s
+                """,
+                {
+                    "reservation": authorization["reservation_id"],
+                    "bytes": actual_bytes,
+                    "requests": physical_requests,
+                },
+            )
+        elif (
+            authorization["actual_bytes"] != actual_bytes
+            or authorization["physical_requests"] != physical_requests
+        ):
+            raise ProxyDenied("proxy attempt was already reconciled with different actuals")
+        usage_cursor = await connection.execute(
+            """
+            select estimated_bytes, request_count, reserved_bytes,
+                   revocation_requested or state = 'revocation_requested' as revoked
+              from catalogue.proxy_reservations
+             where id = %(reservation)s
+            """,
+            {"reservation": authorization["reservation_id"]},
+        )
+        usage = await usage_cursor.fetchone()
+        if usage is None:
+            raise ProxyDenied("proxy reservation does not exist")
+        return ProxyReservationUsage(
+            estimated_bytes=usage["estimated_bytes"],
+            request_count=usage["request_count"],
+            revoked=bool(usage["revoked"]),
+            exhausted=usage["estimated_bytes"] > usage["reserved_bytes"],
+        )
+
+
+async def release_reservation_attempt(
+    connection: AsyncConnection[Any], *, authorization_id: UUID
+) -> None:
+    """Release capacity for an attempt proven not to have dispatched."""
+    cursor = await connection.execute(
+        """
+        update catalogue.proxy_attempt_authorizations
+           set state = 'released', resolved_at = now()
+         where id = %(id)s and state = 'authorized'
+        returning id
+        """,
+        {"id": authorization_id},
+    )
+    row = await cursor.fetchone()
+    if row is not None:
+        return
+    state_cursor = await connection.execute(
+        "select state from catalogue.proxy_attempt_authorizations where id = %(id)s",
+        {"id": authorization_id},
+    )
+    state = await state_cursor.fetchone()
+    if state is None:
+        raise ProxyDenied("proxy attempt authorization does not exist")
+    if state["state"] != "released":
+        raise ProxyDenied("a dispatched proxy attempt cannot be released")
 
 
 async def reservation_revoked(connection: AsyncConnection[Any], reservation_id: UUID) -> bool:

@@ -43,6 +43,7 @@ from mb_commerce_scraper.transports import (
     CommerceTransport,
     RequestPriority,
     RequestPurpose,
+    ResponseBodyTooLarge,
     TransportFailure,
     TransportRequest,
 )
@@ -161,6 +162,7 @@ class WixConnector(CommerceConnector):
             urls, discovery_error = await self._discover(request.base_url)
         except (
             HTTPStatusFailure,
+            ResponseBodyTooLarge,
             SitemapTraversalFailure,
             TransportFailure,
             UnicodeError,
@@ -172,7 +174,7 @@ class WixConnector(CommerceConnector):
                     code=DiagnosticCode.ENUMERATION_INCOMPLETE,
                     severity=DiagnosticSeverity.ERROR,
                     message=f"Wix sitemap discovery failed: {type(error).__name__}",
-                    retryable=True,
+                    retryable=not isinstance(error, ResponseBodyTooLarge),
                     affects_completeness=True,
                     url=request.base_url,
                 ),
@@ -220,14 +222,14 @@ class WixConnector(CommerceConnector):
             url = urls[index]
             try:
                 document = await self.transport.document(url, rendered=self.options.render is True)
-            except (HTTPStatusFailure, TransportFailure) as error:
+            except (HTTPStatusFailure, ResponseBodyTooLarge, TransportFailure) as error:
                 yield self._entity_failure(sequence, index, url, error)
                 return
             snapshot = self._normalize(document, url, request.source_id)
             if snapshot is None and self.options.render is None:
                 try:
                     rendered = await self.transport.document(url, rendered=True)
-                except (HTTPStatusFailure, TransportFailure):
+                except (HTTPStatusFailure, ResponseBodyTooLarge, TransportFailure):
                     rendered = ""
                 snapshot = self._normalize(rendered, url, request.source_id)
             if snapshot is None:
@@ -285,7 +287,7 @@ class WixConnector(CommerceConnector):
     async def _discover(self, base_url: str) -> tuple[list[str], Diagnostic | None]:
         configured = list(self.options.sitemaps)
         if not configured and self.options.use_advertised_sitemaps:
-            with suppress(TransportFailure):
+            with suppress(ResponseBodyTooLarge, TransportFailure):
                 configured.extend(await self.transport.advertised_sitemaps(base_url))
         fallback = f"{_origin(base_url)}/store-products-sitemap.xml"
         first_error: tuple[str, str] | None = None
@@ -296,6 +298,7 @@ class WixConnector(CommerceConnector):
                 urls = await self._walk_sitemaps(list(dict.fromkeys(initial)))
             except (
                 HTTPStatusFailure,
+                ResponseBodyTooLarge,
                 SitemapTraversalFailure,
                 TransportFailure,
                 UnicodeError,
@@ -311,7 +314,7 @@ class WixConnector(CommerceConnector):
                 code=DiagnosticCode.ENUMERATION_INCOMPLETE,
                 severity=DiagnosticSeverity.ERROR,
                 message=f"Wix sitemap fetch failed: {error_name}",
-                retryable=True,
+                retryable=error_name != ResponseBodyTooLarge.__name__,
                 affects_completeness=True,
                 url=url,
             )
@@ -549,7 +552,7 @@ class WixConnector(CommerceConnector):
                 code=DiagnosticCode.ENTITY_FETCH_FAILED,
                 severity=DiagnosticSeverity.ERROR,
                 message=f"Wix product fetch failed: {type(error).__name__}",
-                retryable=True,
+                retryable=not isinstance(error, ResponseBodyTooLarge),
                 affects_completeness=True,
                 url=url,
             ),
@@ -558,6 +561,7 @@ class WixConnector(CommerceConnector):
 
 class WixFactory:
     name = "wix"
+    version = WixConnector.version
     options_model: type[BaseModel] = WixOptions
 
     def build(

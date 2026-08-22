@@ -287,6 +287,33 @@ async def test_proxy_audit_is_immutable_for_runtime_connection(proxy_client, db)
 
 @pytest.mark.postgres
 @requires_postgres
+async def test_proxy_audit_maintenance_checks_invoking_session(proxy_client, db):
+    client, private, _, _ = proxy_client
+    path = "/v1/proxy/kill-switch/activate"
+    await client.post(
+        path, json={},
+        headers={**assertion(private, "POST", path), "idempotency-key": "audit-session"},
+    )
+    await db.execute("create role catalogue_proxy_maintenance")
+    await db.execute("create role catalogue_proxy_untrusted")
+    await db.execute("grant usage on schema catalogue to catalogue_proxy_untrusted")
+    await db.execute(
+        "grant select, delete on catalogue.proxy_admin_audit to catalogue_proxy_untrusted"
+    )
+    try:
+        await db.execute("set session authorization catalogue_proxy_untrusted")
+        await db.execute("set catalogue.proxy_audit_maintenance = 'on'")
+        with pytest.raises(Exception, match="proxy audit rows are immutable"):
+            await db.execute("delete from catalogue.proxy_admin_audit")
+    finally:
+        await db.execute("reset session authorization")
+        await db.execute("drop owned by catalogue_proxy_untrusted")
+        await db.execute("drop role catalogue_proxy_untrusted")
+        await db.execute("drop role catalogue_proxy_maintenance")
+
+
+@pytest.mark.postgres
+@requires_postgres
 async def test_reconciliation_persists_supported_provider_groupings(proxy_client, db):
     client, private, _, _ = proxy_client
     now = datetime.now(UTC)

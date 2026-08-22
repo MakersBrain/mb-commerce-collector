@@ -122,7 +122,10 @@ async def test_warmup_payload_emits_neutral_price_stock_and_documents() -> None:
         ConnectorContext(clock=lambda: NOW),
     )
 
-    pages = await assert_connector_pages(connector.collect(request()))
+    intent = request()
+    pages = await assert_connector_pages(
+        connector.collect(intent), connector=connector, request=intent
+    )
 
     snapshot = pages[0].items[0]
     assert snapshot.title == "Transparent Glaze"

@@ -73,7 +73,10 @@ async def test_simple_product_preserves_neutral_fields() -> None:
         WooCommerceOptions(vat_status="inclusive", stock_from_add_to_cart_maximum=True),
         ConnectorContext(clock=lambda: NOW),
     )
-    pages = await assert_connector_pages(connector.collect(intent()))
+    request = intent()
+    pages = await assert_connector_pages(
+        connector.collect(request), connector=connector, request=request
+    )
     snapshot = pages[0].items[0]
     assert snapshot.title == "Transparent & Gloss Glaze"
     assert snapshot.documents[0].url == "https://shop.test/docs/sds.pdf"
@@ -102,6 +105,33 @@ async def test_categories_are_collection_partitions() -> None:
     pages = await assert_connector_pages(connector.collect(intent(partitions=("glazes",))))
     assert pages[0].partition_key == "glazes"
     assert transport.requests[1].query["category"] == 3
+
+
+async def test_category_boundaries_are_explicit_partition_terminals() -> None:
+    transport = FakeTransport()
+    transport.add(
+        f"{API}/categories",
+        json_body=[{"id": 3, "slug": "glazes"}, {"id": 4, "slug": "clay"}],
+    )
+    transport.add(API, json_body=[product(10)])
+    transport.add(API, json_body=[product(20)])
+    connector = WooCommerceConnector(
+        transport, context=ConnectorContext(clock=lambda: NOW)
+    )
+
+    pages = tuple(
+        [
+            page
+            async for page in connector.collect(
+                intent(partitions=("glazes", "clay"))
+            )
+        ]
+    )
+
+    assert [(page.partition_key, page.partition_terminal, page.terminal) for page in pages] == [
+        ("glazes", True, False),
+        ("clay", False, True),
+    ]
 
 
 async def test_limit_checkpoint_rejects_changed_options() -> None:

@@ -307,6 +307,10 @@ class WooCommerceConnector(CommerceConnector):
                 is not None
             )
             final_page = failure is None and index == len(raw_pages) - 1
+            partition_terminal = (
+                not final_page
+                and raw_pages[index + 1].partition != raw_page.partition
+            )
             limit_diagnostics = (
                 (result_limit_diagnostic(request.result_limit, self._store_api(origin)),)
                 if final_page and limited and request.result_limit is not None
@@ -320,6 +324,7 @@ class WooCommerceConnector(CommerceConnector):
                 items=snapshots,
                 resume_after=None if final_page and not limited else next_cursor,
                 terminal=final_page,
+                partition_terminal=partition_terminal,
                 enumeration_intact=not (final_page and limited),
                 discovered=len(raw_page.products),
                 diagnostics=diagnostics,
@@ -886,6 +891,7 @@ class WooCommerceConnector(CommerceConnector):
 
 class WooCommerceFactory:
     name = "woocommerce"
+    version = WooCommerceConnector.version
     options_model: type[BaseModel] = WooCommerceOptions
 
     def build(

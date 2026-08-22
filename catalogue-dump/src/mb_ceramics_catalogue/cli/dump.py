@@ -26,7 +26,7 @@ from mb_ceramics_catalogue.crawl.session import open_session
 from mb_ceramics_catalogue.observability import logging as obs
 from mb_ceramics_catalogue.observability import tracing
 from mb_ceramics_catalogue.ops import recording
-from mb_ceramics_catalogue.ops.connector_adapters import runtime_plan
+from mb_ceramics_catalogue.ops.commerce_scraper_runtime import local_canary_source_config
 from mb_ceramics_catalogue.scrapers.cache import MODES as CACHE_MODES
 from mb_ceramics_catalogue.scrapers.record import RecordBuilder
 from mb_ceramics_catalogue.storage.history import persist_history
@@ -174,14 +174,9 @@ async def run(options: argparse.Namespace) -> int:
                 "local connector_canary currently writes only the ceramics compatibility "
                 "dataset; multi-dataset publication requires the PostgreSQL worker"
             )
-        plans = {name: runtime_plan(sources[name]) for name in selected}
         sources = SourcesFile.model_validate(
             {
-                name: source.model_copy(
-                    update={"scraper": plans[name].legacy_scraper_adapter}
-                    if name in selected
-                    else {}
-                )
+                name: local_canary_source_config(source) if name in selected else source
                 for name, source in sources.items()
             }
         )

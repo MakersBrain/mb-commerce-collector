@@ -3,5 +3,9 @@ from typing import Protocol
 
 
 class DiscoveryStrategy(Protocol):
-    def discover(self, base_url: str) -> AsyncIterator[str]: ...
+    """Explicitly composed, versioned product-URL discovery strategy."""
 
+    name: str
+    version: str
+
+    def discover(self, base_url: str) -> AsyncIterator[str]: ...

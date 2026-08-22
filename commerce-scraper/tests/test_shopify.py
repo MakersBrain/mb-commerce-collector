@@ -5,7 +5,12 @@ import pytest
 
 from mb_commerce_scraper import CollectionRequest, RefreshMode, SnapshotField
 from mb_commerce_scraper.connectors import ConnectorContext, ShopifyConnector, ShopifyOptions
-from mb_commerce_scraper.testing import FakeTransport, assert_connector_pages
+from mb_commerce_scraper.testing import (
+    FakeTransport,
+    assert_cancelled_without_requests,
+    assert_checkpoint_matches,
+    assert_connector_pages,
+)
 from mb_commerce_scraper.transports import MemoryRequestBudget, MiddlewareTransport
 
 NOW = datetime(2026, 8, 15, tzinfo=UTC)
@@ -40,7 +45,9 @@ async def test_shopify_collects_from_fake_transport_and_resumes() -> None:
     transport.add("https://shop.test/products.json", json_body={"products": [{"id": 1, "handle": "clay", "title": "Clay", "variants": [{"id": 2, "price": "12.30", "available": True}]}]})
     connector = ShopifyConnector(transport, ShopifyOptions(), ConnectorContext())
     request = CollectionRequest(source_id="shop", base_url="https://shop.test", refresh_mode=RefreshMode.FULL, requested_fields=frozenset(SnapshotField))
-    pages = await assert_connector_pages(connector.collect(request))
+    pages = await assert_connector_pages(
+        connector.collect(request), connector=connector, request=request
+    )
     assert pages[0].items[0].variants[0].offers[0].price.currency == "EUR"
     assert [item.url for item in transport.requests] == ["https://shop.test/meta.json", "https://shop.test/products.json"]
 
@@ -50,10 +57,18 @@ async def test_shopify_limit_produces_compatible_checkpoint() -> None:
     transport.add("https://shop.test/products.json", json_body={"products": [{"id": 1, "handle": "one", "title": "One"}, {"id": 2, "handle": "two", "title": "Two"}]})
     connector = ShopifyConnector(transport, ShopifyOptions(currency="EUR", page_size=2))
     request = CollectionRequest(source_id="shop", base_url="https://shop.test", result_limit=1)
-    page = await anext(connector.collect(request))
+    [page] = await assert_connector_pages(
+        connector.collect(request), connector=connector, request=request
+    )
     assert page.terminal and not page.enumeration_intact
     checkpoint = connector.checkpoint(request, "lineage", page.resume_after)
     assert checkpoint.resume_after == {"partition": "main", "page": 1, "offset": 1}
+    assert_checkpoint_matches(
+        checkpoint,
+        connector=connector,
+        request=request,
+        options=connector.options.model_dump(mode="json"),
+    )
 
 
 async def test_product_json_inventory_produces_exact_stock_and_full_snapshot() -> None:
@@ -239,8 +254,9 @@ async def test_cancellation_and_checkpoint_option_drift() -> None:
         ConnectorContext(cancelled=lambda: True),
     )
     request = CollectionRequest(source_id="shop", base_url="https://shop.test")
-    assert [page async for page in connector.collect(request)] == []
-    assert cancelled_transport.requests == []
+    await assert_cancelled_without_requests(
+        connector.collect(request), cancelled_transport.requests
+    )
 
     original = ShopifyConnector(FakeTransport(), ShopifyOptions(currency="EUR"))
     checkpoint = original.checkpoint(

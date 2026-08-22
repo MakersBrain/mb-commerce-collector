@@ -34,14 +34,15 @@ from mb_commerce_scraper.models import (
     validate_checkpoint,
 )
 from mb_commerce_scraper.transports import (
+    BudgetExhausted,
     CommerceTransport,
     RequestPriority,
     RequestPurpose,
+    ResponseBodyTooLarge,
     RotationReason,
     TransportFailure,
     TransportRequest,
 )
-from mb_commerce_scraper.transports.middleware import BudgetExhausted
 
 from .base import BrowserRequirement, CommerceConnector, ConnectorCapabilities, ConnectorContext
 
@@ -69,6 +70,7 @@ class ShopifyConnector(CommerceConnector):
         stock_kinds=frozenset({StockQuantityKind.EXACT, StockQuantityKind.UNKNOWN}),
         supports_documents=True,
         browser=BrowserRequirement.NEVER,
+        shared_edge="edge:shopify",
     )
 
     def __init__(self, transport: CommerceTransport, options: ShopifyOptions, context: ConnectorContext | None = None) -> None:
@@ -145,7 +147,7 @@ class ShopifyConnector(CommerceConnector):
                 except BudgetExhausted:
                     yield self._budget_page(partition, page_number, sequence, endpoint)
                     return
-                except (TransportFailure, ValueError) as error:
+                except (ResponseBodyTooLarge, TransportFailure, ValueError) as error:
                     yield self._failure_page(
                         partition, page_number, sequence, endpoint, error
                     )
@@ -496,7 +498,7 @@ class ShopifyConnector(CommerceConnector):
                     code=DiagnosticCode.ENUMERATION_INCOMPLETE,
                     severity=DiagnosticSeverity.ERROR,
                     message=f"Shopify feed page {page} failed: {error}",
-                    retryable=True,
+                    retryable=not isinstance(error, ResponseBodyTooLarge),
                     affects_completeness=True,
                     url=f"{endpoint}?page={page}",
                 ),
@@ -712,6 +714,7 @@ class ShopifyConnector(CommerceConnector):
 
 class ShopifyFactory:
     name = "shopify"
+    version = ShopifyConnector.version
     options_model: type[BaseModel] = ShopifyOptions
 
     def build(self, *, transport: CommerceTransport, options: BaseModel, context: ConnectorContext) -> ShopifyConnector:

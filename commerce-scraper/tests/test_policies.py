@@ -11,4 +11,6 @@ def test_layered_policies_are_strict_and_bounded() -> None:
     with pytest.raises(ValidationError):
         ProxyPolicyConfig.model_validate({"country": "FRA"})
     with pytest.raises(ValidationError):
+        ProxyPolicyConfig.model_validate({"maximum_requests": 0})
+    with pytest.raises(ValidationError):
         ProxyPolicyConfig.model_validate({"provider_username_template": "secret"})

@@ -14,6 +14,42 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:  # pragma: no cover
     from .base import Scraper
 
+
+@dataclass(frozen=True)
+class AdapterCapabilities:
+    """Migration capabilities keyed by the stable legacy scraper name."""
+
+    canary_adapter: str | None = None
+    price_refresh: bool = False
+
+
+ADAPTER_CAPABILITIES: dict[str, AdapterCapabilities] = {
+    "shopify": AdapterCapabilities("shopify_connector", price_refresh=True),
+    "woocommerce": AdapterCapabilities("woocommerce_connector", price_refresh=True),
+    "bigcommerce": AdapterCapabilities("bigcommerce_connector", price_refresh=True),
+    "wix": AdapterCapabilities("wix_connector"),
+    "shopware": AdapterCapabilities("shopware_connector"),
+    "sumup": AdapterCapabilities("sumup_connector"),
+    "starweb": AdapterCapabilities("starweb_connector", price_refresh=True),
+    "nitrosell": AdapterCapabilities("nitrosell_connector"),
+    "prestashop": AdapterCapabilities("prestashop_connector"),
+    "sio2": AdapterCapabilities("sio2_connector"),
+    "pagecrawl": AdapterCapabilities("pagecrawl_connector"),
+    "axner": AdapterCapabilities("axner_connector"),
+    "ceramicolours": AdapterCapabilities("ceramicolours_connector"),
+    "keramik_kraft": AdapterCapabilities("keramik_kraft_connector", price_refresh=True),
+}
+
+# Shared local library shells are derived from the same migration metadata as
+# their rollback adapters. This reverse map is also the shell's authority for
+# restoring the stable source scraper identity.
+LIBRARY_CANARY_SCRAPERS: dict[str, str] = {
+    f"library_{capabilities.canary_adapter}": scraper
+    for scraper, capabilities in ADAPTER_CAPABILITIES.items()
+    if capabilities.canary_adapter is not None
+}
+_LIBRARY_CONNECTOR_SCRAPER = ".library_connector:LibraryConnectorScraper"
+
 #: scraper name -> "module:class", imported on demand.
 #:
 #: The module names are relative to this package. They used to be absolute
@@ -61,32 +97,10 @@ REGISTRY: dict[str, str] = {
     "sumup_connector": ".specialized_connectors:SumUpConnectorScraper",
     "starweb_connector": ".specialized_connectors:StarwebConnectorScraper",
     "nitrosell_connector": ".specialized_connectors:NitroSellConnectorScraper",
-}
-
-
-@dataclass(frozen=True)
-class AdapterCapabilities:
-    """Migration capabilities keyed by the stable legacy scraper name."""
-
-    canary_adapter: str | None = None
-    price_refresh: bool = False
-
-
-ADAPTER_CAPABILITIES: dict[str, AdapterCapabilities] = {
-    "shopify": AdapterCapabilities("shopify_connector", price_refresh=True),
-    "woocommerce": AdapterCapabilities("woocommerce_connector", price_refresh=True),
-    "bigcommerce": AdapterCapabilities("bigcommerce_connector", price_refresh=True),
-    "wix": AdapterCapabilities("wix_connector"),
-    "shopware": AdapterCapabilities("shopware_connector"),
-    "sumup": AdapterCapabilities("sumup_connector"),
-    "starweb": AdapterCapabilities("starweb_connector", price_refresh=True),
-    "nitrosell": AdapterCapabilities("nitrosell_connector"),
-    "prestashop": AdapterCapabilities("prestashop_connector"),
-    "sio2": AdapterCapabilities("sio2_connector"),
-    "pagecrawl": AdapterCapabilities("pagecrawl_connector"),
-    "axner": AdapterCapabilities("axner_connector"),
-    "ceramicolours": AdapterCapabilities("ceramicolours_connector"),
-    "keramik_kraft": AdapterCapabilities("keramik_kraft_connector", price_refresh=True),
+    # Local dump/probe canaries share one registry/runtime/projection shell.
+    # Connector-specific compatibility shells remain available for parity and
+    # rollback tests but are no longer the local canary composition root.
+    **dict.fromkeys(LIBRARY_CANARY_SCRAPERS, _LIBRARY_CONNECTOR_SCRAPER),
 }
 
 
@@ -95,6 +109,14 @@ def adapter_capabilities(name: str) -> AdapterCapabilities:
     if name.endswith("_connector"):
         name = name.removesuffix("_connector")
     return ADAPTER_CAPABILITIES.get(name, AdapterCapabilities())
+
+
+def library_canary_alias(name: str) -> str:
+    """Return the registered shared-library shell for a stable scraper name."""
+    capabilities = ADAPTER_CAPABILITIES.get(name)
+    if capabilities is None or capabilities.canary_adapter is None:
+        raise KeyError(f"scraper {name!r} has no library canary adapter")
+    return f"library_{capabilities.canary_adapter}"
 
 
 def load(name: str) -> type[Scraper]:

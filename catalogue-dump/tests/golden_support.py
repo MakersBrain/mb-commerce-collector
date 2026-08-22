@@ -74,9 +74,25 @@ def serialise(records: list[dict[str, Any]]) -> str:
     )
 
 
-async def collect(name: str, limit: int | None = None) -> dict[str, Any]:
-    """Scrape one source from the cache alone and return records plus summary."""
+async def collect(
+    name: str,
+    limit: int | None = None,
+    *,
+    scraper: str | None = None,
+) -> dict[str, Any]:
+    """Scrape one source from the cache alone and return records plus summary.
+
+    ``scraper`` selects an explicitly registered migration path while retaining
+    every other checked-in source option.  This lets recorded parity run the
+    legacy and library paths against independent readers of the same archive;
+    it does not rewrite or translate the archive.
+    """
     configured = sources()
+    source = configured[name]
+    if scraper is not None:
+        source = type(source).model_validate(
+            {**source.model_dump(mode="python"), "scraper": scraper}
+        )
     params = CrawlParams(
         limit=limit,
         cache_mode="replay",
@@ -93,7 +109,7 @@ async def collect(name: str, limit: int | None = None) -> dict[str, Any]:
             open_session(params, CACHE) as session,
             Progress(1) as progress,
         ):
-            outcome = await run_source(name, configured[name], session, params, progress, None)
+            outcome = await run_source(name, source, session, params, progress, None)
     return outcome.as_payload()
 
 

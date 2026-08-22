@@ -21,9 +21,14 @@ from mb_commerce_scraper.connectors.specialized import (
     SumUpOptions,
 )
 from mb_commerce_scraper.connectors.specialized_parsing import VerifiedDomRules
-from mb_commerce_scraper.models import SnapshotField
-from mb_commerce_scraper.testing import FakeTransport, assert_connector_pages
-from mb_commerce_scraper.transports import BrowserHint
+from mb_commerce_scraper.models import RefreshMode, SnapshotField
+from mb_commerce_scraper.testing import (
+    FakeTransport,
+    assert_cancelled_without_requests,
+    assert_checkpoint_matches,
+    assert_connector_pages,
+)
+from mb_commerce_scraper.transports import BrowserDispatchTransport, BrowserHint
 
 NOW = datetime(2026, 8, 15, tzinfo=UTC)
 JSONLD = """<html><script type="application/ld+json">{
@@ -165,6 +170,76 @@ def test_sumup_parser_preserves_minor_units_variants_and_exact_stock() -> None:
     assert variant.stock.quantity_kind == "exact"
 
 
+async def test_sumup_collection_runs_contextual_conformance_harness() -> None:
+    secret = "sumup-response-secret"
+    transport = FakeTransport()
+    transport.add(
+        "https://shop.test/s.xml",
+        body="<urlset><url><loc>https://shop.test/article/tasse-bleue</loc></url></urlset>",
+    )
+    transport.add(
+        "https://shop.test/article/tasse-bleue",
+        body=_sumup_page() + f"<script>{secret}</script>",
+    )
+    options = SumUpOptions(
+        sitemaps=("/s.xml",), product_pattern=r"/article/"
+    )
+    connector = SumUpConnector(transport, options, _context())
+    intent = _request()
+
+    [page] = await assert_connector_pages(
+        connector.collect(intent),
+        connector=connector,
+        request=intent,
+        forbidden_values=(secret,),
+    )
+
+    assert page.items[0].title == "Tasse bleue"
+
+
+async def test_oversized_product_body_becomes_a_non_retryable_diagnostic() -> None:
+    raw = FakeTransport()
+    raw.add(
+        "https://shop.test/s.xml",
+        body="<urlset><url><loc>https://shop.test/a</loc></url></urlset>",
+    )
+    secret = "oversized-product-secret"
+    raw.add("https://shop.test/a", body=secret * 10)
+    transport = BrowserDispatchTransport(raw, maximum_response_bytes=128)
+    connector = ShopwareConnector(
+        transport,
+        ShopwareOptions(sitemaps=("/s.xml",), product_pattern=r"/a$"),
+        _context(),
+    )
+
+    pages = [page async for page in connector.collect(_request())]
+
+    assert len(pages) == 1
+    assert pages[0].diagnostics[0].code == "entity_fetch_failed"
+    assert not pages[0].diagnostics[0].retryable
+    assert "ResponseBodyTooLarge" in pages[0].diagnostics[0].message
+    assert secret not in repr(pages[0])
+    assert len(raw.requests) == 2
+
+
+async def test_oversized_sitemap_becomes_a_non_retryable_diagnostic() -> None:
+    raw = FakeTransport()
+    raw.add("https://shop.test/s.xml", body="oversized-sitemap-secret")
+    connector = ShopwareConnector(
+        BrowserDispatchTransport(raw, maximum_response_bytes=10),
+        ShopwareOptions(sitemaps=("/s.xml",)),
+        _context(),
+    )
+
+    pages = [page async for page in connector.collect(_request())]
+
+    assert len(pages) == 1
+    assert pages[0].diagnostics[0].code == "enumeration_incomplete"
+    assert not pages[0].diagnostics[0].retryable
+    assert "ResponseBodyTooLarge" in pages[0].diagnostics[0].message
+    assert "oversized-sitemap-secret" not in repr(pages[0])
+
+
 @pytest.mark.parametrize(
     ("connector_type", "options_type"),
     [
@@ -186,8 +261,11 @@ async def test_collection_is_ordered_bounded_and_checkpoint_resumable(
     transport.add("https://shop.test/b", body=JSONLD)
     options = options_type(sitemaps=("/s.xml",), product_pattern=r"/[ab]$")
     connector = connector_type(transport, options, _context())
+    intent = _request()
 
-    pages = await assert_connector_pages(connector.collect(_request()))
+    pages = await assert_connector_pages(
+        connector.collect(intent), connector=connector, request=intent
+    )
     assert [page.sequence for page in pages] == [0, 1]
     assert pages[0].resume_after == {
         "index": 1, "url": "https://shop.test/b",
@@ -199,9 +277,20 @@ async def test_collection_is_ordered_bounded_and_checkpoint_resumable(
     resume_transport.add("https://shop.test/b", body=JSONLD)
     resumed_connector = connector_type(resume_transport, options, _context())
     checkpoint = resumed_connector.checkpoint(
-        _request(), "lineage-1", pages[0].resume_after
+        intent, "lineage-1", pages[0].resume_after
     )
-    resumed = tuple([page async for page in resumed_connector.collect(_request(), checkpoint)])
+    assert_checkpoint_matches(
+        checkpoint,
+        connector=resumed_connector,
+        request=intent,
+        options=cast(dict[str, JsonValue], options.model_dump(mode="json")),
+    )
+    resumed = await assert_connector_pages(
+        resumed_connector.collect(intent, checkpoint),
+        connector=resumed_connector,
+        request=intent,
+        start_sequence=1,
+    )
     assert resumed[-1].terminal
     assert resumed[0].sequence == 1
     assert resumed[0].items[0].canonical_url == "https://shop.test/b"
@@ -216,14 +305,21 @@ async def test_result_limit_is_typed_and_does_not_fetch_next_product() -> None:
             "<url><loc>https://shop.test/b</loc></url></urlset>"
         ),
     )
-    transport.add("https://shop.test/a", body=NITRO)
+    secret = "specialized-secret-sentinel"
+    transport.add("https://shop.test/a", body=NITRO + f"<script>{secret}</script>")
     connector = NitroSellConnector(
         transport,
         NitroSellOptions(sitemaps=("/s.xml",), product_pattern=r"/[ab]$"),
         _context(),
     )
 
-    pages = await assert_connector_pages(connector.collect(_request(limit=1)))
+    intent = _request(limit=1)
+    pages = await assert_connector_pages(
+        connector.collect(intent),
+        connector=connector,
+        request=intent,
+        forbidden_values=(secret,),
+    )
     assert len(pages) == 1
     assert not pages[0].enumeration_intact
     assert pages[0].diagnostics[0].code == "result_limit_reached"
@@ -231,21 +327,49 @@ async def test_result_limit_is_typed_and_does_not_fetch_next_product() -> None:
         "https://shop.test/s.xml",
         "https://shop.test/a",
     ]
+    checkpoint = connector.checkpoint(
+        intent, "lineage-1", pages[0].resume_after
+    )
+    assert_checkpoint_matches(
+        checkpoint,
+        connector=connector,
+        request=intent,
+        options=cast(
+            dict[str, JsonValue], connector.options.model_dump(mode="json")
+        ),
+    )
 
 
-async def test_cancellation_stops_before_entity_fetch() -> None:
+@pytest.mark.parametrize(
+    ("connector_type", "options_type"),
+    [
+        (ShopwareConnector, ShopwareOptions),
+        (StarwebConnector, StarwebOptions),
+        (NitroSellConnector, NitroSellOptions),
+        (SumUpConnector, SumUpOptions),
+    ],
+)
+async def test_cancellation_stops_before_transport_io(
+    connector_type: Any,
+    options_type: Any,
+) -> None:
     transport = FakeTransport()
-    transport.add(
-        "https://shop.test/s.xml",
-        body="<urlset><url><loc>https://shop.test/a</loc></url></urlset>",
-    )
-    connector = ShopwareConnector(
-        transport,
-        ShopwareOptions(sitemaps=("/s.xml",)),
-        _context(cancelled=True),
+    connector = connector_type(
+        transport, options_type(sitemaps=("/s.xml",)), _context(cancelled=True)
     )
 
-    assert [page async for page in connector.collect(_request())] == []
+    await assert_cancelled_without_requests(
+        connector.collect(_request()), transport.requests
+    )
+
+
+async def test_incremental_request_is_rejected_before_transport_io() -> None:
+    transport = FakeTransport()
+    connector = ShopwareConnector(transport, ShopwareOptions(), _context())
+    request = _request().model_copy(update={"refresh_mode": RefreshMode.INCREMENTAL})
+
+    with pytest.raises(ValueError, match="does not support"):
+        await anext(connector.collect(request))
     assert transport.requests == []
 
 
@@ -290,11 +414,16 @@ async def test_category_discovery_preserves_path_patterns_cards_and_pagination()
 
 
 async def test_checkpoint_fingerprint_rejects_option_drift() -> None:
-    connector = SumUpConnector(
-        FakeTransport(), SumUpOptions(sitemaps=("/products.xml",)), _context()
-    )
+    options = SumUpOptions(sitemaps=("/products.xml",))
+    connector = SumUpConnector(FakeTransport(), options, _context())
     checkpoint = connector.checkpoint(
         _request(), "lineage-1", {"after_url": "https://shop.test/a"}
+    )
+    assert_checkpoint_matches(
+        checkpoint,
+        connector=connector,
+        request=_request(),
+        options=cast(dict[str, JsonValue], options.model_dump(mode="json")),
     )
     changed = SumUpConnector(
         FakeTransport(), SumUpOptions(sitemaps=("/changed.xml",)), _context()

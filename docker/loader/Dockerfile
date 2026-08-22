@@ -12,8 +12,10 @@ COPY commerce-scraper/pyproject.toml commerce-scraper/README.md ./commerce-scrap
 COPY commerce-scraper/src ./commerce-scraper/src
 COPY catalogue-dump/pyproject.toml catalogue-dump/sources.json ./catalogue-dump/
 COPY catalogue-dump/src ./catalogue-dump/src
+COPY docker/verify-python-distributions.py /usr/local/bin/verify-python-distributions.py
 
 RUN pip install --no-cache-dir ./commerce-scraper "./catalogue-dump[postgres]" \
+ && python -I /usr/local/bin/verify-python-distributions.py \
  && rm -rf /root/.cache
 
 # Not root: it reads NDJSON and writes to one database, and needs nothing else.

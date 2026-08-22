@@ -13,7 +13,11 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from mb_commerce_scraper.discovery import SitemapDiscovery
+from mb_commerce_scraper.discovery import (
+    DiscoveryFailure,
+    SitemapDiscovery,
+    advertised_sitemaps,
+)
 from mb_commerce_scraper.models import (
     Availability,
     CategoryRef,
@@ -36,14 +40,18 @@ from mb_commerce_scraper.models import (
     StockState,
     collection_fingerprint,
     result_limit_diagnostic,
+    sanitize_commerce_snapshot,
     validate_checkpoint,
 )
 from mb_commerce_scraper.parsing import JsonLdProductParser
 from mb_commerce_scraper.transports import (
     BrowserHint,
+    BudgetExhausted,
     CommerceTransport,
     RequestPriority,
     RequestPurpose,
+    ResponseBodyTooLarge,
+    TransportFailure,
     TransportRequest,
 )
 
@@ -146,6 +154,12 @@ class SpecializedPageConnector(CommerceConnector):
         request: CollectionRequest,
         checkpoint: ConnectorCheckpoint | None = None,
     ) -> AsyncIterator[EntityPage[CommerceProductSnapshot]]:
+        if not self.capabilities.supports(
+            request.requested_fields, request.refresh_mode
+        ):
+            raise ValueError(
+                f"{self.name} does not support the requested collection contract"
+            )
         if self.context.cancelled():
             return
         options = self._checkpoint_options()
@@ -156,7 +170,19 @@ class SpecializedPageConnector(CommerceConnector):
             request=request,
             options=options,
         )
-        discovered_urls = tuple([url async for url in self._discover(request.base_url)])
+        try:
+            discovered_urls = tuple(
+                [url async for url in self._discover(request.base_url)]
+            )
+        except DiscoveryFailure as error:
+            yield self._failure_page(
+                0,
+                request.base_url,
+                DiagnosticCode.ENUMERATION_INCOMPLETE,
+                str(error),
+                retryable=error.retryable,
+            )
+            return
         if self.context.cancelled():
             return
         if not discovered_urls:
@@ -179,19 +205,45 @@ class SpecializedPageConnector(CommerceConnector):
             if self.context.cancelled():
                 return
             url = discovered_urls[current]
-            response = await self.transport.request(
-                TransportRequest(
-                    url=url,
-                    purpose=RequestPurpose.ENTITY,
-                    priority=RequestPriority.IDENTITY,
-                    estimated_bytes=500_000,
-                    browser=(
-                        BrowserHint.REQUIRED
-                        if self.options.render is True
-                        else BrowserHint.NEVER
-                    ),
+            initial_browser = self.options.render is True
+            try:
+                response = await self.transport.request(
+                    TransportRequest(
+                        url=url,
+                        purpose=RequestPurpose.ENTITY,
+                        priority=RequestPriority.IDENTITY,
+                        estimated_bytes=500_000,
+                        browser=(
+                            BrowserHint.REQUIRED
+                            if initial_browser
+                            else BrowserHint.NEVER
+                        ),
+                    )
                 )
-            )
+            except (BudgetExhausted, ResponseBodyTooLarge, TransportFailure) as error:
+                budget_exhausted = isinstance(error, BudgetExhausted)
+                yield self._failure_page(
+                    sequence,
+                    url,
+                    (
+                        DiagnosticCode.REQUEST_BUDGET_EXHAUSTED
+                        if budget_exhausted
+                        else DiagnosticCode.ENTITY_FETCH_FAILED
+                    ),
+                    f"product transport failed: {type(error).__name__}",
+                    retryable=(
+                        budget_exhausted
+                        or not isinstance(error, ResponseBodyTooLarge)
+                    ),
+                    resume_after={
+                        "index": current,
+                        "url": url,
+                        "snapshot_offset": snapshot_offset,
+                        "sequence": sequence,
+                    },
+                    metadata={"stage": "browser" if initial_browser else "http"},
+                )
+                return
             if response.status >= 400:
                 yield self._failure_page(
                     sequence,
@@ -205,34 +257,81 @@ class SpecializedPageConnector(CommerceConnector):
                         "snapshot_offset": snapshot_offset,
                         "sequence": sequence,
                     },
+                    metadata={"stage": "browser" if initial_browser else "http"},
                 )
                 return
             snapshots = self.parse(response.text(), url, request.source_id)
+            shell = probable_javascript_shell(response.text())
+            browser_attempted = initial_browser
             if (
                 not snapshots
-                and probable_javascript_shell(response.text())
+                and shell
                 and self.options.render is None
                 and zero_gain < self.options.browser_zero_gain_limit
             ):
                 if self.context.cancelled():
                     return
-                rendered = await self.transport.request(
-                    TransportRequest(
-                        url=url,
-                        purpose=RequestPurpose.ENTITY,
-                        priority=RequestPriority.IDENTITY,
-                        estimated_bytes=1_000_000,
-                        browser=BrowserHint.REQUIRED,
+                browser_attempted = True
+                try:
+                    rendered = await self.transport.request(
+                        TransportRequest(
+                            url=url,
+                            purpose=RequestPurpose.ENTITY,
+                            priority=RequestPriority.IDENTITY,
+                            estimated_bytes=1_000_000,
+                            browser=BrowserHint.REQUIRED,
+                        )
                     )
-                )
-                if rendered.status < 400:
-                    snapshots = self.parse(rendered.text(), url, request.source_id)
+                except (
+                    BudgetExhausted,
+                    ResponseBodyTooLarge,
+                    TransportFailure,
+                ) as error:
+                    budget_exhausted = isinstance(error, BudgetExhausted)
+                    yield self._failure_page(
+                        sequence,
+                        url,
+                        (
+                            DiagnosticCode.REQUEST_BUDGET_EXHAUSTED
+                            if budget_exhausted
+                            else DiagnosticCode.ENTITY_FETCH_FAILED
+                        ),
+                        f"browser transport failed: {type(error).__name__}",
+                        retryable=(
+                            budget_exhausted
+                            or not isinstance(error, ResponseBodyTooLarge)
+                        ),
+                        resume_after={
+                            "index": current,
+                            "url": url,
+                            "snapshot_offset": snapshot_offset,
+                            "sequence": sequence,
+                        },
+                        metadata={"stage": "browser"},
+                    )
+                    return
+                if rendered.status >= 400:
+                    yield self._failure_page(
+                        sequence,
+                        url,
+                        DiagnosticCode.ENTITY_FETCH_FAILED,
+                        f"browser request failed with status {rendered.status}",
+                        retryable=rendered.status >= 500,
+                        resume_after={
+                            "index": current,
+                            "url": url,
+                            "snapshot_offset": snapshot_offset,
+                            "sequence": sequence,
+                        },
+                        metadata={"stage": "browser"},
+                    )
+                    return
+                snapshots = self.parse(rendered.text(), url, request.source_id)
                 zero_gain = 0 if snapshots else zero_gain + 1
             if not snapshots:
                 code = (
                     DiagnosticCode.BROWSER_REQUIRED
-                    if probable_javascript_shell(response.text())
-                    and self.options.render is not False
+                    if shell and not browser_attempted
                     else DiagnosticCode.PARSER_UNSUPPORTED
                 )
                 yield self._failure_page(
@@ -240,11 +339,22 @@ class SpecializedPageConnector(CommerceConnector):
                     url,
                     code,
                     f"{self.platform} product markup was not recognized",
+                    retryable=code == DiagnosticCode.BROWSER_REQUIRED,
                     resume_after={
                         "index": current,
                         "url": url,
                         "snapshot_offset": snapshot_offset,
                         "sequence": sequence,
+                    },
+                    metadata={
+                        "browser_attempted": browser_attempted,
+                        "render_policy": (
+                            "require"
+                            if self.options.render is True
+                            else "never"
+                            if self.options.render is False
+                            else "allow"
+                        ),
                     },
                 )
                 return
@@ -255,6 +365,7 @@ class SpecializedPageConnector(CommerceConnector):
             available = snapshots[snapshot_offset:]
             remaining = None if request.result_limit is None else request.result_limit - emitted
             selected = available if remaining is None else available[:remaining]
+            selected = tuple(sanitize_commerce_snapshot(item) for item in selected)
             emitted += len(selected)
             next_offset = snapshot_offset + len(selected)
             has_more_on_page = next_offset < len(snapshots)
@@ -289,7 +400,7 @@ class SpecializedPageConnector(CommerceConnector):
             )
             yield EntityPage(
                 page_id=f"product:{sequence}",
-                partition_key="sitemap",
+                partition_key=self._partition_key(),
                 sequence=sequence,
                 items=selected,
                 resume_after=cursor,
@@ -520,9 +631,8 @@ class SpecializedPageConnector(CommerceConnector):
             return
         roots = self.options.sitemaps
         if not roots and self.options.use_advertised_sitemaps:
-            # The transport contract deliberately has no robots-specific method. The
-            # conventional root remains a deterministic fallback; callers can project
-            # advertised roots into ``sitemaps`` when source metadata provides them.
+            roots = await advertised_sitemaps(self.transport, base_url)
+        if not roots:
             roots = ("/sitemap.xml",)
         discovery = SitemapDiscovery(
             self.transport, roots, product_pattern=None, limit=self.options.sitemap_limit
@@ -544,7 +654,7 @@ class SpecializedPageConnector(CommerceConnector):
             if url in seen:
                 continue
             if len(seen) >= self.options.category_page_limit:
-                raise RuntimeError(
+                raise DiscoveryFailure(
                     f"category page limit {self.options.category_page_limit} reached"
                 )
             seen.add(url)
@@ -557,7 +667,7 @@ class SpecializedPageConnector(CommerceConnector):
                 )
             )
             if response.status >= 400:
-                raise RuntimeError(
+                raise DiscoveryFailure(
                     f"category request failed with status {response.status}"
                 )
             if self.context.cancelled():
@@ -617,8 +727,8 @@ class SpecializedPageConnector(CommerceConnector):
             raise ValueError("CHECKPOINT_INVALID: resume target is missing from discovery")
         return index, snapshot_offset, sequence
 
-    @staticmethod
     def _failure_page(
+        self,
         sequence: int,
         url: str,
         code: DiagnosticCode,
@@ -626,6 +736,7 @@ class SpecializedPageConnector(CommerceConnector):
         *,
         retryable: bool = False,
         resume_after: JsonValue | None = None,
+        metadata: dict[str, JsonValue] | None = None,
     ) -> EntityPage[CommerceProductSnapshot]:
         diagnostic = Diagnostic(
             code=code,
@@ -634,10 +745,11 @@ class SpecializedPageConnector(CommerceConnector):
             retryable=retryable,
             affects_completeness=True,
             url=url,
+            metadata=metadata or {},
         )
         return EntityPage(
             page_id=f"product:{sequence}",
-            partition_key="sitemap",
+            partition_key=self._partition_key(),
             sequence=sequence,
             items=(),
             resume_after=resume_after,
@@ -646,6 +758,10 @@ class SpecializedPageConnector(CommerceConnector):
             discovered=sequence,
             diagnostics=(diagnostic,),
         )
+
+    def _partition_key(self) -> str:
+        """Name the configured discovery mechanism bound into the fingerprint."""
+        return "category" if self.options.category_urls else "sitemap"
 
 
 class ShopwareConnector(SpecializedPageConnector):
@@ -1040,6 +1156,7 @@ class SumUpConnector(SpecializedPageConnector):
 
 class _SpecializedFactory:
     name: str
+    version: str
     options_model: type[BaseModel]
     connector_type: type[SpecializedPageConnector]
 
@@ -1059,24 +1176,28 @@ class _SpecializedFactory:
 
 class ShopwareFactory(_SpecializedFactory):
     name = "shopware"
+    version = ShopwareConnector.version
     options_model: type[BaseModel] = ShopwareOptions
     connector_type = ShopwareConnector
 
 
 class StarwebFactory(_SpecializedFactory):
     name = "starweb"
+    version = StarwebConnector.version
     options_model: type[BaseModel] = StarwebOptions
     connector_type = StarwebConnector
 
 
 class NitroSellFactory(_SpecializedFactory):
     name = "nitrosell"
+    version = NitroSellConnector.version
     options_model: type[BaseModel] = NitroSellOptions
     connector_type = NitroSellConnector
 
 
 class SumUpFactory(_SpecializedFactory):
     name = "sumup"
+    version = SumUpConnector.version
     options_model: type[BaseModel] = SumUpOptions
     connector_type = SumUpConnector
 

@@ -33,6 +33,11 @@ class ConnectorRegistry:
             raise ValueError(f"invalid connector name: {factory.name!r}")
         if name != factory.name:
             raise ValueError(f"connector name must already be normalized as {name!r}")
+        version = getattr(factory, "version", None)
+        if not isinstance(version, str) or not version or version != version.strip():
+            raise ValueError(
+                f"connector {name!r} must declare a non-empty normalized version"
+            )
         if name in self._factories:
             raise ValueError(f"connector {name!r} is already registered")
         self._factories[name] = factory
@@ -42,6 +47,10 @@ class ConnectorRegistry:
 
     def options_schema(self, name: str) -> dict[str, Any]:
         return self._factory(name).options_model.model_json_schema()
+
+    def connector_version(self, name: str) -> str:
+        """Return registered immutable metadata without building a connector."""
+        return self._factory(name).version
 
     def build(
         self,
@@ -53,7 +62,15 @@ class ConnectorRegistry:
     ) -> CommerceConnector:
         factory = self._factory(name)
         validated = factory.options_model.model_validate(options)
-        return factory.build(transport=transport, options=validated, context=context)
+        connector = factory.build(
+            transport=transport, options=validated, context=context
+        )
+        if connector.version != factory.version:
+            raise ValueError(
+                f"connector {factory.name!r} built version {connector.version!r}, "
+                f"but its factory declares {factory.version!r}"
+            )
+        return connector
 
     def load_entry_points(self, *, strict: bool = False) -> tuple[PluginLoadError, ...]:
         errors: list[PluginLoadError] = []
@@ -65,7 +82,9 @@ class ConnectorRegistry:
                 self.register(factory)
             except Exception as error:
                 package = point.dist.name if point.dist is not None else "unknown package"
-                failure = PluginLoadError(f"plugin {package}:{point.name} failed: {type(error).__name__}: {error}")
+                failure = PluginLoadError(
+                    f"plugin {package}:{point.name} failed: {type(error).__name__}"
+                )
                 errors.append(failure)
                 if strict:
                     raise failure from error

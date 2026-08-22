@@ -612,6 +612,129 @@ class TestCheckpointOutputs:
         )
         return job_id, lineage
 
+    async def test_library_lineage_identity_round_trips_and_never_matches_legacy(
+        self, db
+    ):
+        run_id = await runs.create_run(db)
+        job_id = (await runs.create_jobs(db, run_id, SOURCES, ["ceradel"]))[
+            "ceradel"
+        ]
+        durable_request = {
+            "source_id": "ceradel",
+            "base_url": "https://shop.test/",
+            "refresh_mode": "full",
+            "requested_fields": ["identity"],
+        }
+        durable_options = {"currency": "EUR", "page_limit": 50}
+        lineage = await outputs.create_lineage(
+            db,
+            job_id,
+            source_id="ceradel",
+            source_url="https://shop.test/",
+            connector="shopify",
+            connector_version="1",
+            connector_config_fingerprint="a" * 64,
+            dataset_fingerprint="b" * 64,
+            dataset_selection=[],
+            runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+            collection_request=durable_request,
+            connector_options=durable_options,
+        )
+
+        assert await outputs.lineage_runtime_configuration(
+            db, job_id, lineage
+        ) == outputs.LineageRuntimeConfiguration(
+            runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+            collection_request=durable_request,
+            connector_options=durable_options,
+        )
+        lookup = {
+            "source_url": "https://shop.test/",
+            "connector": "shopify",
+            "connector_version": "1",
+            "connector_config_fingerprint": "a" * 64,
+            "dataset_fingerprint": "b" * 64,
+        }
+        assert await outputs.find_compatible_lineage(db, job_id, **lookup) is None
+        assert await outputs.find_compatible_lineage(
+            db,
+            job_id,
+            **lookup,
+            runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+        ) == lineage
+
+        assert await outputs.reject_lineage(db, job_id, lineage)
+        assert not await outputs.reject_lineage(db, job_id, lineage)
+        assert (
+            await outputs.find_compatible_lineage(
+                db,
+                job_id,
+                **lookup,
+                runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+            )
+            is None
+        )
+
+    async def test_completed_library_lineage_remains_recoverable_for_publication(
+        self, db
+    ):
+        run_id = await runs.create_run(db)
+        job_id = (await runs.create_jobs(db, run_id, SOURCES, ["ceradel"]))[
+            "ceradel"
+        ]
+        lookup = {
+            "source_url": "https://shop.test/",
+            "connector": "shopify",
+            "connector_version": "1",
+            "connector_config_fingerprint": "a" * 64,
+            "dataset_fingerprint": "b" * 64,
+        }
+        lineage = await outputs.create_lineage(
+            db,
+            job_id,
+            source_id="ceradel",
+            connector_configuration={"partitions": ["main"]},
+            dataset_selection=[],
+            runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+            collection_request={
+                "source_id": "ceradel",
+                "base_url": "https://shop.test/",
+                "requested_fields": ["identity"],
+            },
+            connector_options={"page_limit": 50},
+            **lookup,
+        )
+        await outputs.commit_page(
+            db,
+            job_id,
+            lineage,
+            partition_key="main",
+            page_id="main:1",
+            page_sequence=0,
+            resume_after=None,
+            terminal=True,
+            enumeration_intact=True,
+            connector_version="1",
+            batches=[],
+        )
+        checksum = await outputs.lineage_checksum(db, job_id, lineage)
+        await outputs.complete_lineage(
+            db, job_id, lineage, expected_partitions=("main",), checksum=checksum
+        )
+
+        assert await outputs.find_compatible_lineage(
+            db,
+            job_id,
+            runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+            **lookup,
+        ) is None
+        assert await outputs.find_recoverable_library_lineage(
+            db, job_id, **lookup
+        ) == lineage
+        assert await outputs.lineage_progress(
+            db, job_id, lineage
+        ) == outputs.LineageProgress(outputs.LineageProgressState.TERMINAL_INTACT)
+
     async def test_shopify_crash_between_partitions_resumes_without_refetch(self, db):
         partitions = ("zeta", "alpha")
         job_id, lineage = await self.connector_lineage(db, "shopify", partitions)
@@ -971,9 +1094,10 @@ class TestScheduleDefault:
 
 class TestSchemaMigration:
     async def test_an_existing_schema_is_adopted_rather_than_reapplied(self, db):
-        # The fixture built the schema from the same file, exactly as initdb
-        # does, so there is nothing to run - only a ledger row to write.
-        assert await storage_db.apply_schema(db) == []
+        # The fixture preloads every DDL file without a migration ledger. The
+        # baseline is adopted; the idempotent incremental migration is recorded
+        # through the ordinary application path.
+        assert await storage_db.apply_schema(db) == list(storage_db.SCHEMA_FILES[1:])
         assert await storage_db.apply_schema(db) == []
         applied = await rows(db, "select filename from catalogue.schema_migrations")
         assert {row["filename"] for row in applied} == set(storage_db.SCHEMA_FILES)
@@ -988,7 +1112,7 @@ class TestSchemaMigration:
 
     async def test_an_empty_database_gets_the_baseline(self, db):
         await db.execute("drop schema catalogue cascade")
-        assert await storage_db.apply_schema(db) == [storage_db.BASELINE]
+        assert await storage_db.apply_schema(db) == list(storage_db.SCHEMA_FILES)
         assert await storage_db.apply_schema(db) == []
 
     async def test_multi_dataset_page_and_artifact_schema_enforces_identity(self, db):

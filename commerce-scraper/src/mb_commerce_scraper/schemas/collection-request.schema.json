@@ -1,0 +1,107 @@
+{
+  "$defs": {
+    "RefreshMode": {
+      "enum": [
+        "full",
+        "incremental"
+      ],
+      "title": "RefreshMode",
+      "type": "string"
+    },
+    "SnapshotField": {
+      "enum": [
+        "identity",
+        "description",
+        "categories",
+        "images",
+        "variants",
+        "offers",
+        "stock",
+        "documents",
+        "published_attributes",
+        "platform_extensions"
+      ],
+      "title": "SnapshotField",
+      "type": "string"
+    }
+  },
+  "$id": "https://makersbrain.com/schemas/mb-commerce-scraper/v1/collection-request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "base_url": {
+      "pattern": "^https?://",
+      "title": "Base Url",
+      "type": "string"
+    },
+    "deadline": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Deadline"
+    },
+    "partitions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Partitions",
+      "type": "array"
+    },
+    "refresh_mode": {
+      "$ref": "#/$defs/RefreshMode",
+      "default": "full"
+    },
+    "requested_fields": {
+      "default": [
+        "categories",
+        "description",
+        "documents",
+        "identity",
+        "images",
+        "offers",
+        "platform_extensions",
+        "published_attributes",
+        "stock",
+        "variants"
+      ],
+      "items": {
+        "$ref": "#/$defs/SnapshotField"
+      },
+      "title": "Requested Fields",
+      "type": "array",
+      "uniqueItems": true
+    },
+    "result_limit": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Result Limit"
+    },
+    "source_id": {
+      "minLength": 1,
+      "title": "Source Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "source_id",
+    "base_url"
+  ],
+  "title": "CollectionRequest",
+  "type": "object"
+}

@@ -43,6 +43,7 @@ from mb_commerce_scraper.transports import (
     CommerceTransport,
     RequestPriority,
     RequestPurpose,
+    ResponseBodyTooLarge,
     TransportFailure,
     TransportRequest,
 )
@@ -293,7 +294,12 @@ class PrestaShopConnector(CommerceConnector):
                 request.base_url,
             )
             return
-        except (_DiscoveryFailure, _HTTPStatusFailure, TransportFailure) as error:
+        except (
+            ResponseBodyTooLarge,
+            _DiscoveryFailure,
+            _HTTPStatusFailure,
+            TransportFailure,
+        ) as error:
             yield self._failure_page(
                 "discovery",
                 0,
@@ -301,6 +307,7 @@ class PrestaShopConnector(CommerceConnector):
                 DiagnosticCode.ENUMERATION_INCOMPLETE,
                 f"PrestaShop discovery failed: {type(error).__name__}",
                 request.base_url,
+                retryable=not isinstance(error, ResponseBodyTooLarge),
             )
             return
 
@@ -359,7 +366,12 @@ class PrestaShopConnector(CommerceConnector):
                 return
             try:
                 document, method = await self._product_document(url, request)
-            except (_BoundReached, _HTTPStatusFailure, TransportFailure) as error:
+            except (
+                ResponseBodyTooLarge,
+                _BoundReached,
+                _HTTPStatusFailure,
+                TransportFailure,
+            ) as error:
                 yield self._failure_page(
                     partition,
                     sequence,
@@ -367,6 +379,7 @@ class PrestaShopConnector(CommerceConnector):
                     DiagnosticCode.ENTITY_FETCH_FAILED,
                     f"PrestaShop product fetch failed: {type(error).__name__}",
                     url,
+                    retryable=not isinstance(error, ResponseBodyTooLarge),
                 )
                 return
 
@@ -516,6 +529,8 @@ class PrestaShopConnector(CommerceConnector):
             ), "browser"
         try:
             document = await self._fetch(url, request, priority=RequestPriority.IDENTITY)
+        except ResponseBodyTooLarge:
+            raise
         except TransportFailure:
             if self.options.render is False:
                 raise
@@ -611,6 +626,7 @@ class PrestaShopConnector(CommerceConnector):
             except (
                 _BoundReached,
                 _HTTPStatusFailure,
+                ResponseBodyTooLarge,
                 TransportFailure,
                 json.JSONDecodeError,
             ) as error:
@@ -959,6 +975,8 @@ class PrestaShopConnector(CommerceConnector):
         code: DiagnosticCode,
         message: str,
         url: str,
+        *,
+        retryable: bool = True,
     ) -> EntityPage[CommerceProductSnapshot]:
         return EntityPage(
             page_id=f"{partition}:{sequence}:failed",
@@ -974,7 +992,7 @@ class PrestaShopConnector(CommerceConnector):
                     code=code,
                     severity=DiagnosticSeverity.ERROR,
                     message=message,
-                    retryable=True,
+                    retryable=retryable,
                     affects_completeness=True,
                     url=_safe_url(url),
                 ),
@@ -1193,6 +1211,7 @@ def _redact_json(value: Any) -> JsonValue:
 
 class PrestaShopFactory:
     name = "prestashop"
+    version = PrestaShopConnector.version
     options_model: type[BaseModel] = PrestaShopOptions
 
     def build(

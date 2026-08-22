@@ -1,16 +1,68 @@
 from __future__ import annotations
 
-import hashlib
 import json
+from asyncio import Lock
+from dataclasses import dataclass
 from enum import IntEnum, StrEnum
 from time import monotonic
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
+from urllib.parse import urlencode, urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+
+DEFAULT_MAXIMUM_RESPONSE_BYTES = 16 * 1024 * 1024
+
+
+class BudgetExhausted(RuntimeError):
+    """A request attempt could not be authorized by its neutral budget."""
+
+
+class TransportAccounting(BaseModel):
+    """Secret-free physical transport totals for one logical backend call."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    physical_requests: int = Field(default=1, ge=0)
+    transmitted_bytes: int = Field(default=0, ge=0)
+    received_bytes: int = Field(default=0, ge=0)
 
 
 class TransportFailure(RuntimeError):
     """A typed network/TLS/backend failure eligible for routing policy."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        accounting: TransportAccounting | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.accounting = accounting
+
+
+class ResponseBodyTooLarge(RuntimeError):
+    """A response exceeded the configured retained-body limit."""
+
+    def __init__(
+        self,
+        *,
+        maximum_bytes: int,
+        received_bytes: int,
+        accounting: TransportAccounting | None = None,
+    ) -> None:
+        super().__init__(f"response body exceeded the {maximum_bytes}-byte retention limit")
+        self.maximum_bytes = maximum_bytes
+        self.received_bytes = received_bytes
+        self.accounting = accounting
+
+
+class ResponseDecodeFailure(ValueError):
+    """A response body could not be decoded without retaining parser context."""
+
+    def __init__(self, *, line: int, column: int) -> None:
+        super().__init__(f"response body is not valid JSON at line {line}, column {column}")
+        self.line = line
+        self.column = column
 
 
 class RequestPurpose(StrEnum):
@@ -40,6 +92,17 @@ class BrowserHint(StrEnum):
     REQUIRED = "required"
 
 
+class BrowserEvaluation(BaseModel):
+    """One bounded connector-owned script evaluated in an isolated page."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    action_id: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,63}$")
+    script: str = Field(min_length=1, max_length=65_536, repr=False)
+    wait_for: str | None = Field(default=None, max_length=512)
+    wait_milliseconds: int = Field(default=2_000, ge=0, le=30_000)
+
+
 class RotationReason(StrEnum):
     EXPLICIT = "explicit"
     BLOCKED = "blocked"
@@ -64,6 +127,74 @@ class TransportRequest(BaseModel):
     estimated_bytes: int = Field(default=0, ge=0)
     cache: CachePolicy = CachePolicy.DEFAULT
     browser: BrowserHint = BrowserHint.NEVER
+    evaluation: BrowserEvaluation | None = None
+
+    @model_validator(mode="after")
+    def evaluation_is_an_explicit_browser_action(self) -> TransportRequest:
+        if self.evaluation is None:
+            return self
+        if self.browser is not BrowserHint.REQUIRED:
+            raise ValueError("browser evaluation requires browser=required")
+        if self.method.upper() != "GET" or any(
+            (self.query, self.headers, self.json_body is not None, self.body is not None)
+        ):
+            raise ValueError("browser evaluation cannot be combined with HTTP request payload fields")
+        if self.purpose in {RequestPurpose.ROBOTS, RequestPurpose.DISCOVERY}:
+            raise ValueError("browser evaluation is only valid for entity/detail work")
+        return self
+
+
+def estimated_transmitted_bytes(request: TransportRequest) -> int:
+    """Deterministic application-layer bytes for one physical HTTP request.
+
+    This intentionally returns only an integer. Header, query, and body values
+    are measured transiently and are never copied into accounting metadata.
+    HTTP client defaults, proxy CONNECT framing, TLS, and browser subrequests
+    are backend knowledge and belong in explicit ``TransportAccounting``.
+    """
+
+    parsed = urlsplit(request.url)
+    existing_query = parsed.query
+    supplied_query = urlencode(
+        [(key, _query_accounting_value(value)) for key, value in request.query.items()]
+    )
+    query = "&".join(value for value in (existing_query, supplied_query) if value)
+    target = parsed.path or "/"
+    if query:
+        target = f"{target}?{query}"
+
+    body = request.body or b""
+    if request.json_body is not None:
+        body = json.dumps(
+            request.json_body,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+    headers = list(request.headers.items())
+    normalized = {name.casefold() for name, _ in headers}
+    if "host" not in normalized:
+        host = parsed.hostname or ""
+        if ":" in host:
+            host = f"[{host}]"
+        default_port = (parsed.scheme == "https" and parsed.port in {None, 443}) or (
+            parsed.scheme == "http" and parsed.port in {None, 80}
+        )
+        headers.append(("Host", host if default_port else f"{host}:{parsed.port}"))
+    if body and "content-length" not in normalized:
+        headers.append(("Content-Length", str(len(body))))
+    if request.json_body is not None and "content-type" not in normalized:
+        headers.append(("Content-Type", "application/json"))
+
+    start_line = f"{request.method.upper()} {target} HTTP/1.1\r\n".encode()
+    header_bytes = sum(len(name.encode("utf-8")) + len(value.encode("utf-8")) + 4 for name, value in headers)
+    return len(start_line) + header_bytes + 2 + len(body)
+
+
+def _query_accounting_value(value: str | int | float | bool) -> str | int | float:
+    if isinstance(value, bool):
+        return str(value).lower()
+    return value
 
 
 class RouteMetadata(BaseModel):
@@ -83,12 +214,32 @@ class TransportResponse(BaseModel):
     route: RouteMetadata = RouteMetadata()
     from_cache: bool = False
     elapsed_seconds: float = Field(default=0, ge=0)
+    accounting: TransportAccounting | None = None
 
     def json_value(self) -> Any:
-        return json.loads(self.content)
+        location: tuple[int, int] | None = None
+        try:
+            return json.loads(self.content)
+        except json.JSONDecodeError as error:
+            location = (error.lineno, error.colno)
+        # Raise after leaving the handler: JSONDecodeError retains its full input in
+        # ``doc`` and must not escape through exception context or chaining.
+        line, column = location
+        raise ResponseDecodeFailure(line=line, column=column) from None
 
     def text(self, encoding: str = "utf-8") -> str:
         return self.content.decode(encoding, errors="replace")
+
+
+def enforce_response_body_limit(response: TransportResponse, maximum_bytes: int) -> TransportResponse:
+    received_bytes = len(response.content)
+    if received_bytes > maximum_bytes:
+        raise ResponseBodyTooLarge(
+            maximum_bytes=maximum_bytes,
+            received_bytes=received_bytes,
+            accounting=response.accounting,
+        )
+    return response
 
 
 class CommerceTransport(Protocol):
@@ -101,17 +252,38 @@ class ResponseCache(Protocol):
     async def put(self, request: TransportRequest, response: TransportResponse) -> None: ...
 
 
+@runtime_checkable
+class StaleResponseCache(ResponseCache, Protocol):
+    """Optional cache extension for validators and explicit stale fallback."""
+
+    async def stale(self, request: TransportRequest) -> TransportResponse | None: ...
+
+
 class RobotsChecker(Protocol):
     async def allowed(self, url: str) -> bool: ...
 
 
 class RateLimiter(Protocol):
     async def wait(self, request: TransportRequest) -> None: ...
+    async def release(self, request: TransportRequest) -> None: ...
+
+
+class BudgetAuthorization(Protocol):
+    """One exclusively authorized network attempt."""
+
+    async def reconcile(self, response_bytes: int) -> None:
+        """Replace the byte estimate with the actual response size."""
+
+    async def release(self) -> None:
+        """Return an authorization when dispatch did not begin."""
 
 
 class RequestBudget(Protocol):
+    """Attempt budget with non-consuming previews and atomic authorization."""
+
     def affordable(self, request: TransportRequest) -> bool: ...
-    def charge(self, request: TransportRequest, response_bytes: int) -> None: ...
+
+    async def authorize(self, request: TransportRequest) -> BudgetAuthorization | None: ...
 
 
 class TelemetryHooks(Protocol):
@@ -133,17 +305,59 @@ class MemoryRequestBudget:
         self.maximum_bytes = maximum_bytes
         self.requests = 0
         self.bytes = 0
+        self._reserved_bytes = 0
+        self._next_authorization_id = 0
+        self._authorizations: dict[int, int] = {}
+        self._lock = Lock()
 
     def affordable(self, request: TransportRequest) -> bool:
-        return (
-            (self.maximum_requests is None or self.requests < self.maximum_requests)
-            and (self.maximum_bytes is None or self.bytes + request.estimated_bytes <= self.maximum_bytes)
+        return (self.maximum_requests is None or self.requests < self.maximum_requests) and (
+            self.maximum_bytes is None
+            or self.bytes + self._reserved_bytes + request.estimated_bytes <= self.maximum_bytes
         )
 
-    def charge(self, request: TransportRequest, response_bytes: int) -> None:
-        del request
-        self.requests += 1
-        self.bytes += response_bytes
+    async def authorize(self, request: TransportRequest) -> BudgetAuthorization | None:
+        async with self._lock:
+            if not self.affordable(request):
+                return None
+            authorization_id = self._next_authorization_id
+            self._next_authorization_id += 1
+            self.requests += 1
+            self._reserved_bytes += request.estimated_bytes
+            self._authorizations[authorization_id] = request.estimated_bytes
+            return _MemoryBudgetAuthorization(self, authorization_id)
+
+    async def _reconcile(self, authorization_id: int, response_bytes: int) -> None:
+        if response_bytes < 0:
+            raise ValueError("response_bytes must be non-negative")
+        async with self._lock:
+            try:
+                estimated_bytes = self._authorizations.pop(authorization_id)
+            except KeyError as error:
+                raise RuntimeError("budget authorization already reconciled") from error
+            self._reserved_bytes -= estimated_bytes
+            self.bytes += response_bytes
+
+    async def _release(self, authorization_id: int) -> None:
+        async with self._lock:
+            try:
+                estimated_bytes = self._authorizations.pop(authorization_id)
+            except KeyError as error:
+                raise RuntimeError("budget authorization already resolved") from error
+            self.requests -= 1
+            self._reserved_bytes -= estimated_bytes
+
+
+@dataclass(slots=True)
+class _MemoryBudgetAuthorization:
+    budget: MemoryRequestBudget
+    authorization_id: int
+
+    async def reconcile(self, response_bytes: int) -> None:
+        await self.budget._reconcile(self.authorization_id, response_bytes)
+
+    async def release(self) -> None:
+        await self.budget._release(self.authorization_id)
 
 
 class Timer:
@@ -153,48 +367,3 @@ class Timer:
     @property
     def elapsed(self) -> float:
         return monotonic() - self._start
-
-
-class MemoryResponseCache(ResponseCache):
-    """Bounded-process cache useful for embedding and deterministic tests."""
-
-    def __init__(self, *, maximum_entries: int = 1_000) -> None:
-        if maximum_entries < 1:
-            raise ValueError("maximum_entries must be positive")
-        self.maximum_entries = maximum_entries
-        self._entries: dict[str, TransportResponse] = {}
-
-    async def get(self, request: TransportRequest) -> TransportResponse | None:
-        return self._entries.get(self.key(request))
-
-    async def put(self, request: TransportRequest, response: TransportResponse) -> None:
-        key = self.key(request)
-        if key not in self._entries and len(self._entries) >= self.maximum_entries:
-            self._entries.pop(next(iter(self._entries)))
-        self._entries[key] = response
-
-    @staticmethod
-    def key(request: TransportRequest) -> str:
-        relevant_headers = {
-            key.casefold(): value
-            for key, value in request.headers.items()
-            if key.casefold() in {"accept", "accept-language", "content-type"}
-        }
-        body = request.body or b""
-        if request.json_body is not None:
-            body = json.dumps(
-                request.json_body,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-        value = {
-            "schema": 1,
-            "method": request.method.upper(),
-            "url": request.url,
-            "query": sorted(request.query.items()),
-            "headers": relevant_headers,
-            "body": hashlib.sha256(body).hexdigest(),
-            "browser": request.browser.value,
-        }
-        serialized = json.dumps(value, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(serialized.encode()).hexdigest()

@@ -43,6 +43,7 @@ from mb_commerce_scraper.transports import (
     CommerceTransport,
     RequestPriority,
     RequestPurpose,
+    ResponseBodyTooLarge,
     TransportFailure,
     TransportRequest,
 )
@@ -181,14 +182,19 @@ class BigCommerceConnector(CommerceConnector):
                         f"BigCommerce GraphQL failed with status {response.status}"
                     )
                 payload = response.json_value()
-            except (ValueError, _HTTPStatusFailure, TransportFailure) as error:
+            except (
+                ResponseBodyTooLarge,
+                ValueError,
+                _HTTPStatusFailure,
+                TransportFailure,
+            ) as error:
                 yield self._failed_page(
                     sequence,
                     after,
                     DiagnosticCode.ENUMERATION_INCOMPLETE,
                     f"BigCommerce GraphQL page failed: {type(error).__name__}",
                     endpoint,
-                    retryable=True,
+                    retryable=not isinstance(error, ResponseBodyTooLarge),
                 )
                 return
             if not isinstance(payload, dict) or payload.get("errors"):
@@ -295,8 +301,11 @@ class BigCommerceConnector(CommerceConnector):
                         )
                     document = response.text()
                 except _HTTPStatusFailure:
-                    break
-                except TransportFailure:
+                    # A plain HTTP denial can be the signal that this storefront
+                    # requires its configured browser fallback. Keep the rendered
+                    # attempt available instead of abandoning this token page.
+                    continue
+                except (ResponseBodyTooLarge, TransportFailure):
                     continue
                 for candidate in dict.fromkeys(TOKEN_PATTERN.findall(document)):
                     if _token_allows_origin(candidate, origin):
@@ -629,6 +638,7 @@ def _page_id(sequence: int, after: str | None) -> str:
 
 class BigCommerceFactory:
     name = "bigcommerce"
+    version = BigCommerceConnector.version
     options_model: type[BaseModel] = BigCommerceOptions
 
     def build(

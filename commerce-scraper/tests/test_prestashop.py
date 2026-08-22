@@ -106,7 +106,10 @@ async def test_sitemap_product_preserves_neutral_snapshot() -> None:
         ConnectorContext(clock=lambda: NOW),
     )
 
-    pages = await assert_connector_pages(connector.collect(request()))
+    intent = request()
+    pages = await assert_connector_pages(
+        connector.collect(intent), connector=connector, request=intent
+    )
 
     snapshot = pages[0].items[0]
     assert snapshot.connector == "prestashop"

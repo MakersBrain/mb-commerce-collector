@@ -21,6 +21,15 @@ class URLPolicy:
         self._resolver = resolver
 
     async def validate(self, url: str, *, previous_url: str | None = None) -> str:
+        absolute, _ = await self.validate_with_addresses(
+            url, previous_url=previous_url
+        )
+        return absolute
+
+    async def validate_with_addresses(
+        self, url: str, *, previous_url: str | None = None
+    ) -> tuple[str, tuple[str, ...]]:
+        """Return the logical URL and the exact public addresses it resolved to."""
         absolute = urljoin(previous_url, url) if previous_url else url
         parsed = urlsplit(absolute)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -36,7 +45,7 @@ class URLPolicy:
             ip = ipaddress.ip_address(address)
             if not ip.is_global:
                 raise ValueError(f"URL host resolves to a non-public address: {ip}")
-        return absolute
+        return absolute, addresses
 
     @staticmethod
     def _origin(url: str) -> str:

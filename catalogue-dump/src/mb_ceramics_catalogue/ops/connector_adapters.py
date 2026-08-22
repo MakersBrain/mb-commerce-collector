@@ -7,12 +7,18 @@ and is intentionally extensible for new connector canaries.
 
 from __future__ import annotations
 
-import gzip
+import json
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlparse
+
+from mb_commerce_scraper.transports import (
+    DEFAULT_MAXIMUM_RESPONSE_BYTES,
+    ResponseBodyTooLarge,
+)
 
 from mb_ceramics_catalogue.config.sources import SourceConfig
 from mb_ceramics_catalogue.connectors import (
@@ -49,31 +55,52 @@ from mb_ceramics_catalogue.pipeline.budget import RequestBudget
 
 
 class BigCommerceFetcherTransport:
-    def __init__(self, fetcher: Any) -> None:
+    def __init__(
+        self,
+        fetcher: Any,
+        *,
+        maximum_response_bytes: int = DEFAULT_MAXIMUM_RESPONSE_BYTES,
+    ) -> None:
         self.fetcher = fetcher
+        self.maximum_response_bytes = _positive_response_limit(maximum_response_bytes)
 
     async def document(self, url: str, *, rendered: bool = False) -> str:
         if rendered:
-            return str(await self.fetcher.render(url, wait_ms=2500))
-        return str(await self.fetcher.text(url, browser_user_agent=True))
+            document = str(await self.fetcher.render(url, wait_ms=2500))
+        else:
+            document = str(await self.fetcher.text(url, browser_user_agent=True))
+        return _bounded_text(document, maximum_bytes=self.maximum_response_bytes)
 
     async def request_json(
         self, url: str, *, headers: dict[str, str], body: dict[str, Any],
         browser_context_url: str | None = None,
     ) -> Any:
         if browser_context_url is not None:
-            return await self.fetcher.request_json_in_browser(
+            value = await self.fetcher.request_json_in_browser(
                 browser_context_url, url, headers=headers, body=body
+            )
+            return _bounded_json_value(
+                value,
+                maximum_bytes=self.maximum_response_bytes,
             )
         response = await self.fetcher.response(
             url, method="POST", json_body=body, headers=headers, browser_user_agent=True
         )
-        return response.json()
+        return _decode_json_bytes(
+            bytes(response.content),
+            maximum_bytes=self.maximum_response_bytes,
+        )
 
 
 class WixFetcherTransport:
-    def __init__(self, fetcher: Any) -> None:
+    def __init__(
+        self,
+        fetcher: Any,
+        *,
+        maximum_response_bytes: int = DEFAULT_MAXIMUM_RESPONSE_BYTES,
+    ) -> None:
         self.fetcher = fetcher
+        self.maximum_response_bytes = _positive_response_limit(maximum_response_bytes)
 
     async def advertised_sitemaps(self, base_url: str) -> tuple[str, ...]:
         _, sitemaps = await self.fetcher.robots(base_url)
@@ -83,14 +110,28 @@ class WixFetcherTransport:
         self, url: str, *, rendered: bool = False, accept: str | None = None
     ) -> str:
         if rendered:
-            return str(await self.fetcher.render(url))
+            document = str(await self.fetcher.render(url))
+            return _bounded_text(
+                document,
+                maximum_bytes=self.maximum_response_bytes,
+            )
         if accept is not None:
             response = await self.fetcher.response(url, accept=accept)
-            body = bytes(response.content)
+            body = _bounded_bytes(
+                bytes(response.content),
+                maximum_bytes=self.maximum_response_bytes,
+            )
             if body[:2] == b"\x1f\x8b":
-                body = gzip.decompress(body)
+                body = _decompress_gzip_bounded(
+                    body,
+                    maximum_bytes=self.maximum_response_bytes,
+                )
             return body.decode(response.encoding or "utf-8", errors="replace")
-        return str(await self.fetcher.text(url, browser_user_agent=True))
+        document = str(await self.fetcher.text(url, browser_user_agent=True))
+        return _bounded_text(
+            document,
+            maximum_bytes=self.maximum_response_bytes,
+        )
 
 
 class PageFetcherTransport(WixFetcherTransport):
@@ -111,6 +152,124 @@ class InteractiveFetcherTransport(PageFetcherTransport):
         return await self.fetcher.evaluate_in_browser(url, script, wait_for=wait_for)
 
 
+def _positive_response_limit(value: int) -> int:
+    if value < 1:
+        raise ValueError("maximum_response_bytes must be positive")
+    return value
+
+
+def _bounded_bytes(content: bytes, *, maximum_bytes: int) -> bytes:
+    received_bytes = len(content)
+    if received_bytes > maximum_bytes:
+        del content
+        _raise_response_body_too_large(
+            maximum_bytes=maximum_bytes,
+            received_bytes=received_bytes,
+        )
+    return content
+
+
+def _bounded_text(document: str, *, maximum_bytes: int) -> str:
+    received_bytes = len(document.encode())
+    if received_bytes > maximum_bytes:
+        del document
+        _raise_response_body_too_large(
+            maximum_bytes=maximum_bytes,
+            received_bytes=received_bytes,
+        )
+    return document
+
+
+def _decode_json_bytes(content: bytes, *, maximum_bytes: int) -> Any:
+    content = _bounded_bytes(content, maximum_bytes=maximum_bytes)
+    failure: ValueError | None = None
+    try:
+        value = json.loads(content)
+    except json.JSONDecodeError as error:
+        failure = ValueError(
+            f"response body is not valid JSON at line {error.lineno} column {error.colno}"
+        )
+    except UnicodeDecodeError:
+        failure = ValueError("response body is not valid Unicode JSON")
+    if failure is not None:
+        del content
+        raise failure
+    return value
+
+
+def _bounded_json_value(value: Any, *, maximum_bytes: int) -> Any:
+    failure: ValueError | None = None
+    try:
+        encoded = json.dumps(value, separators=(",", ":")).encode()
+    except (RecursionError, TypeError, ValueError):
+        failure = ValueError("browser response did not contain a JSON-compatible value")
+    if failure is not None:
+        del value
+        raise failure
+    _bounded_bytes(encoded, maximum_bytes=maximum_bytes)
+    return value
+
+
+def _decompress_gzip_bounded(content: bytes, *, maximum_bytes: int) -> bytes:
+    failure: ValueError | None = None
+    decompressed = b""
+    decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        decompressed = decompressor.decompress(content, maximum_bytes + 1)
+        if len(decompressed) <= maximum_bytes:
+            decompressed += decompressor.flush(maximum_bytes + 1 - len(decompressed))
+        if not decompressor.eof:
+            failure = ValueError("gzip response is incomplete or exceeds its retention limit")
+    except zlib.error:
+        failure = ValueError("gzip response is invalid")
+    received_bytes = len(decompressed)
+    del content, decompressor
+    if received_bytes > maximum_bytes:
+        del decompressed
+        _raise_response_body_too_large(
+            maximum_bytes=maximum_bytes,
+            received_bytes=received_bytes,
+        )
+    if failure is not None:
+        raise failure
+    return decompressed
+
+
+def _raise_response_body_too_large(
+    *, maximum_bytes: int, received_bytes: int
+) -> None:
+    raise ResponseBodyTooLarge(
+        maximum_bytes=maximum_bytes,
+        received_bytes=received_bytes,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class LibraryCanaryRoute:
+    """Application approval for one connector's native migration route."""
+
+    connector: str
+    request_partitions: tuple[str, ...] = ()
+    dynamic_partitions: bool = False
+    uses_browser_transport: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.connector or self.connector != self.connector.strip().lower():
+            raise ValueError(
+                "library canary connector must be a normalized non-empty name"
+            )
+        if any(not value or value != value.strip() for value in self.request_partitions):
+            raise ValueError(
+                "library canary partitions must be normalized non-empty strings"
+            )
+        if len(set(self.request_partitions)) != len(self.request_partitions):
+            raise ValueError("library canary partitions must be unique")
+        if self.dynamic_partitions and not self.request_partitions:
+            raise ValueError(
+                "dynamic library canary partitions require configured partitions"
+            )
+
+
 @dataclass(frozen=True)
 class ConnectorRuntimePlan:
     name: str
@@ -124,6 +283,7 @@ class ConnectorRuntimePlan:
     ceramics_projection: dict[str, Any] = field(default_factory=dict)
     categories: tuple[str, ...] = ()
     collections: tuple[str, ...] = ()
+    library_canary: LibraryCanaryRoute | None = None
 
     @property
     def dynamic_partitions(self) -> bool:
@@ -151,6 +311,19 @@ def runtime_plan(config: SourceConfig) -> ConnectorRuntimePlan:
         ) from None
 
 
+def library_canary_route(
+    plan: ConnectorRuntimePlan,
+    projected_connector: str,
+) -> LibraryCanaryRoute | None:
+    """Return explicitly approved native metadata, rejecting projection drift."""
+    route = plan.library_canary
+    if route is not None and route.connector != projected_connector:
+        raise ValueError(
+            "library canary route does not match the projected source connector"
+        )
+    return route
+
+
 def _shopify(config: SourceConfig) -> ConnectorRuntimePlan:
     options = ShopifyOptions(
         currency=config.currency, vat_status=config.vat_status,
@@ -166,6 +339,10 @@ def _shopify(config: SourceConfig) -> ConnectorRuntimePlan:
         lambda fetcher, budget: ShopifyConnector(fetcher, options, budget=budget),
         "api_json", "api", "shopify_connector",
         collections=collections,
+        library_canary=LibraryCanaryRoute(
+            connector="shopify",
+            request_partitions=collections,
+        ),
     )
 
 
@@ -187,12 +364,18 @@ def _woocommerce(config: SourceConfig) -> ConnectorRuntimePlan:
         lambda fetcher, budget: WooCommerceConnector(fetcher, options, budget=budget),
         "api_json", "api", "woocommerce_connector",
         categories=categories,
+        library_canary=LibraryCanaryRoute(
+            connector="woocommerce",
+            request_partitions=categories,
+            dynamic_partitions=bool(categories),
+        ),
     )
 
 
 def _bigcommerce(config: SourceConfig) -> ConnectorRuntimePlan:
     options = BigCommerceOptions(
         token_page=config.category_url, page_limit=config.page_limit or 200,
+        allow_rendered_token_fallback=config.render is not False,
         vat_status=config.vat_status,
     )
     return ConnectorRuntimePlan(
@@ -201,6 +384,10 @@ def _bigcommerce(config: SourceConfig) -> ConnectorRuntimePlan:
             BigCommerceFetcherTransport(fetcher), options, budget=budget
         ),
         "graphql", "api", "bigcommerce_connector",
+        library_canary=LibraryCanaryRoute(
+            connector="bigcommerce",
+            uses_browser_transport=True,
+        ),
     )
 
 
@@ -218,6 +405,10 @@ def _wix(config: SourceConfig) -> ConnectorRuntimePlan:
             WixFetcherTransport(fetcher), options, budget=budget
         ),
         "dom", "product_page", "wix_connector",
+        library_canary=LibraryCanaryRoute(
+            connector="wix",
+            uses_browser_transport=True,
+        ),
     )
 
 
@@ -256,13 +447,19 @@ def _specialized(config: SourceConfig, name: str) -> ConnectorRuntimePlan:
     connector_type, options_type, method = definitions[name]
     options = _specialized_options(options_type, config)
     sitemaps = tuple(options.sitemaps)
+    partitions = _page_partitions(config, sitemaps=sitemaps)
     return ConnectorRuntimePlan(
         name, connector_type.version, options.model_dump(mode="json"),
-        _page_partitions(config, sitemaps=sitemaps),
+        partitions,
         lambda fetcher, budget: connector_type(
             WixFetcherTransport(fetcher), options, budget=budget
         ),
         method, "product_page", f"{name}_connector",
+        library_canary=LibraryCanaryRoute(
+            connector=name,
+            request_partitions=partitions,
+            uses_browser_transport=options.render is not False,
+        ),
     )
 
 
@@ -282,6 +479,11 @@ def _sumup(config: SourceConfig) -> ConnectorRuntimePlan:
             WixFetcherTransport(fetcher), options, budget=budget
         ),
         "dom", "product_page", "sumup_connector",
+        library_canary=LibraryCanaryRoute(
+            connector="sumup",
+            request_partitions=("sitemap",),
+            uses_browser_transport=options.render is not False,
+        ),
     )
 
 
@@ -299,14 +501,19 @@ def _prestashop(config: SourceConfig, *, sio2: bool = False) -> ConnectorRuntime
         page_limit=config.page_limit or 500,
         category_page_limit=config.category_page_limit or 120,
     )
+    partitions = declared_partition_keys(options, config.url)
     return ConnectorRuntimePlan(
         "prestashop", PrestaShopConnector.version, options.model_dump(mode="json"),
-        declared_partition_keys(options, config.url),
+        partitions,
         lambda fetcher, budget: PrestaShopConnector(
             PageFetcherTransport(fetcher, config), options, budget=budget
         ),
         "dom", "product_page", "sio2_connector" if sio2 else "prestashop_connector",
         ceramics_projection={"source_policy": "sio2"} if sio2 else {},
+        library_canary=LibraryCanaryRoute(
+            connector="prestashop",
+            request_partitions=partitions,
+        ),
     )
 
 
@@ -323,51 +530,113 @@ def _pagecommerce(config: SourceConfig) -> ConnectorRuntimePlan:
         vat_rate=Decimal(str(config.vat_rate)) if config.vat_rate is not None else None,
         stock_from_quantity_maximum=bool(config.stock_from_quantity_maximum),
     )
+    partitions = _page_partitions(config, sitemaps=tuple(options.sitemaps))
     return ConnectorRuntimePlan(
         "pagecommerce", PageCommerceConnector.version, options.model_dump(mode="json"),
-        _page_partitions(config, sitemaps=tuple(options.sitemaps)),
+        partitions,
         lambda fetcher, budget: PageCommerceConnector(
             PageFetcherTransport(fetcher, config), options, budget=budget
         ),
         "structured", "product_page", "pagecrawl_connector",
+        library_canary=LibraryCanaryRoute(
+            connector="generic-pages",
+            request_partitions=partitions,
+            uses_browser_transport=options.render is not False,
+        ),
     )
 
 
-def _bespoke(config: SourceConfig, name: str) -> ConnectorRuntimePlan:
-    options: Any
-    connector_type: Any
-    transport_type: Any
-    if name == "axner":
-        options = AxnerOptions(
-            category_url=config.category_url, category_page_limit=config.category_page_limit or 400,
-            page_limit=config.page_limit or 500, brand=config.brand, currency=config.currency or "USD",
-            vat_status=config.vat_status,
-            vat_rate=Decimal(str(config.vat_rate)) if config.vat_rate is not None else None,
-            render=config.render,
-        )
-        connector_type, transport_type = AxnerConnector, PageFetcherTransport
-    elif name == "ceramicolours":
-        options = CeramicoloursOptions(
-            category_ids=tuple(str(value) for value in (config.category_ids or ())),
-            category_page_limit=config.category_page_limit or 25, page_limit=config.page_limit or 500,
-            brand=config.brand, vat_status=config.vat_status or "inclusive", render=config.render,
-        )
-        connector_type, transport_type = CeramicoloursConnector, InteractiveFetcherTransport
-    else:
-        options = KeramikKraftOptions(
-            category_paths=tuple(config.category_paths or ()),
-            category_page_limit=config.category_page_limit or 150, page_limit=config.page_limit or 500,
-            brand=config.brand,
-            vat_rate=Decimal(str(config.vat_rate)) if config.vat_rate is not None else None,
-            render=config.render,
-        )
-        connector_type, transport_type = KeramikKraftConnector, PageFetcherTransport
-    return ConnectorRuntimePlan(
-        name, connector_type.version, options.model_dump(mode="json"), ("main",),
-        lambda fetcher, budget: connector_type(
-            transport_type(fetcher, config), options, budget=budget
+def _axner(config: SourceConfig) -> ConnectorRuntimePlan:
+    options = AxnerOptions(
+        category_url=config.category_url,
+        category_page_limit=config.category_page_limit or 400,
+        page_limit=config.page_limit or 500,
+        brand=config.brand,
+        currency=config.currency or "USD",
+        vat_status=config.vat_status,
+        vat_rate=(
+            Decimal(str(config.vat_rate))
+            if config.vat_rate is not None
+            else None
         ),
-        "dom", "product_page", f"{name}_connector",
+        render=config.render,
+    )
+    return ConnectorRuntimePlan(
+        "axner",
+        AxnerConnector.version,
+        options.model_dump(mode="json"),
+        ("main",),
+        lambda fetcher, budget: AxnerConnector(
+            PageFetcherTransport(fetcher, config), options, budget=budget
+        ),
+        "dom",
+        "product_page",
+        "axner_connector",
+        library_canary=LibraryCanaryRoute(
+            connector="axner",
+            request_partitions=("main",),
+            uses_browser_transport=options.render is not False,
+        ),
+    )
+
+
+def _ceramicolours(config: SourceConfig) -> ConnectorRuntimePlan:
+    options = CeramicoloursOptions(
+        category_ids=tuple(str(value) for value in (config.category_ids or ())),
+        category_page_limit=config.category_page_limit or 25,
+        page_limit=config.page_limit or 500,
+        brand=config.brand,
+        vat_status=config.vat_status or "inclusive",
+        render=config.render,
+    )
+    return ConnectorRuntimePlan(
+        "ceramicolours",
+        CeramicoloursConnector.version,
+        options.model_dump(mode="json"),
+        ("main",),
+        lambda fetcher, budget: CeramicoloursConnector(
+            InteractiveFetcherTransport(fetcher, config), options, budget=budget
+        ),
+        "dom",
+        "product_page",
+        "ceramicolours_connector",
+        library_canary=LibraryCanaryRoute(
+            connector="ceramicolours",
+            request_partitions=("main",),
+            uses_browser_transport=options.render is not False,
+        ),
+    )
+
+
+def _keramik_kraft(config: SourceConfig) -> ConnectorRuntimePlan:
+    options = KeramikKraftOptions(
+        category_paths=tuple(config.category_paths or ()),
+        category_page_limit=config.category_page_limit or 150,
+        page_limit=config.page_limit or 500,
+        brand=config.brand,
+        vat_rate=(
+            Decimal(str(config.vat_rate))
+            if config.vat_rate is not None
+            else None
+        ),
+        render=config.render,
+    )
+    return ConnectorRuntimePlan(
+        "keramik_kraft",
+        KeramikKraftConnector.version,
+        options.model_dump(mode="json"),
+        ("main",),
+        lambda fetcher, budget: KeramikKraftConnector(
+            PageFetcherTransport(fetcher, config), options, budget=budget
+        ),
+        "dom",
+        "product_page",
+        "keramik_kraft_connector",
+        library_canary=LibraryCanaryRoute(
+            connector="keramik-kraft",
+            request_partitions=("main",),
+            uses_browser_transport=options.render is not False,
+        ),
     )
 
 
@@ -383,8 +652,8 @@ for _name, _projector in {
     "prestashop": _prestashop,
     "sio2": lambda config: _prestashop(config, sio2=True),
     "pagecrawl": _pagecommerce,
-    "axner": lambda config: _bespoke(config, "axner"),
-    "ceramicolours": lambda config: _bespoke(config, "ceramicolours"),
-    "keramik_kraft": lambda config: _bespoke(config, "keramik_kraft"),
+    "axner": _axner,
+    "ceramicolours": _ceramicolours,
+    "keramik_kraft": _keramik_kraft,
 }.items():
     register_runtime_adapter(_name, _projector)

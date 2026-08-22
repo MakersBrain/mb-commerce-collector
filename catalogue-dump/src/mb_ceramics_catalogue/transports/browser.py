@@ -7,6 +7,7 @@ the isolation boundary that a shared browser process needs.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -38,6 +39,52 @@ class BrowserJobContext:
     logical_profile: str | None = None
 
 
+@dataclass(slots=True)
+class BrowserNetworkAccounting:
+    """Monotonic aggregate for one lease-scoped browser backend."""
+
+    physical_requests: int = 0
+    transmitted_bytes: int = 0
+    received_bytes: int = 0
+
+    def record(
+        self,
+        transmitted_bytes: int,
+        received_bytes: int,
+        physical_requests: int,
+    ) -> None:
+        if min(transmitted_bytes, received_bytes, physical_requests) < 0:
+            raise ValueError("browser network accounting cannot be negative")
+        self.transmitted_bytes += transmitted_bytes
+        self.received_bytes += received_bytes
+        self.physical_requests += physical_requests
+
+    def snapshot(self) -> tuple[int, int, int]:
+        return (
+            self.physical_requests,
+            self.transmitted_bytes,
+            self.received_bytes,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserFetchResponse:
+    """Browser-context fetch result without exposing a Playwright response."""
+
+    status: int
+    headers: Mapping[str, str]
+    content: bytes
+    final_url: str
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserEvaluationResult:
+    """JSON-safe browser evaluation value and its post-navigation URL."""
+
+    value: Any
+    final_url: str
+
+
 @runtime_checkable
 class BrowserSession(Protocol):
     async def render(
@@ -48,6 +95,21 @@ class BrowserSession(Protocol):
         self, url: str, script: str, wait_ms: int = 2000,
         wait_for: str | None = None,
     ) -> Any: ...
+
+    async def evaluate_result(
+        self, url: str, script: str, wait_ms: int = 2000,
+        wait_for: str | None = None,
+    ) -> BrowserEvaluationResult: ...
+
+    async def request(
+        self,
+        page_url: str,
+        endpoint: str,
+        *,
+        method: str = "GET",
+        headers: dict[str, str] | None = None,
+        json_body: Any = None,
+    ) -> BrowserFetchResponse: ...
 
     async def request_json(
         self, page_url: str, endpoint: str, *, method: str = "POST",

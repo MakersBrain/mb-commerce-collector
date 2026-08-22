@@ -15,8 +15,10 @@ COPY catalogue-dump/pyproject.toml catalogue-dump/sources.json ./catalogue-dump/
 COPY catalogue-dump/src ./catalogue-dump/src
 COPY catalogue-service/pyproject.toml catalogue-service/catalogue.openapi.json ./catalogue-service/
 COPY catalogue-service/src ./catalogue-service/src
+COPY docker/verify-python-distributions.py /usr/local/bin/verify-python-distributions.py
 
 RUN pip install --no-cache-dir ./commerce-scraper ./catalogue-dump ./catalogue-service \
+ && python -I /usr/local/bin/verify-python-distributions.py \
  && rm -rf /root/.cache /src
 
 # Not root: it reads one database and serves JSON, and needs nothing else.

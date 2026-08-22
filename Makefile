@@ -148,18 +148,25 @@ openapi-check:  ## Fail if a generated contract has drifted from the code
 .PHONY: check
 check: lint typecheck test openapi-check scraper-build scraper-contracts  ## What every change has to pass
 
-.PHONY: scraper-lint scraper-typecheck scraper-test scraper-build scraper-contracts scraper-check
+.PHONY: scraper-lint scraper-typecheck scraper-test scraper-schemas scraper-build scraper-contracts scraper-example scraper-release-check scraper-check
 scraper-lint:  ## Lint the reusable scraper distribution
 	$(RUNSCRAPER) ruff check .
 scraper-typecheck:  ## Type-check the reusable scraper distribution
 	$(RUNSCRAPER) mypy
 scraper-test:  ## Run scraper unit and conformance tests
 	$(RUNSCRAPER) pytest
+scraper-schemas:  ## Verify frozen public schemas and representative payloads
+	$(RUNSCRAPER) python scripts/generate_schemas.py --check
 scraper-build:  ## Build wheel and source distribution
 	$(RUNSCRAPER) python -m build
-scraper-contracts:  ## Run dependency and clean-import contract tests
+scraper-contracts: scraper-build  ## Run dependency, clean-import, and installed-wheel contract tests
 	$(RUNSCRAPER) pytest tests/test_boundaries.py
-scraper-check: scraper-lint scraper-typecheck scraper-test scraper-build scraper-contracts  ## All scraper gates
+	$(RUNSCRAPER) python scripts/verify_wheel.py
+scraper-example: scraper-build  ## Install and exercise the external connector example
+	$(RUNSCRAPER) python scripts/verify_custom_connector.py
+scraper-release-check: scraper-build  ## Verify changelog, source, and artifact versions
+	$(RUNSCRAPER) python scripts/verify_release.py
+scraper-check: scraper-lint scraper-typecheck scraper-test scraper-schemas scraper-build scraper-contracts scraper-example scraper-release-check  ## All scraper gates
 
 .PHONY: check-all
 check-all: check test-golden  ## check, the replay suite, and the database suite

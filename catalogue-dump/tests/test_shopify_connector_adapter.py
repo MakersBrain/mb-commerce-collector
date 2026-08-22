@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -25,15 +26,33 @@ class FakeFetcher:
         self.limiter = Limiter()
         self.on_products = on_products
         self.rotations = 0
+        self.proxy_lease = None
+        self.stats = SimpleNamespace(proxy_requests=0)
 
-    async def json(self, url, *, params=None, headers=None):
+    async def response(
+        self,
+        url,
+        *,
+        params=None,
+        method="GET",
+        json_body=None,
+        headers=None,
+    ):
+        del json_body
         self.calls.append((url, params, headers))
         if url.endswith("products.json") and self.on_products is not None:
             self.on_products()
         value = self.responses.pop(0)
         if isinstance(value, Exception):
             raise value
-        return deepcopy(value)
+        return httpx.Response(
+            200,
+            json=deepcopy(value),
+            request=httpx.Request(method, url, params=params),
+        )
+
+    async def json(self, url, *, params=None, headers=None):
+        return (await self.response(url, params=params, headers=headers)).json()
 
     async def text(self, url, *, headers=None):
         return await self.json(url, headers=headers)
@@ -41,18 +60,40 @@ class FakeFetcher:
     async def rotate_client(self):
         self.rotations += 1
 
+    async def render(self, url, wait_ms=1500, wait_for=None):
+        del url, wait_ms, wait_for
+        raise AssertionError("Shopify connector must not render")
+
+    async def may_fetch(self, url, ignore_robots=False, obey_robots=False):
+        del url, ignore_robots, obey_robots
+        return True
+
 
 class BlockingSecondPageFetcher(FakeFetcher):
     def __init__(self, first):
         super().__init__([first])
         self.second_started = asyncio.Event()
 
-    async def json(self, url, *, params=None, headers=None):
+    async def response(
+        self,
+        url,
+        *,
+        params=None,
+        method="GET",
+        json_body=None,
+        headers=None,
+    ):
         if self.calls:
             self.calls.append((url, params, headers))
             self.second_started.set()
             await asyncio.Event().wait()
-        return await super().json(url, params=params, headers=headers)
+        return await super().response(
+            url,
+            params=params,
+            method=method,
+            json_body=json_body,
+            headers=headers,
+        )
 
 
 def product(identifier: int = 10) -> dict:
@@ -93,7 +134,9 @@ def product(identifier: int = 10) -> dict:
 
 def config(**updates) -> dict:
     values = {
+        "label": "Shop",
         "url": "https://shop.test/path",
+        "scraper": "shopify",
         "scope": "all",
         "currency": "EUR",
         "vat_status": "inclusive",
@@ -140,6 +183,26 @@ async def test_canary_is_explicit_and_preserves_sale_options_images_raw_and_stoc
         "product": {key: value for key, value in product().items() if key != "variants"},
         "variant": product()["variants"][0],
     }
+
+
+@pytest.mark.asyncio
+async def test_local_library_shell_uses_shared_registry_and_projection_root() -> None:
+    payload = {"products": [product()]}
+    canary, _ = await scrape("shopify_connector", [payload])
+    shared, fetcher = await scrape(
+        "library_shopify_connector",
+        [payload],
+        scraper="library_shopify_connector",
+    )
+
+    assert scrapers.load("library_shopify_connector").__name__ == (
+        "LibraryConnectorScraper"
+    )
+    assert [stable(row) for row in shared.records] == [
+        stable(row) for row in canary.records
+    ]
+    assert shared.requests == 1
+    assert fetcher.calls[0][0].endswith("products.json")
 
 
 @pytest.mark.asyncio

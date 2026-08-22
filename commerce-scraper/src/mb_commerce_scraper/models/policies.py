@@ -40,4 +40,5 @@ class ProxyPolicyConfig(BaseModel):
     mode: ProxyMode = ProxyMode.NEVER
     country: str | None = Field(default=None, min_length=2, max_length=2)
     provider_preferences: tuple[str, ...] = ()
+    maximum_requests: int | None = Field(default=None, ge=1)
     maximum_bytes: int | None = Field(default=None, ge=1)

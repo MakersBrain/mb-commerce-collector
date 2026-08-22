@@ -36,6 +36,9 @@ def _walk(value: Any) -> list[dict[str, Any]]:
 
 
 class JsonLdProductParser:
+    name = "jsonld"
+    version = "1"
+
     def __init__(self, *, currency: str | None = None) -> None:
         self.currency = currency
 
@@ -100,4 +103,3 @@ class JsonLdProductParser:
             "backorder": Availability.BACKORDER,
             "preorder": Availability.PREORDER,
         }.get(normalized, Availability.UNKNOWN)
-

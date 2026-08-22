@@ -126,8 +126,16 @@ def schema_directory() -> Any:
 #: database with all eleven applied; regenerate it the same way rather than
 #: editing it by hand.
 BASELINE = "catalogue-schema.sql"
+LINEAGE_RUNTIME_MIGRATION = "catalogue-lineage-runtime-v1.sql"
+PROXY_ATTEMPT_AUTHORIZATION_MIGRATION = "catalogue-proxy-attempt-authorization-v1.sql"
+PROXY_AUDIT_ROLE_MIGRATION = "catalogue-proxy-audit-role-v1.sql"
 
-SCHEMA_FILES = (BASELINE,)
+SCHEMA_FILES = (
+    BASELINE,
+    LINEAGE_RUNTIME_MIGRATION,
+    PROXY_ATTEMPT_AUTHORIZATION_MIGRATION,
+    PROXY_AUDIT_ROLE_MIGRATION,
+)
 
 #: The table added by the last file that went into the baseline. Its presence
 #: is what separates a database that is already at head from one that stopped

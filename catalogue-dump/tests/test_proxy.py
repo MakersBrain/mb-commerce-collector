@@ -24,11 +24,14 @@ from mb_ceramics_catalogue.proxy import (
     ProxyDenied,
     ProxyLease,
     ProxyProfile,
+    authorize_reservation_attempt,
     load_api_key,
     load_profiles,
     provider_usage,
     reconcile,
+    reconcile_reservation_attempt,
     redact_url,
+    release_reservation_attempt,
     reserve,
     scrub_secrets,
 )
@@ -332,6 +335,87 @@ async def test_atomic_reservations_cannot_oversubscribe_a_cycle(db):
         await second.close()
     assert sum(not isinstance(value, Exception) for value in results) == 1
     assert sum(isinstance(value, ProxyDenied) for value in results) == 1
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_attempt_authorizations_are_atomic_and_reconcile_exactly_once(db):
+    start = datetime.now(UTC) - timedelta(days=1)
+    end = datetime.now(UTC) + timedelta(hours=12)
+    await db.execute(
+        """insert into catalogue.proxy_budget_cycles
+           (provider, cycle_start, cycle_end, purchased_bytes, operational_bytes,
+            daily_bytes, pilot_bytes, reconciled_at, reconciliation_ok, kill_switch)
+           values ('decodo', %s, %s, 100000000, 25000000, 80000000, 300000000,
+                   now(), true, false)""",
+        (start, end),
+    )
+    run_id, job_id = uuid4(), uuid4()
+    await db.execute(
+        "insert into catalogue.runs(id, kind, status) values (%s, 'manual', 'running')",
+        (run_id,),
+    )
+    await db.execute(
+        """insert into catalogue.jobs(id, run_id, source_id, host, state)
+           values (%s, %s, 'shop', 'shop.test', 'running')""",
+        (job_id, run_id),
+    )
+    reservation_id = await reserve(
+        db,
+        job_id=job_id,
+        profile="default",
+        cycle_start=start,
+        cycle_end=end,
+        requested_bytes=100,
+    )
+
+    dsn = postgres_dsn()
+    assert dsn
+    first = await psycopg.AsyncConnection.connect(dsn, row_factory=dict_row, autocommit=True)
+    second = await psycopg.AsyncConnection.connect(dsn, row_factory=dict_row, autocommit=True)
+    try:
+        authorizations = await asyncio.gather(
+            authorize_reservation_attempt(
+                first,
+                reservation_id=reservation_id,
+                estimated_bytes=60,
+                maximum_requests=2,
+            ),
+            authorize_reservation_attempt(
+                second,
+                reservation_id=reservation_id,
+                estimated_bytes=60,
+                maximum_requests=2,
+            ),
+        )
+        accepted = [value for value in authorizations if value is not None]
+        assert len(accepted) == 1
+        usage = await reconcile_reservation_attempt(
+            first,
+            authorization_id=accepted[0],
+            actual_bytes=40,
+            physical_requests=1,
+        )
+        repeated = await reconcile_reservation_attempt(
+            second,
+            authorization_id=accepted[0],
+            actual_bytes=40,
+            physical_requests=1,
+        )
+        assert usage == repeated
+        assert (usage.estimated_bytes, usage.request_count) == (40, 1)
+
+        returned = await authorize_reservation_attempt(
+            first,
+            reservation_id=reservation_id,
+            estimated_bytes=60,
+            maximum_requests=2,
+        )
+        assert returned is not None
+        await release_reservation_attempt(second, authorization_id=returned)
+    finally:
+        await first.close()
+        await second.close()
 
 
 @pytest.mark.postgres

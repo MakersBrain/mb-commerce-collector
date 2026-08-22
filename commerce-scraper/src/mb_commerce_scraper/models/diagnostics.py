@@ -1,8 +1,10 @@
 from enum import StrEnum
+from typing import Any, cast
 
-from pydantic import Field, JsonValue
+from pydantic import Field, JsonValue, field_validator
 
 from .commerce import ContractModel
+from .sanitization import sanitize_diagnostic_text, sanitize_json_value, sanitize_url
 
 
 class DiagnosticCode(StrEnum):
@@ -35,6 +37,37 @@ class Diagnostic(ContractModel):
     entity_id: str | None = None
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
+    @field_validator("message", mode="before")
+    @classmethod
+    def sanitize_message(cls, value: Any) -> Any:
+        return sanitize_diagnostic_text(value) if isinstance(value, str) else value
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def sanitize_diagnostic_url(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        return sanitize_diagnostic_text(sanitize_url(value))
+
+    @field_validator("entity_id", mode="before")
+    @classmethod
+    def sanitize_entity_identifier(cls, value: Any) -> Any:
+        return sanitize_diagnostic_text(value) if isinstance(value, str) else value
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def sanitize_metadata(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        sanitized = sanitize_json_value(cast(dict[str, JsonValue], value))
+        return cast(dict[str, JsonValue], sanitized)
+
+
+def sanitize_diagnostic(diagnostic: Diagnostic) -> Diagnostic:
+    """Revalidate a diagnostic at an untrusted connector egress boundary."""
+
+    return Diagnostic.model_validate(diagnostic.model_dump(mode="python"))
+
 
 def result_limit_diagnostic(limit: int, url: str) -> Diagnostic:
     return Diagnostic(
@@ -45,4 +78,3 @@ def result_limit_diagnostic(limit: int, url: str) -> Diagnostic:
         affects_completeness=True,
         url=url,
     )
-

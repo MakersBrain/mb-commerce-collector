@@ -40,13 +40,26 @@ import os
 import signal
 import socket
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
+from mb_commerce_scraper import (
+    BrowserPolicy as LibraryBrowserPolicy,
+)
+from mb_commerce_scraper import (
+    CollectionRequest as LibraryCollectionRequest,
+)
+from mb_commerce_scraper import (
+    RefreshMode as LibraryRefreshMode,
+)
+from mb_commerce_scraper import (
+    SnapshotField as LibrarySnapshotField,
+)
+from mb_commerce_scraper import sanitize_diagnostic_text
 from psycopg.types.json import Jsonb
 
 from mb_ceramics_catalogue import __version__, scrapers
@@ -68,11 +81,28 @@ from mb_ceramics_catalogue.observability import logging as obs
 from mb_ceramics_catalogue.observability import metrics, tracing
 from mb_ceramics_catalogue.ops import events, health, leases, monitor, queue, runs, schedule
 from mb_ceramics_catalogue.ops import outputs as ops_outputs
-from mb_ceramics_catalogue.ops.connector_adapters import runtime_plan
+from mb_ceramics_catalogue.ops.commerce_scraper_adapter import (
+    layered_source_config,
+)
+from mb_ceramics_catalogue.ops.commerce_scraper_proxy_runtime import (
+    resolve_native_proxy_runtime,
+)
+from mb_ceramics_catalogue.ops.commerce_scraper_runtime import (
+    application_connector_registry,
+    fetcher_transport_totals,
+    open_native_library_pipeline_connector,
+)
+from mb_ceramics_catalogue.ops.connector_adapters import (
+    library_canary_route,
+    runtime_plan,
+)
 from mb_ceramics_catalogue.ops.delivery import Delivery, routes_for
+from mb_ceramics_catalogue.ops.library_lineages import (
+    LibraryLineageSpec,
+    resolve_library_lineage,
+)
 from mb_ceramics_catalogue.ops.providers.factory import consumer
 from mb_ceramics_catalogue.ops.sink import THROTTLE_SECONDS, JobLogHandler, PostgresSink
-from mb_ceramics_catalogue.pipeline.budget import RequestBudget, RequestCost
 from mb_ceramics_catalogue.pipeline.outputs import LocalArtifactStore
 from mb_ceramics_catalogue.pipeline.runner import ConnectorPipeline, DatasetPageState, PipelineResult
 from mb_ceramics_catalogue.proxy import (
@@ -96,6 +126,21 @@ from mb_ceramics_catalogue.transports.browser import (
 from mb_ceramics_catalogue.transports.cdp_extension_proxy import CdpExtensionProxyBackend
 
 LOGGER = obs.get_logger("catalogue.worker")
+class _BorrowedConnectionPool:
+    """Expose the worker's fenced job connection to the proxy adapter.
+
+    The native proxy pool serializes its reservation and attempt-accounting
+    operations. Reusing this connection prevents a one-slot worker pool from
+    deadlocking while a canary already owns its job connection.
+    """
+
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    @contextlib.asynccontextmanager
+    async def connection(self) -> AsyncIterator[Any]:
+        yield self._connection
+
 
 #: How often the worker reports that it is alive and renews its leases.
 HEARTBEAT_SECONDS = 5.0
@@ -583,10 +628,10 @@ class Worker:
                     # the image being wrong, not the source, but a failed job an
                     # operator can see beats one circling the queue unnoticed.
                     LOGGER.exception("job.failed", source=job.source_id)
-                    await self._finish(job, "failed", error=str(error)[:2000])
+                    await self._finish(job, "failed", error=_durable_error(error))
             except Exception as error:
                 LOGGER.exception("job.failed", source=job.source_id)
-                await self._finish(job, "failed", error=str(error)[:2000])
+                await self._finish(job, "failed", error=_durable_error(error))
             finally:
                 async with self.pool.connection() as connection:
                     await leases.release_all(connection, job.id, job.execution_token)
@@ -614,7 +659,7 @@ class Worker:
         self,
         job: queue.ClaimedJob,
         params: CrawlParams,
-        proxy_lease: ProxyLease | None,
+        proxy_active: bool,
     ) -> tuple[BrowserBackend | None, BrowserJobContext | None]:
         """Resolve the snapshotted backend without inspecting scraper/platform names.
 
@@ -636,7 +681,7 @@ class Worker:
                 f"unsupported selected browser backend {job.selected_browser_backend!r}"
             ) from error
 
-        if selected == BrowserBackendName.CDP_EXTENSION_PROXY and proxy_lease is not None:
+        if selected == BrowserBackendName.CDP_EXTENSION_PROXY and proxy_active:
             raise BrowserUnavailable(
                 "cdp_extension_proxy is direct-route only and cannot use a paid proxy lease"
             )
@@ -682,7 +727,9 @@ class Worker:
                 return
             async with self.pool.connection() as connection:
                 proxy_lease = await self._proxy_lease(connection, job, config, params)
-                browser_backend, browser_job = self._browser_for_job(job, params, proxy_lease)
+                browser_backend, browser_job = self._browser_for_job(
+                    job, params, proxy_lease is not None
+                )
                 sink = PostgresSink(connection, job.run_id, {job.source_id: job.id})
                 with RecordBuilder(self.sources.as_scraper_configs()):
                     try:
@@ -800,15 +847,34 @@ class Worker:
 
     async def _crawl_connector_canary(self, job: queue.ClaimedJob, params: CrawlParams, config: Any) -> None:
         """Run a registered reusable connector only when explicitly selected."""
-        if params.refresh_mode != "full":
-            raise ValueError("connector canary currently requires refresh_mode=full")
         adapter = runtime_plan(config)
+        library_registry = application_connector_registry()
 
         registry = built_in_registry()
         current_ceramics = (
             "ceramics.catalogue_identity.v2" if config.identity_only else "ceramics.catalogue_item.v2"
         )
         selected = tuple(current_ceramics if name == "ceramics" else name for name in params.datasets)
+        configuration = layered_source_config(
+            job.source_id,
+            config,
+            run=params,
+            datasets=selected,
+            connector_plan=adapter,
+        )
+        library_source = configuration.source
+        route = library_canary_route(adapter, library_source.connector)
+        if route is None:
+            raise ValueError(
+                f"connector_canary has no approved native route for {config.scraper!r}"
+            )
+        library_partitions = route.request_partitions
+        library_dynamic_partitions = route.dynamic_partitions
+        if library_source.connector not in library_registry.names():
+            raise ValueError(
+                f"approved library canary connector {library_source.connector!r} "
+                "is not registered"
+            )
         definitions = tuple(registry.get(name) for name in selected)
         keys = {
             definition.name: ops_outputs.DatasetKey(
@@ -816,18 +882,10 @@ class Worker:
             )
             for definition in definitions
         }
-        ceramics_projection = {
-            "scope": config.scope,
-            "enrichments": tuple(config.enrichments or ()),
-            "brand": config.brand,
-            "is_manufacturer": config.is_manufacturer,
-            "extraction_method": adapter.extraction_method,
-            "source_detail_level": adapter.source_detail_level,
-            # The durable pipeline has no legacy Scraper.add category gate;
-            # keep scope enforcement in the projector composition root.
-            "apply_scope": True,
-            **adapter.ceramics_projection,
-        }
+        ceramics_projection = configuration.projection_options
+        # Library connectors enumerate a coherent neutral snapshot in FULL
+        # mode. PRICE is application projection intent: the compatibility
+        # record marker makes the loader preserve weekly descriptive fields.
         request = CollectionRequest(
             source_id=job.source_id,
             base_url=config.url,
@@ -838,13 +896,19 @@ class Worker:
             categories=adapter.categories,
             cancellation_check=self._cancels[job.id].is_set,
         )
-        connector_identity = {
-            "source_url": config.url,
-            "connector": adapter.name,
-            "options": adapter.options,
-            "collections": list(adapter.collections),
-            "categories": list(adapter.categories),
-        }
+        library_request = LibraryCollectionRequest(
+            source_id=job.source_id,
+            base_url=config.url,
+            refresh_mode=LibraryRefreshMode.FULL,
+            requested_fields=frozenset(
+                LibrarySnapshotField(field.value) for field in request.requested_fields
+            ),
+            result_limit=params.limit,
+            partitions=library_partitions,
+        )
+        connector_name = library_source.connector
+        connector_version = library_registry.connector_version(connector_name)
+        connector_options = library_source.connector_options
         projection_configuration = {
             name: ceramics_projection if name.startswith("ceramics.") else {} for name in selected
         }
@@ -857,104 +921,140 @@ class Worker:
             }
             for key in keys.values()
         ]
-        connector_fingerprint = _fingerprint(connector_identity)
         dataset_fingerprint = _fingerprint(dataset_selection)
         store = LocalArtifactStore(self.settings.dumps_dir / "pipeline")
 
         async with self.pool.connection() as connection:
-            lineage = await ops_outputs.find_compatible_lineage(
+            resolved = await resolve_library_lineage(
                 connection,
                 job.id,
-                source_url=config.url,
-                connector=adapter.name,
-                connector_version=adapter.connector_version,
-                connector_config_fingerprint=connector_fingerprint,
-                dataset_fingerprint=dataset_fingerprint,
-            )
-            resuming = lineage is not None
-            for key in keys.values():
-                await ops_outputs.prepare_dataset_for_collection(connection, job.id, key, resuming=resuming)
-            if lineage is None:
-                lineage = await ops_outputs.create_lineage(
-                    connection,
-                    job.id,
-                    source_id=job.source_id,
-                    source_url=config.url,
-                    connector=adapter.name,
-                    connector_version=adapter.connector_version,
-                    connector_configuration={"partitions": list(adapter.partitions)},
-                    connector_config_fingerprint=connector_fingerprint,
+                spec=LibraryLineageSpec(
+                    request=library_request,
+                    connector=connector_name,
+                    connector_version=connector_version,
+                    connector_options=connector_options,
                     dataset_fingerprint=dataset_fingerprint,
                     dataset_selection=dataset_selection,
+                    connector_configuration={
+                        "partitions": (
+                            []
+                            if library_dynamic_partitions
+                            else list(library_request.partitions or ("main",))
+                        )
+                    },
                     budget_state={"request_budget": request.request_budget},
-                )
-            checkpoint = await ops_outputs.resume_checkpoint(connection, job.id, lineage)
+                ),
+                datasets=list(keys.values()),
+            )
+            lineage = resolved.lineage
+            library_checkpoint = resolved.checkpoint
+            collection_complete = (
+                resolved.progress is ops_outputs.LineageProgressState.TERMINAL_INTACT
+            )
+            restart_reason = (
+                resolved.restart_reason.value if resolved.restart_reason else None
+            )
             restored_states = await ops_outputs.pipeline_dataset_states(
                 connection, job.id, list(keys.values())
             )
 
-            proxy_lease = await self._proxy_lease(connection, job, config, params)
-            try:
-                browser_backend, browser_job = self._browser_for_job(job, params, proxy_lease)
-                async with open_session(
-                    params,
-                    self.settings.cache_dir,
-                    browser=None if proxy_lease else browser_backend,
-                    proxy_lease=proxy_lease,
-                    proxy_policy=str(job.proxy_snapshot.get("policy", "never")),
-                    browser_job=browser_job,
-                ) as session:
-                    remaining = getattr(session.fetcher, "proxy_bytes_remaining", None)
-                    budget = (
-                        RequestBudget(RequestCost(http_requests=2**31 - 1, proxy_bytes=remaining))
-                        if isinstance(remaining, int) and remaining >= 0
-                        else None
+            initial_states = {
+                name: DatasetPageState(state) for name, state in restored_states.items()
+            }
+            if collection_complete:
+                result = PipelineResult(
+                    pages=0,
+                    terminal=True,
+                    enumeration_intact=True,
+                    datasets=initial_states,
+                )
+                traffic_requests = 0
+                rendered_pages = 0
+                transport_totals = fetcher_transport_totals(None)
+            else:
+                native_proxy = resolve_native_proxy_runtime(
+                    _BorrowedConnectionPool(connection),
+                    job_id=job.id,
+                    proxy_snapshot=job.proxy_snapshot,
+                    settings=self.settings,
+                    run_proxy_policy=params.proxy_policy,
+                    run_proxy_max_megabytes=params.proxy_max_megabytes,
+                    source=configuration.source,
+                    source_policy=configuration.proxy,
+                )
+                browser_backend: BrowserBackend | None = None
+                browser_job: BrowserJobContext | None = None
+                if (
+                    route.uses_browser_transport
+                    and configuration.fetch.browser is not LibraryBrowserPolicy.NEVER
+                ):
+                    browser_backend, browser_job = self._browser_for_job(
+                        job,
+                        params,
+                        native_proxy is not None,
                     )
-                    connector = adapter.build(session.fetcher, budget)
+                async with open_native_library_pipeline_connector(
+                    registry=library_registry,
+                    configuration=configuration,
+                    request=library_request,
+                    checkpoint=library_checkpoint,
+                    params=params,
+                    cache_directory=self.settings.cache_dir,
+                    proxy=native_proxy,
+                    browser_backend=browser_backend,
+                    browser_job=browser_job,
+                    cancelled=self._cancels[job.id].is_set,
+                    collection_id=str(lineage),
+                ) as (native_connector, telemetry):
                     committer = ops_outputs.PostgresPageCommitter(
                         connection,
                         job.id,
                         lineage,
-                        connector.version,
+                        native_connector.version,
                         keys,
-                        dynamic_partitions=adapter.dynamic_partitions,
+                        dynamic_partitions=library_dynamic_partitions,
                     )
-                    result = await ConnectorPipeline(registry, store, committer).run(
-                        job_id=str(job.id),
-                        checkpoint_lineage=str(lineage),
-                        connector=connector,
-                        request=request,
-                        datasets=selected,
-                        checkpoint=checkpoint,
-                        projection_configuration=projection_configuration,
-                        initial_states={
-                            name: DatasetPageState(state) for name, state in restored_states.items()
-                        },
-                    )
-                    traffic_requests = (
-                        session.fetcher.stats.direct_requests
-                        + session.fetcher.stats.impersonated_requests
-                        + session.fetcher.stats.browser_requests
-                    )
-                    rendered_pages = session.fetcher.stats.browser_requests
-            finally:
-                if proxy_lease:
-                    await close_reservation(connection, proxy_lease)
+                    async with asyncio.timeout(
+                        configuration.fetch.timeout_seconds
+                    ):
+                        result = await ConnectorPipeline(
+                            registry, store, committer
+                        ).run(
+                            job_id=str(job.id),
+                            checkpoint_lineage=str(lineage),
+                            connector=native_connector,
+                            request=request,
+                            datasets=selected,
+                            checkpoint=None,
+                            projection_configuration=projection_configuration,
+                            initial_states=initial_states,
+                        )
+                transport_totals = telemetry.transport_totals()
+                traffic_requests = transport_totals["physical_requests"]
+                rendered_pages = transport_totals["browser_requests"]
 
             summary: dict[str, Any] = {
                 "source": job.source_id,
                 "label": config.label,
-                "scraper": f"{adapter.name}-connector-canary",
+                "scraper": f"{connector_name}-connector-canary",
+                "runtime_format": ops_outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1.value,
+                "connector": connector_name,
+                "connector_version": connector_version,
+                "checkpoint_lineage": str(lineage),
+                "checkpoint_restart_reason": restart_reason,
+                "terminal_recovery": collection_complete,
                 "extraction_method": adapter.extraction_method,
                 "records": 0,
                 "discovered": 0,
                 "requests": traffic_requests,
                 "connector_pages": result.pages,
                 "rendered_pages": rendered_pages,
+                "transport": transport_totals,
                 "truncated": not result.enumeration_intact,
                 "error_count": 0,
                 "errors": [],
                 "notes": ["reusable connector canary"],
+                "refresh_mode": params.refresh_mode,
                 "field_coverage": {},
             }
             if self._cancels[job.id].is_set() or not result.terminal:
@@ -985,7 +1085,9 @@ class Worker:
                 job.id,
                 lineage,
                 expected_partitions=(
-                    adapter.partitions or await ops_outputs.declared_partitions(connection, job.id, lineage)
+                    await ops_outputs.declared_partitions(connection, job.id, lineage)
+                    if library_dynamic_partitions
+                    else library_request.partitions or ("main",)
                 ),
                 checksum=checksum,
             )
@@ -1063,7 +1165,7 @@ class Worker:
                         keys[ceramics_name],
                         state="failed",
                         complete=True,
-                        error=str(error)[:2000],
+                        error=_durable_error(error),
                     )
                 raise
             summary.update(loaded=loaded.records, retired=loaded.retired, rejected=loaded.rejected)
@@ -1177,7 +1279,11 @@ class Worker:
         """
         async with self.pool.connection() as connection:
             return await queue.require_capability(
-                connection, job, self.state.id, "browser", reason=str(error)[:200]
+                connection,
+                job,
+                self.state.id,
+                "browser",
+                reason=_durable_error(error, max_length=200),
             )
 
     async def _retry_transient(
@@ -1503,7 +1609,18 @@ class Worker:
 
 def _first_error(summary: dict[str, Any]) -> str | None:
     errors = summary.get("errors") or []
-    return str(errors[0].get("error"))[:2000] if errors else None
+    return (
+        sanitize_diagnostic_text(
+            str(errors[0].get("error")),
+            max_length=2_000,
+        )
+        if errors
+        else None
+    )
+
+
+def _durable_error(error: BaseException, *, max_length: int = 2_000) -> str:
+    return sanitize_diagnostic_text(str(error), max_length=max_length)
 
 
 def _legacy_terminal_state(error: str | None, rejected: int) -> str:

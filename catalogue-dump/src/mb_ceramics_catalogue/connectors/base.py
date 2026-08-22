@@ -122,11 +122,12 @@ def result_limit_diagnostic(limit: int, url: str) -> Diagnostic:
 class Diagnostic(ContractModel):
     code: DiagnosticCode
     severity: DiagnosticSeverity
-    message: str = Field(min_length=1)
+    message: str = Field(min_length=1, max_length=2048)
     retryable: bool
     affects_completeness: bool
     url: str | None = None
     entity_id: str | None = None
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class ConnectorCheckpoint(ContractModel):

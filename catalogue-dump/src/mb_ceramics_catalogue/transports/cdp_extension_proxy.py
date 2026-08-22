@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Literal, Protocol
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
@@ -25,6 +26,8 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, f
 
 from mb_ceramics_catalogue.observability import logging as obs
 from mb_ceramics_catalogue.transports.browser import (
+    BrowserEvaluationResult,
+    BrowserFetchResponse,
     BrowserJobContext,
     BrowserUnavailable,
     TransportBlocked,
@@ -487,10 +490,19 @@ class CdpExtensionProxySession:
         self, url: str, script: str, wait_ms: int = 2000,
         wait_for: str | None = None,
     ) -> Any:
+        return (await self.evaluate_result(url, script, wait_ms, wait_for)).value
+
+    async def evaluate_result(
+        self, url: str, script: str, wait_ms: int = 2000,
+        wait_for: str | None = None,
+    ) -> BrowserEvaluationResult:
         page = await self._new_page()
         try:
             await self._load(page, url, wait_ms, wait_for)
-            return await page.evaluate(script)
+            return BrowserEvaluationResult(
+                value=await page.evaluate(script),
+                final_url=str(page.url),
+            )
         finally:
             await self._close_page(page)
 
@@ -507,6 +519,33 @@ class CdpExtensionProxySession:
         self, page_url: str, endpoint: str, *, method: str = "POST",
         headers: dict[str, str] | None = None, body: Any = None,
     ) -> Any:
+        response = await self.request(
+            page_url,
+            endpoint,
+            method=method,
+            headers=headers,
+            json_body=body,
+        )
+        if response.status >= 400:
+            raise TransportBlocked(
+                f"{endpoint} returned {response.status} in the browser context"
+            )
+        try:
+            return json.loads(response.content)
+        except json.JSONDecodeError as error:
+            raise TransportBlocked(
+                f"{endpoint} did not return JSON in the browser context"
+            ) from error
+
+    async def request(
+        self,
+        page_url: str,
+        endpoint: str,
+        *,
+        method: str = "GET",
+        headers: dict[str, str] | None = None,
+        json_body: Any = None,
+    ) -> BrowserFetchResponse:
         origin = urlsplit(page_url).netloc
         async with self._origin_locks[origin]:
             page = self._origin_pages.get(origin)
@@ -521,21 +560,28 @@ class CdpExtensionProxySession:
                         body: body === null ? undefined : JSON.stringify(body),
                         credentials: 'include',
                     });
-                    return {status: response.status, text: await response.text()};
+                    return {
+                        status: response.status,
+                        headers: Object.fromEntries(response.headers.entries()),
+                        text: await response.text(),
+                        url: response.url,
+                    };
                 }""",
-                {"endpoint": endpoint, "method": method, "headers": headers or {}, "body": body},
+                {
+                    "endpoint": endpoint,
+                    "method": method,
+                    "headers": headers or {},
+                    "body": json_body,
+                },
             )
-        if result["status"] >= 400:
-            raise TransportBlocked(
-                f"{endpoint} returned {result['status']} in the browser context: "
-                f"{result['text'][:400]}"
-            )
-        try:
-            return json.loads(result["text"])
-        except json.JSONDecodeError as error:
-            raise TransportBlocked(
-                f"{endpoint} did not return JSON in the browser context"
-            ) from error
+        return BrowserFetchResponse(
+            status=int(result["status"]),
+            headers=MappingProxyType(
+                {str(key): str(value) for key, value in result["headers"].items()}
+            ),
+            content=str(result["text"]).encode("utf-8"),
+            final_url=str(result["url"]),
+        )
 
     async def _close_page(self, page: Any) -> None:
         self._pages.discard(page)

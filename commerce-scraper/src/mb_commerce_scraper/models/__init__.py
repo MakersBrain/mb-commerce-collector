@@ -1,4 +1,14 @@
-from .checkpoints import ConnectorCheckpoint, collection_fingerprint, validate_checkpoint
+from .checkpoints import (
+    CompatibleLegacyCheckpoint,
+    ConnectorCheckpoint,
+    LegacyCheckpointDecodeResult,
+    LegacyCheckpointRestartReason,
+    LegacyConnectorCheckpoint,
+    RestartLegacyCheckpoint,
+    collection_fingerprint,
+    decode_legacy_checkpoint,
+    validate_checkpoint,
+)
 from .collection import CollectionRequest, EntityPage, RefreshMode, SnapshotField, SourceDefinition
 from .commerce import (
     Availability,
@@ -13,8 +23,63 @@ from .commerce import (
     Money,
     StockQuantityKind,
     StockState,
+    sanitize_commerce_snapshot,
 )
-from .diagnostics import Diagnostic, DiagnosticCode, DiagnosticSeverity, result_limit_diagnostic
+from .diagnostics import (
+    Diagnostic,
+    DiagnosticCode,
+    DiagnosticSeverity,
+    result_limit_diagnostic,
+    sanitize_diagnostic,
+)
 from .policies import BrowserPolicy, FetchPolicy, ProxyMode, ProxyPolicyConfig, RobotsPolicy
+from .sanitization import (
+    JsonSanitizationLimits,
+    sanitize_diagnostic_text,
+    sanitize_json_value,
+    sanitize_url,
+)
 
-__all__ = [name for name in globals() if not name.startswith("_")]
+__all__ = [
+    "Availability",
+    "BrowserPolicy",
+    "CategoryRef",
+    "CollectionRequest",
+    "CommerceOffer",
+    "CommerceProductSnapshot",
+    "CommerceVariant",
+    "CompatibleLegacyCheckpoint",
+    "ConnectorCheckpoint",
+    "ContractModel",
+    "Diagnostic",
+    "DiagnosticCode",
+    "DiagnosticSeverity",
+    "DocumentRef",
+    "EntityPage",
+    "Evidence",
+    "FetchPolicy",
+    "JsonSanitizationLimits",
+    "LegacyCheckpointDecodeResult",
+    "LegacyCheckpointRestartReason",
+    "LegacyConnectorCheckpoint",
+    "MediaRef",
+    "Money",
+    "ProxyMode",
+    "ProxyPolicyConfig",
+    "RefreshMode",
+    "RestartLegacyCheckpoint",
+    "RobotsPolicy",
+    "SnapshotField",
+    "SourceDefinition",
+    "StockQuantityKind",
+    "StockState",
+    "collection_fingerprint",
+    "decode_legacy_checkpoint",
+    "result_limit_diagnostic",
+    "sanitize_commerce_snapshot",
+    "sanitize_diagnostic",
+    "sanitize_diagnostic_text",
+    "sanitize_json_value",
+    "sanitize_url",
+    "validate_checkpoint",
+]

@@ -16,6 +16,7 @@ from mb_commerce_scraper.connectors.bigcommerce import (
 from mb_commerce_scraper.proxy import ProxyBudgetExhausted
 from mb_commerce_scraper.testing import FakeTransport, assert_connector_pages
 from mb_commerce_scraper.transports import (
+    BrowserHint,
     BudgetExhausted,
     RobotsDenied,
     TransportRequest,
@@ -89,7 +90,11 @@ def request(**values: Any) -> CollectionRequest:
 
 async def test_public_graphql_snapshot_is_neutral() -> None:
     transport = FakeTransport()
-    transport.add(f"{ORIGIN}/catalogue", body=f'storefront_api_token: "{token()}"')
+    storefront_token = token()
+    transport.add(
+        f"{ORIGIN}/catalogue",
+        body=f'storefront_api_token: "{storefront_token}"',
+    )
     transport.add(GRAPHQL, json_body=payload([product()]))
     connector = BigCommerceConnector(
         transport,
@@ -97,7 +102,13 @@ async def test_public_graphql_snapshot_is_neutral() -> None:
         ConnectorContext(clock=lambda: NOW),
     )
 
-    pages = await assert_connector_pages(connector.collect(request()))
+    intent = request()
+    pages = await assert_connector_pages(
+        connector.collect(intent),
+        connector=connector,
+        request=intent,
+        forbidden_values=(storefront_token,),
+    )
 
     snapshot = pages[0].items[0]
     assert snapshot.connector == "bigcommerce"
@@ -106,6 +117,48 @@ async def test_public_graphql_snapshot_is_neutral() -> None:
     assert snapshot.documents[0].url == f"{ORIGIN}/docs/sds.pdf"
     assert snapshot.variants[0].offers[0].price.amount == 12.50
     assert transport.requests[-1].json_body is not None
+
+
+async def test_http_denial_uses_rendered_token_and_browser_graphql() -> None:
+    transport = FakeTransport()
+    storefront_token = token()
+    token_page = f"{ORIGIN}/catalogue"
+    transport.add(token_page, status=403)
+    transport.add(
+        token_page,
+        body=f'storefront_api_token: "{storefront_token}"',
+    )
+    transport.add(GRAPHQL, json_body=payload([product()]))
+    connector = BigCommerceConnector(
+        transport,
+        context=ConnectorContext(clock=lambda: NOW),
+    )
+    intent = request()
+
+    pages = await assert_connector_pages(
+        connector.collect(intent),
+        connector=connector,
+        request=intent,
+        forbidden_values=(storefront_token,),
+    )
+
+    direct, rendered, graphql = transport.requests
+    assert direct.url == rendered.url == token_page
+    assert direct.browser is BrowserHint.NEVER
+    assert rendered.browser is BrowserHint.REQUIRED
+    assert graphql.url == GRAPHQL
+    assert graphql.method == "POST"
+    assert graphql.browser is BrowserHint.REQUIRED
+    assert graphql.headers == {
+        "authorization": f"Bearer {storefront_token}",
+        "content-type": "application/json",
+        "origin": ORIGIN,
+        "referer": token_page,
+    }
+    assert isinstance(graphql.json_body, dict)
+    assert isinstance(graphql.json_body["query"], str)
+    assert graphql.json_body["variables"] == {"after": None, "first": 50}
+    assert pages[0].diagnostics == ()
 
 
 async def test_result_limit_produces_resumable_checkpoint() -> None:

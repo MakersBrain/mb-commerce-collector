@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -17,6 +18,31 @@ if TYPE_CHECKING:
     from mb_ceramics_catalogue.pipeline.runner import DatasetPageOutcome
 
 Connection = psycopg.AsyncConnection[dict[str, Any]]
+
+
+class LineageRuntimeFormat(StrEnum):
+    CATALOGUE_V1 = "catalogue-v1"
+    COMMERCE_SCRAPER_V1 = "commerce-scraper-v1"
+
+
+class LineageProgressState(StrEnum):
+    EMPTY = "empty"
+    RESUMABLE = "resumable"
+    TERMINAL_INTACT = "terminal_intact"
+    TERMINAL_INCOMPLETE = "terminal_incomplete"
+
+
+@dataclass(frozen=True)
+class LineageRuntimeConfiguration:
+    runtime_format: LineageRuntimeFormat
+    collection_request: dict[str, Any] | None
+    connector_options: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class LineageProgress:
+    state: LineageProgressState
+    checkpoint: ConnectorCheckpoint | None = None
 
 
 @dataclass(frozen=True)
@@ -184,11 +210,20 @@ async def create_lineage(
     connector_config_fingerprint: str,
     dataset_fingerprint: str,
     dataset_selection: list[dict[str, Any]],
+    runtime_format: LineageRuntimeFormat = LineageRuntimeFormat.CATALOGUE_V1,
+    collection_request: dict[str, Any] | None = None,
+    connector_options: dict[str, Any] | None = None,
     budget_state: dict[str, Any] | None = None,
     lineage: UUID | None = None,
     expires_at: Any = None,
 ) -> UUID:
     """Create the immutable compatibility identity for a checkpoint chain."""
+    if runtime_format is LineageRuntimeFormat.COMMERCE_SCRAPER_V1 and (
+        collection_request is None or connector_options is None
+    ):
+        raise ValueError(
+            "commerce-scraper-v1 lineages require a durable request and connector options"
+        )
     lineage = lineage or uuid4()
     inserted = await _one(
         connection,
@@ -196,14 +231,18 @@ async def create_lineage(
                      (job_id, checkpoint_lineage, source_id, source_url, connector,
                       connector_version, connector_configuration,
                       connector_config_fingerprint, dataset_fingerprint,
-                      dataset_selection, budget_state, expires_at)
-              values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                      dataset_selection, runtime_format, collection_request,
+                      connector_options, budget_state, expires_at)
+              values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
               on conflict (job_id, checkpoint_lineage) do nothing
               returning checkpoint_lineage""",
         (
             job_id, lineage, source_id, source_url, connector, connector_version,
             Jsonb(connector_configuration or {}), connector_config_fingerprint, dataset_fingerprint,
-            Jsonb(dataset_selection), Jsonb(budget_state or {}), expires_at,
+            Jsonb(dataset_selection), runtime_format.value,
+            Jsonb(collection_request) if collection_request is not None else None,
+            Jsonb(connector_options) if connector_options is not None else None,
+            Jsonb(budget_state or {}), expires_at,
         ),
     )
     if inserted is None:
@@ -212,7 +251,8 @@ async def create_lineage(
             """select source_id, source_url, connector, connector_version,
                       connector_configuration,
                       connector_config_fingerprint, dataset_fingerprint,
-                      dataset_selection, budget_state, expires_at
+                      dataset_selection, runtime_format, collection_request,
+                      connector_options, budget_state, expires_at
                  from catalogue.job_checkpoint_lineages
                 where job_id = %s and checkpoint_lineage = %s""",
             (job_id, lineage),
@@ -220,7 +260,8 @@ async def create_lineage(
         identity = (
             source_id, source_url, connector, connector_version, connector_configuration or {},
             connector_config_fingerprint, dataset_fingerprint,
-            dataset_selection, budget_state or {}, expires_at,
+            dataset_selection, runtime_format.value, collection_request,
+            connector_options, budget_state or {}, expires_at,
         )
         if existing is None or tuple(existing.values()) != identity:
             raise ValueError("checkpoint lineage identity changed")
@@ -236,22 +277,151 @@ async def find_compatible_lineage(
     connector_version: str,
     connector_config_fingerprint: str,
     dataset_fingerprint: str,
+    runtime_format: LineageRuntimeFormat = LineageRuntimeFormat.CATALOGUE_V1,
+    lock: bool = False,
 ) -> UUID | None:
+    lock_clause = " for update" if lock else ""
     row = await _one(
         connection,
         """select checkpoint_lineage
              from catalogue.job_checkpoint_lineages
             where job_id = %s and status = 'active' and source_url = %s
+              and runtime_format = %s
               and connector = %s and connector_version = %s
               and connector_config_fingerprint = %s and dataset_fingerprint = %s
               and (expires_at is null or expires_at > now())
-            order by created_at desc limit 1""",
+            order by created_at desc limit 1""" + lock_clause,
         (
-            job_id, source_url, connector, connector_version,
+            job_id, source_url, runtime_format.value, connector, connector_version,
             connector_config_fingerprint, dataset_fingerprint,
         ),
     )
     return row["checkpoint_lineage"] if row else None
+
+
+async def find_recoverable_library_lineage(
+    connection: Connection,
+    job_id: UUID,
+    *,
+    source_url: str,
+    connector: str,
+    connector_version: str,
+    connector_config_fingerprint: str,
+    dataset_fingerprint: str,
+    lock: bool = False,
+) -> UUID | None:
+    """Find active collection or sealed output awaiting publication.
+
+    Publication is intentionally after lineage sealing. If the worker dies in
+    that window, the completed manifest is still the authoritative collection
+    and must be compacted/published rather than fetched again.
+    """
+    lock_clause = " for update" if lock else ""
+    row = await _one(
+        connection,
+        """select checkpoint_lineage
+             from catalogue.job_checkpoint_lineages
+            where job_id = %s and status in ('active', 'completed')
+              and source_url = %s and runtime_format = %s
+              and connector = %s and connector_version = %s
+              and connector_config_fingerprint = %s and dataset_fingerprint = %s
+              and (expires_at is null or expires_at > now())
+            order by (status = 'active') desc, created_at desc limit 1"""
+        + lock_clause,
+        (
+            job_id,
+            source_url,
+            LineageRuntimeFormat.COMMERCE_SCRAPER_V1.value,
+            connector,
+            connector_version,
+            connector_config_fingerprint,
+            dataset_fingerprint,
+        ),
+    )
+    return row["checkpoint_lineage"] if row else None
+
+
+async def active_lineages_for_runtime(
+    connection: Connection,
+    job_id: UUID,
+    runtime_format: LineageRuntimeFormat,
+    *,
+    lock: bool = False,
+) -> tuple[UUID, ...]:
+    """Return all active lineages for one runtime, optionally serializing changes.
+
+    Locking the parent job closes the empty-result race that a ``FOR UPDATE``
+    query on lineage rows cannot close: concurrent resolvers must not both see
+    no active lineage and create one. Callers then lock the returned rows in a
+    stable order before deciding which lineage, if any, remains active.
+    """
+    if lock:
+        job = await _one(
+            connection,
+            "select id from catalogue.jobs where id = %s for update",
+            (job_id,),
+        )
+        if job is None:
+            raise ValueError("unknown checkpoint job")
+    lock_clause = " for update" if lock else ""
+    rows = await _all(
+        connection,
+        """select checkpoint_lineage
+             from catalogue.job_checkpoint_lineages
+            where job_id = %s and runtime_format = %s and status = 'active'
+            order by created_at, checkpoint_lineage""" + lock_clause,
+        (job_id, runtime_format.value),
+    )
+    return tuple(row["checkpoint_lineage"] for row in rows)
+
+
+async def lineage_runtime_configuration(
+    connection: Connection, job_id: UUID, lineage: UUID
+) -> LineageRuntimeConfiguration:
+    """Load the durable runtime identity without consulting mutable source config."""
+    row = await _one(
+        connection,
+        """select runtime_format, collection_request, connector_options
+             from catalogue.job_checkpoint_lineages
+            where job_id = %s and checkpoint_lineage = %s""",
+        (job_id, lineage),
+    )
+    if row is None:
+        raise ValueError("unknown checkpoint lineage")
+    collection_request = _optional_json_object(
+        row["collection_request"], "collection_request"
+    )
+    connector_options = _optional_json_object(
+        row["connector_options"], "connector_options"
+    )
+    return LineageRuntimeConfiguration(
+        runtime_format=LineageRuntimeFormat(row["runtime_format"]),
+        collection_request=collection_request,
+        connector_options=connector_options,
+    )
+
+
+async def reject_lineage(
+    connection: Connection, job_id: UUID, lineage: UUID
+) -> bool:
+    """Reject an active incompatible lineage without deleting its audit trail."""
+    row = await _one(
+        connection,
+        """update catalogue.job_checkpoint_lineages
+              set status = 'rejected', updated_at = now()
+            where job_id = %s and checkpoint_lineage = %s and status = 'active'
+        returning checkpoint_lineage""",
+        (job_id, lineage),
+    )
+    return row is not None
+
+
+def _optional_json_object(value: Any, field: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"checkpoint lineage {field} must be a JSON object")
+    return dict(value)
 
 
 async def commit_page(
@@ -625,6 +795,21 @@ async def resume_checkpoint(
     connection: Connection, job_id: UUID, lineage: UUID
 ) -> ConnectorCheckpoint | None:
     """Return the cursor after the latest durable page, never process memory."""
+    progress = await lineage_progress(connection, job_id, lineage)
+    if progress.state is LineageProgressState.TERMINAL_INCOMPLETE:
+        raise ValueError("incomplete terminal checkpoint requires a new lineage")
+    return progress.checkpoint
+
+
+async def lineage_progress(
+    connection: Connection, job_id: UUID, lineage: UUID
+) -> LineageProgress:
+    """Classify the latest durable page without conflating empty and terminal.
+
+    A terminal intact page means collection already finished even if the
+    process crashed before lineage completion or publication. Callers must not
+    turn that state into ``checkpoint=None`` and refetch from the beginning.
+    """
     row = await _one(
         connection,
         """select connector, connector_version, source_id, status,
@@ -646,7 +831,7 @@ async def resume_checkpoint(
         (job_id, lineage),
     )
     if not pages:
-        return None
+        return LineageProgress(LineageProgressState.EMPTY)
     order = {
         partition: index
         for index, partition in enumerate(
@@ -662,16 +847,19 @@ async def resume_checkpoint(
         ),
     )
     if latest["resume_after"] is not None:
-        return ConnectorCheckpoint(
-            connector=row["connector"], connector_version=row["connector_version"],
-            source_id=row["source_id"], lineage=str(lineage),
-            resume_after=latest["resume_after"],
+        return LineageProgress(
+            LineageProgressState.RESUMABLE,
+            ConnectorCheckpoint(
+                connector=row["connector"], connector_version=row["connector_version"],
+                source_id=row["source_id"], lineage=str(lineage),
+                resume_after=latest["resume_after"],
+            ),
         )
     if latest["terminal"]:
         if not latest["enumeration_intact"]:
-            raise ValueError("incomplete terminal checkpoint requires a new lineage")
-        return None
-    return None
+            return LineageProgress(LineageProgressState.TERMINAL_INCOMPLETE)
+        return LineageProgress(LineageProgressState.TERMINAL_INTACT)
+    return LineageProgress(LineageProgressState.EMPTY)
 
 
 async def _partition_order(

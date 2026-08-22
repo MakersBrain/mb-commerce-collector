@@ -10,8 +10,10 @@ COPY commerce-scraper/pyproject.toml commerce-scraper/README.md ./commerce-scrap
 COPY commerce-scraper/src ./commerce-scraper/src
 COPY catalogue-dump/pyproject.toml catalogue-dump/sources.json ./catalogue-dump/
 COPY catalogue-dump/src ./catalogue-dump/src
+COPY docker/verify-python-distributions.py /usr/local/bin/verify-python-distributions.py
 RUN python3 -m venv /opt/catalogue \
- && /opt/catalogue/bin/pip install --no-cache-dir ./commerce-scraper "./catalogue-dump[postgres]"
+ && /opt/catalogue/bin/pip install --no-cache-dir ./commerce-scraper "./catalogue-dump[postgres]" \
+ && /opt/catalogue/bin/python -I /usr/local/bin/verify-python-distributions.py
 
 ENV PATH=/opt/catalogue/bin:/usr/lib/postgresql/17/bin:/usr/local/bin:/usr/bin:/bin
 ENTRYPOINT ["catalogue-db-transfer"]

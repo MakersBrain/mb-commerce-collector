@@ -31,6 +31,10 @@ def test_every_checked_in_legacy_scraper_has_runtime_canary_and_rollback_key() -
     legacy_keys = {source.scraper for _, source in sources.items()}
 
     assert legacy_keys <= RUNTIME_ADAPTERS.keys()
+    assert all(
+        runtime_plan(source).library_canary is not None
+        for _, source in sources.items()
+    )
     for key in sorted(legacy_keys):
         examples = [source for _, source in sources.items() if source.scraper == key]
         assert examples
@@ -38,6 +42,12 @@ def test_every_checked_in_legacy_scraper_has_runtime_canary_and_rollback_key() -
         assert key in scrapers.REGISTRY, f"{key} lost its rollback selector"
         assert plan.legacy_scraper_adapter != key
         assert plan.legacy_scraper_adapter in scrapers.REGISTRY
+        library_alias = scrapers.library_canary_alias(key)
+        assert library_alias == f"library_{plan.legacy_scraper_adapter}"
+        assert scrapers.LIBRARY_CANARY_SCRAPERS[library_alias] == key
+        assert scrapers.REGISTRY[library_alias] == (
+            ".library_connector:LibraryConnectorScraper"
+        )
         assert plan.connector_version
         assert plan.partitions or plan.dynamic_partitions
 

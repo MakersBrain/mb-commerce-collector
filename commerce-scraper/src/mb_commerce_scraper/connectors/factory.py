@@ -11,9 +11,9 @@ from .base import CommerceConnector, ConnectorContext
 
 class ConnectorFactory(Protocol):
     name: str
+    version: str
     options_model: type[BaseModel]
 
     def build(
         self, *, transport: CommerceTransport, options: BaseModel, context: ConnectorContext
     ) -> CommerceConnector: ...
-

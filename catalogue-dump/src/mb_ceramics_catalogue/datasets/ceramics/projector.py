@@ -45,6 +45,7 @@ class CeramicsProjectionOptions(BaseModel):
     source_detail_level: str = "api"
     apply_scope: bool = True
     source_policy: Literal["sio2"] | None = None
+    collection_mode: Literal["full", "price"] = "full"
     offer_role_priority: tuple[Literal["sale", "regular", "member", "quantity_tier"], ...] = (
         "sale",
         "regular",
@@ -222,6 +223,11 @@ class _CeramicsProjector:
         for compatibility_field in ("published_unit_price", "vat_basis"):
             if value := _string(attributes.get(compatibility_field)):
                 row[compatibility_field] = value
+        if options.collection_mode == "price":
+            # The PostgreSQL compatibility loader uses this marker to retain
+            # descriptive enrichment while updating identity, price, stock,
+            # and freshness fields from a complete daily enumeration.
+            row["collection_mode"] = "price"
         return row
 
     @staticmethod
