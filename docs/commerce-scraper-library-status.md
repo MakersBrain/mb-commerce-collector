@@ -134,13 +134,14 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `92f97ba` — exercise durable lineage resolution against PostgreSQL.
 - `864e87d` — review framework connector traffic profiles.
 - `0998578` — bypass the retained commerce-model compatibility shim internally.
+- `aabf825` — move structured parsing helpers below the connector layer.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 76 source and test files.
-  - 321 library tests passed.
+  - 322 library tests passed.
   - Wheel and source distribution built.
   - 4 dependency-boundary tests passed.
   - The installed-wheel matrix verified all 233 reviewed public exports across
@@ -629,6 +630,12 @@ completed the production migration gate.
     provenance from discovery through artifact/checkpoint handling; the chosen
     mechanism is already bound into the options fingerprint.
 - [x] Add Microdata and OpenGraph parsers.
+  - DOM selection, raw JSON-LD/Microdata/OpenGraph extraction, JavaScript-shell
+    detection, specification tables, and document-link parsing now live in the
+    private parsing layer rather than a connector implementation module. The
+    move was byte-identical and changed only three private imports; the full
+    322-test release, schema, artifact, installed-consumer, and boundary gate
+    passes without expanding the public API.
 - [x] Make the declared DOM rules functional.
   - The public generic options accept an explicit `dom` parser and bounded
     tag/id/class/attribute selectors, project them into the shared verified DOM
