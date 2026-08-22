@@ -79,6 +79,12 @@ the literals above are deliberately local-only placeholders. Keep the origin
 allowlist narrow. A proxy is not an SSRF bypass: redirects and DNS resolution
 remain subject to the shared URL policy.
 
+Static routes can prove proxy kind, country, and provider identity. They do not
+declare region, city, or session-duration capabilities, so `StaticProxyPool`
+rejects requests carrying those constraints before selecting a route or
+checking out a lease. Use an application-owned provider adapter when those
+constraints are required; silently relaxing paid-route policy is not allowed.
+
 ## Provider adapter contract
 
 Implement all `ProxyPool` lifecycle operations:

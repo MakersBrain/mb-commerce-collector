@@ -68,6 +68,45 @@ async def test_static_pool_round_robin_rotation_and_idempotent_release() -> None
     await pool.release(second)
 
 
+@pytest.mark.parametrize(
+    ("constraint", "value"),
+    [
+        ("region", "IDF"),
+        ("city", "Paris"),
+        ("session_ttl_seconds", 300),
+    ],
+)
+async def test_static_pool_rejects_unprovable_route_constraints_before_checkout(
+    constraint: str,
+    value: str | int,
+) -> None:
+    pool = fake_proxy_pool("one", "two")
+    request = ProxyRequest.model_validate(
+        {
+            "source_id": "shop",
+            "target_host": "shop.test",
+            constraint: value,
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=rf"static proxy routes cannot prove requested constraints: {constraint}",
+    ):
+        await pool.acquire(request)
+
+    assert pool.active_leases == 0
+    # Rejection happens before route selection, credential projection, or lease
+    # identity allocation. An ordinary request therefore retains the first
+    # deterministic route and lease identity.
+    lease = await pool.acquire(
+        ProxyRequest(source_id="ordinary", target_host="shop.test")
+    )
+    assert lease.provider == "one"
+    assert lease.lease_id == "static-1"
+    await pool.release(lease)
+
+
 async def test_proxy_accounting_fails_on_exhaustion_and_credentials_are_redacted() -> None:
     pool = fake_proxy_pool("one")
     lease = await pool.acquire(ProxyRequest(source_id="shop", target_host="shop.test", maximum_bytes=10))

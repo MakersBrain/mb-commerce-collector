@@ -158,6 +158,20 @@ class StaticProxyPool(ProxyPool):
         return len(self._leases)
 
     async def acquire(self, request: ProxyRequest) -> StaticProxyLease:
+        unsupported = tuple(
+            name
+            for name, value in (
+                ("region", request.region),
+                ("city", request.city),
+                ("session_ttl_seconds", request.session_ttl_seconds),
+            )
+            if value is not None
+        )
+        if unsupported:
+            raise ValueError(
+                "static proxy routes cannot prove requested constraints: "
+                + ", ".join(unsupported)
+            )
         async with self._lock:
             candidates = [route for route in self._routes if self._eligible(route, request)]
             if not candidates:
