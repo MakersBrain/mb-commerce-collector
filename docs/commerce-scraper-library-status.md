@@ -101,6 +101,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `f863a66` — share native catalogue composition across worker and local tools.
 - `1b05488` — publish intentional bounded collections as sealed limited output.
 - `de23085` — make catalogue connector runtime plans data-only.
+- `bdefd58` — derive worker placement capabilities from adapter metadata.
 
 ### Verification at last review
 
@@ -435,7 +436,7 @@ direct-path parity and migration-wide application composition are incomplete.
     URL/query behavior.
   - This gate found and fixed strict Decimal corruption at the page-envelope
     boundary and non-JSON projection configuration before a non-empty canary.
-- [~] Adapt catalogue configuration to the options model.
+- [x] Adapt catalogue configuration to the options model.
 - [x] Execute Shopify through the library registry in the worker canary route.
   - The worker now composes the native library cache, policy, middleware,
     direct/proxy transport, and lifecycle boundary without a legacy
@@ -766,10 +767,13 @@ canaries have not run.
 
 ## Phase 7 — Catalogue cutover
 
-- [~] Replace catalogue `RUNTIME_ADAPTERS` connector construction with
+- [x] Replace catalogue `RUNTIME_ADAPTERS` connector construction with
   `mb_commerce_scraper.ConnectorRegistry` and application-owned adapters.
-  - A typed compatibility boundary now delegates registry-built connectors and
-    decoded library checkpoints into the existing atomic dataset pipeline,
+  - `RUNTIME_ADAPTERS` now projects only immutable canonical connector/options,
+    routing, and ceramics metadata. Connector construction and version
+    authority belong exclusively to the built-in-plus-application registry.
+    A typed compatibility boundary delegates those registry-built connectors
+    and decoded library checkpoints into the existing atomic dataset pipeline,
     revalidating the still-distinct page envelope and rejecting catalogue
     checkpoints at the boundary.
 - [~] Run neutral collection before ceramics projection for all migrated
@@ -799,7 +803,7 @@ canaries have not run.
     browser, crawl, and dataset ownership. The checked-in file validates, a
     golden projection covers every source, and lossless/default-preservation
     tests prevent the compatibility layer from changing legacy scraper input.
-- [~] Remove connector-specific worker/runtime conditionals.
+- [x] Remove connector-specific worker/runtime conditionals.
   - Native eligibility, browser ownership, request partitions, and
     dynamic-partition behavior are now explicit immutable metadata on the
     application runtime plan. Worker selection no longer contains a connector
@@ -824,8 +828,8 @@ canaries have not run.
   - Library registry membership deliberately does not grant worker
     eligibility: remaining registered connectors stay on their compatibility
     routes until explicit application metadata and their required evidence are
-    added. Other legacy runtime conditionals remain and prevent this item from
-    being complete.
+    added. This is a generic approval boundary rather than storefront-specific
+    worker logic.
 - [~] Map library telemetry to catalogue observability.
   - Sanitized Fetcher bridge protocol events map to catalogue DEBUG logging;
     worker summaries retain direct/impersonated/browser/proxy route counters
