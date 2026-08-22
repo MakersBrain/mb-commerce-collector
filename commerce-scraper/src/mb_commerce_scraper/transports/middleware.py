@@ -85,6 +85,7 @@ class MiddlewareTransport(CommerceTransport):
         }
         if request_id is not None:
             common["request_id"] = request_id
+        self._emit("request.accepted", {**common, "level": "debug"})
         if (
             self._robots is not None
             and request.purpose.value != "robots"

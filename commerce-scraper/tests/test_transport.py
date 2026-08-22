@@ -192,8 +192,13 @@ async def test_budget_denial_telemetry_explains_browser_evaluation_policy() -> N
     with pytest.raises(BudgetExhausted):
         await transport.request(request)
 
-    [(event, fields)] = telemetry.events
-    assert event == "budget.denied"
+    assert [event for event, _ in telemetry.events] == [
+        "request.accepted",
+        "budget.denied",
+    ]
+    accepted = telemetry.events[0][1]
+    fields = telemetry.events[1][1]
+    assert accepted["request_id"] == fields["request_id"]
     assert fields["purpose"] == "enrichment"
     assert fields["priority"] == "optional"
     assert fields["required"] is False
@@ -313,6 +318,7 @@ async def test_cancelled_backend_attempt_reconciles_before_next_authorization() 
     assert budget.requests == 1
     assert budget.bytes == 0
     assert [event for event, _ in telemetry.events] == [
+        "request.accepted",
         "request.started",
         "request.failed",
     ]
@@ -710,6 +716,7 @@ class Limiter:
 
 async def test_robots_precedes_cache_and_paid_attempt_layers() -> None:
     events: list[str] = []
+    telemetry = RecordingTelemetry()
     backend = FakeTransport()
     cache = MemoryResponseCache()
     cached_request = TransportRequest(
@@ -721,15 +728,22 @@ async def test_robots_precedes_cache_and_paid_attempt_layers() -> None:
         robots=Robots(False, events),
         cache=cache,
         rate_limiter=Limiter(events),
+        telemetry=telemetry,
     )
     with pytest.raises(RobotsDenied):
         await transport.request(cached_request)
     assert events == ["robots"]
     assert backend.requests == []
+    assert [event for event, _ in telemetry.events] == [
+        "request.accepted",
+        "robots.denied",
+    ]
+    assert telemetry.events[0][1]["request_id"] == telemetry.events[1][1]["request_id"]
 
 
 async def test_cache_hit_skips_budget_rate_limit_and_network() -> None:
     events: list[str] = []
+    telemetry = RecordingTelemetry()
     backend = FakeTransport()
     cache = MemoryResponseCache()
     cached_request = TransportRequest(
@@ -737,10 +751,21 @@ async def test_cache_hit_skips_budget_rate_limit_and_network() -> None:
     )
     await cache.put(cached_request, _response("cached"))
     budget = MemoryRequestBudget(maximum_requests=0)
-    transport = MiddlewareTransport(backend, cache=cache, budget=budget, rate_limiter=Limiter(events))
+    transport = MiddlewareTransport(
+        backend,
+        cache=cache,
+        budget=budget,
+        rate_limiter=Limiter(events),
+        telemetry=telemetry,
+    )
     response = await transport.request(cached_request)
     assert response.from_cache and response.text() == "cached"
     assert budget.requests == 0 and events == [] and backend.requests == []
+    assert [event for event, _ in telemetry.events] == [
+        "request.accepted",
+        "cache.hit",
+    ]
+    assert telemetry.events[0][1]["request_id"] == telemetry.events[1][1]["request_id"]
 
 
 async def test_stale_cache_validator_reuses_body_after_304() -> None:
@@ -778,6 +803,7 @@ async def test_stale_cache_validator_reuses_body_after_304() -> None:
     assert cache.writes[0][0] == request
     assert cache.writes[0][1].text() == "previous"
     assert [event for event, _ in telemetry.events] == [
+        "request.accepted",
         "cache.miss",
         "request.started",
         "cache.revalidated",
@@ -1042,6 +1068,7 @@ async def test_retry_telemetry_correlates_attempts_without_leaking_credentials()
 
     assert response.text() == "ok"
     assert [event for event, _ in telemetry.events] == [
+        "request.accepted",
         "request.started",
         "request.retry",
         "request.started",
@@ -1049,17 +1076,17 @@ async def test_retry_telemetry_correlates_attempts_without_leaking_credentials()
     ]
     fields = [event_fields for _, event_fields in telemetry.events]
     assert {event_fields["request_id"] for event_fields in fields} == {fields[0]["request_id"]}
-    assert [fields[0]["attempt"], fields[1]["next_attempt"], fields[2]["attempt"]] == [
+    assert [fields[1]["attempt"], fields[2]["next_attempt"], fields[3]["attempt"]] == [
         1,
         2,
         2,
     ]
-    assert fields[1]["status"] == 503
-    assert fields[1]["backoff_ms"] == 0
+    assert fields[2]["status"] == 503
+    assert fields[2]["backoff_ms"] == 0
     expected_transmitted = estimated_transmitted_bytes(backend.requests[0])
-    assert fields[1]["transmitted_bytes"] == expected_transmitted
-    assert fields[1]["received_bytes"] == 0
-    assert fields[1]["physical_requests"] == 1
+    assert fields[2]["transmitted_bytes"] == expected_transmitted
+    assert fields[2]["received_bytes"] == 0
+    assert fields[2]["physical_requests"] == 1
     assert fields[-1]["route"] == "direct"
     assert fields[-1]["purpose"] == "entity"
     assert fields[-1]["transmitted_bytes"] == expected_transmitted

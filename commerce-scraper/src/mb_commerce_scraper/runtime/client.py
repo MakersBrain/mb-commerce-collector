@@ -4,6 +4,8 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from time import monotonic
+from typing import Protocol, cast
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -66,6 +68,10 @@ from mb_commerce_scraper.transports.base import (
 
 RobotsFactory = Callable[[CommerceTransport], RobotsChecker]
 RateLimiterFactory = Callable[[FetchPolicy], RateLimiter]
+
+
+class _AsyncCloseable(Protocol):
+    async def aclose(self) -> None: ...
 
 
 def _routing_from_policy(policy: ProxyPolicyConfig) -> ProxyRouting:
@@ -651,14 +657,46 @@ class CommerceScraper:
     async def __aexit__(self, *_: object) -> None:
         try:
             if self.owns_transport and hasattr(self.transport, "aclose"):
-                await self.transport.aclose()  # type: ignore[attr-defined, unused-ignore]
+                await self._close_owned_resource("http", cast(_AsyncCloseable, self.transport))
         finally:
             if (
                 self.owns_browser_transport
                 and self.browser_transport is not self.transport
                 and hasattr(self.browser_transport, "aclose")
             ):
-                await self.browser_transport.aclose()  # type: ignore[attr-defined, union-attr, unused-ignore]
+                await self._close_owned_resource(
+                    "browser",
+                    cast(_AsyncCloseable, self.browser_transport),
+                )
+
+    async def _close_owned_resource(self, resource: str, target: _AsyncCloseable) -> None:
+        started = monotonic()
+        self._emit(
+            "runtime.cleanup_started",
+            {"level": "debug", "resource": resource},
+        )
+        try:
+            await target.aclose()
+        except BaseException as error:
+            self._emit(
+                "runtime.cleanup_failed",
+                {
+                    "level": "warning",
+                    "resource": resource,
+                    "elapsed_ms": round((monotonic() - started) * 1_000, 3),
+                    "error_type": type(error).__name__,
+                    "cancelled": isinstance(error, asyncio.CancelledError),
+                },
+            )
+            raise
+        self._emit(
+            "runtime.cleanup_completed",
+            {
+                "level": "debug",
+                "resource": resource,
+                "elapsed_ms": round((monotonic() - started) * 1_000, 3),
+            },
+        )
 
 
 def _sanitize_page(

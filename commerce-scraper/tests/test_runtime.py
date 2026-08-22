@@ -1101,12 +1101,15 @@ async def test_runtime_binds_browser_and_http_to_the_same_proxy_lease() -> None:
 
 
 class ClosingTransport(FakeTransport):
-    def __init__(self) -> None:
+    def __init__(self, close_error: Exception | None = None) -> None:
         super().__init__()
         self.closed = False
+        self.close_error = close_error
 
     async def aclose(self) -> None:
         self.closed = True
+        if self.close_error is not None:
+            raise self.close_error
 
 
 async def test_runtime_closes_browser_only_when_explicitly_owned() -> None:
@@ -1131,3 +1134,39 @@ async def test_runtime_closes_browser_only_when_explicitly_owned() -> None:
     ):
         pass
     assert owned_browser.closed
+
+
+async def test_runtime_traces_owned_cleanup_and_closes_browser_after_http_failure() -> None:
+    telemetry = RecordingTelemetry()
+    owned_http = ClosingTransport(RuntimeError("close failed"))
+    owned_browser = ClosingTransport()
+    scraper = CommerceScraper(
+        registry=ConnectorRegistry.with_builtins(),
+        transport=owned_http,
+        browser_transport=owned_browser,
+        owns_transport=True,
+        owns_browser_transport=True,
+        telemetry=telemetry,
+    )
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        async with scraper:
+            pass
+
+    assert owned_http.closed
+    assert owned_browser.closed
+    assert [event for event, _ in telemetry.events] == [
+        "runtime.cleanup_started",
+        "runtime.cleanup_failed",
+        "runtime.cleanup_started",
+        "runtime.cleanup_completed",
+    ]
+    assert [fields["resource"] for _, fields in telemetry.events] == [
+        "http",
+        "http",
+        "browser",
+        "browser",
+    ]
+    failure = telemetry.events[1][1]
+    assert failure["error_type"] == "RuntimeError"
+    assert failure["cancelled"] is False

@@ -103,13 +103,15 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `de23085` — make catalogue connector runtime plans data-only.
 - `bdefd58` — derive worker placement capabilities from adapter metadata.
 - `be50039` — reconcile completed Phase 7 implementation status.
+- `3bdd0a2` — revalidate durable proxy safety before every physical attempt.
+- `e7c4662` — preserve HTTP retry outcomes in protocol telemetry.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 76 source and test files.
-  - 305 library tests passed.
+  - 307 library tests passed.
   - Wheel and source distribution built.
   - 4 dependency-boundary tests passed.
   - The installed-wheel matrix verified all 231 reviewed public exports across
@@ -134,9 +136,9 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - [x] Full catalogue verification:
   - Ruff passed.
   - Mypy passed for 227 source and test files.
-  - 822 tests passed, 6 skipped, and 164 deselected in the latest fast-suite
-    run; the wider repository fast gate also passed 32 control-plane tests, 14
-    service tests, and 2 explorer tests.
+  - 824 tests passed, 2 skipped, 168 deselected, and 284 subtests passed in the
+    latest fast-suite run; the wider repository fast gate also passed 32
+    control-plane tests, 14 service tests, and 2 explorer tests.
   - The lower fast-test count reflects deletion of the obsolete specialized
     Fetcher composition shell and its construction/transport tests. Its native
     middleware guarantees remain covered at the library/runtime boundaries;
@@ -997,6 +999,12 @@ Exit criterion: **not met**.
     proxy rate gates, typed browser dispatch decisions, proxy
     acquire/rotation/outcome, and terminal events. Retry events expose the
     selected backoff; connector version is present in child events.
+  - A logical `request.accepted` event now precedes robots, cache, budget,
+    rate-limit, and physical-attempt decisions. Cache hits, robots denials, and
+    budget denials therefore retain the same request correlation even when no
+    network span is opened.
+  - Catalogue terminal accounting classifies retrying HTTP 403, 429, and 5xx
+    outcomes by status instead of collapsing them into transport errors.
   - Disabled telemetry avoids UUID/context allocation. Invalid event names are
     replaced without echoing them, and limiter release, budget reconciliation,
     and cache-write failures emit terminal request failures so tracing spans
@@ -1007,6 +1015,9 @@ Exit criterion: **not met**.
   - Proxy acquire, rotation, outcome/accounting, failure, and release events
     include sanitized route/provider context, reason codes, timings, and byte
     counts without credentials or payload bodies.
+  - Runtime-owned HTTP and browser cleanup emits typed start, completion, and
+    failure events with resource and elapsed-time context. Browser cleanup is
+    still attempted and traced when HTTP cleanup fails.
 
 ## Immediate implementation queue
 
@@ -1029,8 +1040,10 @@ Exit criterion: **not met**.
    limited browser-capable canary with the tested source-level rollback route.
 6. Run representative PrestaShop and Sio2 sources through recorded replay,
    projected output comparison, and limited canaries with independent rollback.
-7. Define the Webshare secret/profile snapshot and application-owned durable
-   billing authorization before adding it to production composite selection.
+7. Add provider-specific Webshare control-plane reconciliation and deployment
+   secret/profile wiring on top of the provider-keyed durable authorization;
+   keep Webshare out of production composite selection until those controls
+   and their focused integration gate pass.
 8. Run one Shopify and one page-based source through recorded replay, ceramics
    projection parity, and a production canary with rollback.
 9. Migrate configured production sources incrementally through the existing
