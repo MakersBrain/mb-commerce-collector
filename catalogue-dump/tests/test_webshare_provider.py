@@ -69,6 +69,8 @@ async def test_usage_is_byte_native_with_no_conversion():
         datetime.now(UTC) - timedelta(days=2), datetime.now(UTC)
     )
     assert report.total_bytes == 1_234_567
+    assert report.total_received_bytes == 0
+    assert report.buckets[0].received_bytes == 0
     assert report.requests == 89
 
 

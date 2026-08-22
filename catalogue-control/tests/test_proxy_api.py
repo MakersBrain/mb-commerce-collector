@@ -20,6 +20,7 @@ from mb_ceramics_catalogue.providers.base import (
 
 from catalogue_control.app import create_app
 from catalogue_control.proxy_api import _probe_identity
+from catalogue_control.proxy_control import finalize_draining_profiles
 from catalogue_control.settings import Settings
 
 from .conftest import TOKEN, postgres_dsn, requires_postgres
@@ -36,6 +37,11 @@ class FakeProvider:
     def __init__(self) -> None:
         self.created = 0
         self.create_error: ProviderError | None = None
+        self.usage_groupings: list[str] = []
+        self.updated_resources: list[str] = []
+        self.subscription_days = 30
+        self.subscription_limit: int | None = 3_000_000_000
+        self.usage_error: ProviderError | None = None
 
     async def create_subuser(self, **values):
         if self.create_error is not None:
@@ -49,12 +55,19 @@ class FakeProvider:
     async def subscription(self):
         now = datetime.now(UTC)
         return Subscription(
-            service_type="residential_proxies", traffic_limit_bytes=3_000_000_000,
+            service_type="residential_proxies", traffic_limit_bytes=self.subscription_limit,
             raw_traffic_limit=3, valid_from=now - timedelta(days=1),
-            valid_until=now + timedelta(days=29), users_limit=5,
+            valid_until=now + timedelta(days=self.subscription_days - 1), users_limit=5,
         )
 
+    async def update_subuser(self, resource_id, **values):
+        self.updated_resources.append(resource_id)
+        return SubUser(id=resource_id, username=resource_id, status=values.get("status", "active"))
+
     async def usage(self, start, end, *, group_by="day"):
+        self.usage_groupings.append(group_by)
+        if self.usage_error is not None:
+            raise self.usage_error
         key = start.isoformat() if group_by == "day" else "example.test"
         return UsageReport(
             total_transmitted_bytes=100, total_received_bytes=900, total_bytes=1000,
@@ -103,6 +116,8 @@ async def proxy_client(db, tmp_path):
         transport=httpx.ASGITransport(app=app), base_url="http://control",
         headers={"authorization": f"Bearer {TOKEN}"},
     ) as client:
+        app.state.providers["iproyal"] = fake
+        app.state.providers["webshare"] = fake
         yield client, private, fake, secret_file
 
 
@@ -242,6 +257,113 @@ async def test_profile_creation_is_bounded_and_installs_dynamic_secret(proxy_cli
 
 @pytest.mark.postgres
 @requires_postgres
+async def test_profile_creation_persists_the_selected_provider(proxy_client, db):
+    client, private, fake, _ = proxy_client
+    now = datetime.now(UTC)
+    await db.execute(
+        """insert into catalogue.proxy_budget_cycles
+             (provider, cycle_start, cycle_end, purchased_bytes, operational_bytes,
+              daily_bytes, pilot_bytes, lifecycle)
+             values ('iproyal', %(start)s, %(end)s, 3000000000, 2400000000,
+                     80000000, 300000000, 'active')""",
+        {"start": now - timedelta(days=1), "end": now + timedelta(days=29)},
+    )
+    path = "/v1/proxy/profiles?provider=iproyal"
+    response = await client.post(
+        path,
+        json={
+            "logical_name": "iproyal-primary",
+            "display_name": "IPRoyal primary",
+            "allocated_bytes": 100_000_000,
+            "provider_traffic_limit_bytes": 90_000_000,
+            "confirmation": "CREATE iproyal-primary",
+        },
+        headers={
+            **assertion(private, "POST", "/v1/proxy/profiles"),
+            "idempotency-key": "create-iproyal-primary",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert fake.created == 1
+    profile_cursor = await db.execute(
+        "select provider from catalogue.proxy_profiles where logical_name = 'iproyal-primary'"
+    )
+    allocation_cursor = await db.execute(
+        """select provider from catalogue.proxy_profile_allocations
+            where profile_id = (
+                select id from catalogue.proxy_profiles where logical_name = 'iproyal-primary'
+            )"""
+    )
+    assert (await profile_cursor.fetchone())["provider"] == "iproyal"
+    assert (await allocation_cursor.fetchone())["provider"] == "iproyal"
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_webshare_profile_provisioning_fails_before_local_intent(proxy_client, db):
+    client, private, fake, _ = proxy_client
+    path = "/v1/proxy/profiles?provider=webshare"
+
+    response = await client.post(
+        path,
+        json={
+            "logical_name": "webshare-primary",
+            "allocated_bytes": 100_000_000,
+            "confirmation": "CREATE webshare-primary",
+        },
+        headers={
+            **assertion(private, "POST", "/v1/proxy/profiles"),
+            "idempotency-key": "unsupported-webshare-profile",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["title"] == "Profile provisioning unsupported"
+    assert fake.created == 0
+    cursor = await db.execute(
+        "select count(*) as count from catalogue.proxy_profiles where provider = 'webshare'"
+    )
+    assert (await cursor.fetchone())["count"] == 0
+
+
+@pytest.mark.postgres
+@requires_postgres
+@pytest.mark.parametrize(
+    ("subscription_days", "subscription_limit", "title"),
+    [
+        (91, 3_000_000_000, "Provider usage window unsupported"),
+        (30, None, "Finite cycle ceiling required"),
+    ],
+)
+async def test_webshare_cycle_proposal_refuses_unreconcilable_terms(
+    proxy_client,
+    db,
+    subscription_days,
+    subscription_limit,
+    title,
+):
+    client, private, fake, _ = proxy_client
+    fake.subscription_days = subscription_days
+    fake.subscription_limit = subscription_limit
+    path = "/v1/proxy/cycles/propose?provider=webshare"
+
+    response = await client.post(
+        path,
+        json={},
+        headers=assertion(private, "POST", "/v1/proxy/cycles/propose"),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["title"] == title
+    cursor = await db.execute(
+        "select count(*) as count from catalogue.proxy_budget_cycles where provider = 'webshare'"
+    )
+    assert (await cursor.fetchone())["count"] == 0
+
+
+@pytest.mark.postgres
+@requires_postgres
 async def test_conclusive_profile_rejection_releases_local_allocation(proxy_client, db):
     client, private, fake, _ = proxy_client
     now = datetime.now(UTC)
@@ -337,4 +459,146 @@ async def test_reconciliation_persists_supported_provider_groupings(proxy_client
     )
     assert [(row["grouping_dimension"], row["total_bytes"]) for row in await cursor.fetchall()] == [
         ("day", 1000), ("target", 1000),
+    ]
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_webshare_reconciliation_is_cycle_total_and_provider_isolated(proxy_client, db):
+    client, private, fake, _ = proxy_client
+    now = datetime.now(UTC)
+    start = now - timedelta(days=1)
+    end = now + timedelta(days=29)
+    await db.execute(
+        """insert into catalogue.proxy_budget_cycles
+             (provider, cycle_start, cycle_end, purchased_bytes, operational_bytes,
+              daily_bytes, pilot_bytes, lifecycle, provider_reported_bytes,
+              reconciliation_ok, reconciled_at)
+             values
+               ('decodo', %(start)s, %(end)s, 3000000000, 2400000000,
+                80000000, 300000000, 'active', 77, true, now()),
+               ('webshare', %(start)s, %(end)s, 3000000000, 2400000000,
+                80000000, 300000000, 'active', 0, false, null)""",
+        {"start": start, "end": end},
+    )
+    await db.execute(
+        """insert into catalogue.proxy_reconcile_requests (provider, reason, dedup_key)
+             values ('decodo', 'test', 'decodo:test'),
+                    ('webshare', 'test', 'webshare:test')"""
+    )
+    path = "/v1/proxy/reconcile?provider=webshare"
+
+    response = await client.post(
+        path,
+        json={},
+        headers={
+            **assertion(private, "POST", "/v1/proxy/reconcile"),
+            "idempotency-key": "reconcile-webshare-total",
+        },
+    )
+
+    assert response.status_code == 202, response.text
+    assert fake.usage_groupings == ["total"]
+    snapshots = await db.execute(
+        """select provider, grouping_dimension, grouping_key, bucket_start, bucket_end,
+                  total_bytes
+             from catalogue.proxy_provider_snapshots"""
+    )
+    assert await snapshots.fetchall() == [
+        {
+            "provider": "webshare",
+            "grouping_dimension": "total",
+            "grouping_key": "total",
+            "bucket_start": start,
+            "bucket_end": end,
+            "total_bytes": 1000,
+        }
+    ]
+    cycles = await db.execute(
+        """select provider, provider_reported_bytes, reconciliation_ok
+             from catalogue.proxy_budget_cycles order by provider"""
+    )
+    assert await cycles.fetchall() == [
+        {"provider": "decodo", "provider_reported_bytes": 77, "reconciliation_ok": True},
+        {"provider": "webshare", "provider_reported_bytes": 1000, "reconciliation_ok": True},
+    ]
+    pending = await db.execute(
+        """select provider, completed_at is not null as completed
+             from catalogue.proxy_reconcile_requests order by provider"""
+    )
+    assert await pending.fetchall() == [
+        {"provider": "decodo", "completed": False},
+        {"provider": "webshare", "completed": True},
+    ]
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_webshare_reconciliation_failure_cannot_mark_decodo_unsafe(proxy_client, db):
+    client, private, fake, _ = proxy_client
+    fake.usage_error = ProviderError("provider_unavailable", "provider unavailable")
+    now = datetime.now(UTC)
+    await db.execute(
+        """insert into catalogue.proxy_budget_cycles
+             (provider, cycle_start, cycle_end, purchased_bytes, operational_bytes,
+              daily_bytes, pilot_bytes, lifecycle, reconciliation_ok, reconciled_at,
+              kill_switch)
+             values
+               ('decodo', %(start)s, %(end)s, 3000000000, 2400000000,
+                80000000, 300000000, 'active', true, now(), false),
+               ('webshare', %(start)s, %(end)s, 3000000000, 2400000000,
+                80000000, 300000000, 'active', true, now(), false)""",
+        {"start": now - timedelta(days=1), "end": now + timedelta(days=29)},
+    )
+    path = "/v1/proxy/reconcile?provider=webshare"
+
+    response = await client.post(
+        path,
+        json={},
+        headers={
+            **assertion(private, "POST", "/v1/proxy/reconcile"),
+            "idempotency-key": "reconcile-webshare-failure",
+        },
+    )
+
+    assert response.status_code == 502
+    cycles = await db.execute(
+        """select provider, reconciliation_ok, kill_switch
+             from catalogue.proxy_budget_cycles order by provider"""
+    )
+    assert await cycles.fetchall() == [
+        {"provider": "decodo", "reconciliation_ok": True, "kill_switch": False},
+        {"provider": "webshare", "reconciliation_ok": False, "kill_switch": False},
+    ]
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_profile_finalization_cannot_cross_provider_boundary(proxy_client, db):
+    _, _, fake, secret_file = proxy_client
+    await db.execute(
+        """insert into catalogue.proxy_profiles
+             (provider, logical_name, provider_resource_id, display_name, lifecycle,
+              pending_action, created_by, updated_by)
+             values ('decodo', 'decodo-draining', 'decodo-resource', 'Decodo', 'draining',
+                     'disable', 'test', 'test'),
+                    ('webshare', 'webshare-draining', 'webshare-resource', 'Webshare', 'draining',
+                     'disable', 'test', 'test')"""
+    )
+
+    await finalize_draining_profiles(
+        db,
+        fake,
+        secret_file,
+        provider_name="webshare",
+    )
+
+    assert fake.updated_resources == ["webshare-resource"]
+    profiles = await db.execute(
+        """select provider, lifecycle, pending_action
+             from catalogue.proxy_profiles order by provider"""
+    )
+    assert await profiles.fetchall() == [
+        {"provider": "decodo", "lifecycle": "draining", "pending_action": "disable"},
+        {"provider": "webshare", "lifecycle": "disabled", "pending_action": None},
     ]

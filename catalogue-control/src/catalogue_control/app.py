@@ -1106,6 +1106,7 @@ def create_app(settings: Settings | None = None, *, proxy_provider: Any = None) 
                         built,
                         settings.proxy_reconcile_interval_seconds,
                         settings.proxy_secret_file,
+                        provider_name=name,
                     )
                     app.state.proxy_schedulers[name] = scheduler
                     await scheduler.start()

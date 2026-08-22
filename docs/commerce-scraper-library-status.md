@@ -188,8 +188,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
   role is absent and checks the invoking session rather than the privileged
   owner of its `SECURITY DEFINER` function.
 - [x] Full PostgreSQL verification after the audit migration:
-  - Catalogue dump: 144 passed, 1 skipped, and 749 deselected.
-  - Control plane: 64 passed and 32 deselected.
+  - Catalogue dump: 163 passed, 1 skipped, and 830 deselected.
+  - Control plane: 71 passed and 32 deselected.
 - [x] Frozen `catalogue-control` and `catalogue-service` lockfiles resolve and
   import both `mb_ceramics_catalogue` and `mb_commerce_scraper==0.1.0`.
 - [x] Lineage runtime persistence tests: 5 unit tests and 5 PostgreSQL
@@ -217,7 +217,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 | 2. HTTP transport and runtime | Partial | HTTP/fake transports, hardened middleware, conditional archive revalidation, and native Shopify policy composition exist; recorded direct-path parity and wider application rollout remain. |
 | 3. Shopify vertical slice | Partial | Registry/Fetcher/projection synthetic parity exists; recorded replay, production canary, and stable source switch remain. |
 | 4. Generic custom shops | Partial | Composable versioned discovery/parser strategies, sitemap/category/robots discovery, structured-page parsing, safe resume, current pagecrawl option translation, and a native worker gate exist; replay and production migration remain. |
-| 5. Proxy data plane | Partial | Atomic HTTP and browser-subrequest caps, real local HTTP/SOCKS and two-provider failover gates, Decodo and Webshare gateway adapters, sticky Camoufox composition, and native direct/optional-browser framework worker composition exist; durable Webshare runtime/billing wiring and live routed canaries remain. |
+| 5. Proxy data plane | Partial | Atomic HTTP and browser-subrequest caps, real local HTTP/SOCKS and two-provider failover gates, provider-isolated Decodo/Webshare control reconciliation, gateway adapters, sticky Camoufox composition, and native direct/optional-browser framework worker composition exist; durable Webshare runtime/secret wiring and live routed canaries remain. |
 | 6. Remaining frameworks | Implementation complete, migration pending | Eight framework connectors are extracted; replay, canary, and stable source switching remain. |
 | 7. Catalogue cutover | Partial | Every configured connector family now has an explicit native library/application-plugin route through the atomic projection pipeline; production replay/canary approval and stable switching remain. |
 | 8. Legacy removal and 1.0 | Partial | Public API/schema manifests, SemVer policy, guides, changelog/release automation, and a clean external consumer gate exist; production observation and duplicate removal remain. |
@@ -655,8 +655,26 @@ but replay/canary migration remains.
     persist the profile generation, and both legacy and native workers reject a
     rotated secret rather than silently changing credentials for queued work.
     Focused PostgreSQL tests cover provider-isolated Webshare ledger rows and
-    all unsafe-cycle denials; Webshare runtime/control composition remains a
-    separate incomplete item.
+    all unsafe-cycle denials; Webshare runtime composition remains a separate
+    incomplete item.
+- [x] Make durable control reconciliation provider-aware.
+  - Provider capabilities declare their real reconciliation dimensions:
+    Decodo uses day and target snapshots, IPRoyal uses day snapshots, Webshare
+    uses exactly one cycle-total snapshot, and providers without a windowed
+    usage contract remain unsupported rather than receiving fabricated data.
+  - Locks, active-cycle selection, ledger updates, provider snapshots,
+    reconciliation requests, notifications, kill-switch revocation, profile
+    refresh/actions, and asynchronous finalization are provider-scoped.
+    PostgreSQL tests prove Webshare success and failure cannot change Decodo
+    safety state or finalize its profiles.
+  - Webshare-reported aggregate bandwidth is retained as total bytes only; it
+    is not mislabeled as received traffic. Subscription windows beyond the
+    provider's 90-day reporting limit and unlimited plans without an explicit
+    finite ceiling are refused before a cycle proposal is written.
+  - Profile creation now persists the selected provider explicitly. Webshare
+    create, rotate, disable, and retirement operations fail before local intent
+    because provider-issued credentials and missing status controls do not
+    satisfy those mutation contracts.
 - [x] Bound health state and add reason-specific health counters.
   - Process-local state is keyed per provider/endpoint/target, capped with LRU
     eviction, and exposes detached read-only snapshots. Cooldowns grow
@@ -699,9 +717,10 @@ but replay/canary migration remains.
     legacy decoding returns a sanitized new-lineage restart outcome.
 
 Exit criterion: **not met**. Hard browser authorization, a verified second
-gateway adapter, and local two-provider failover proof are complete. Durable
-Webshare runtime/billing composition, a live Camoufox callback gate, and a
-production routed canary remain.
+gateway adapter, provider-isolated control reconciliation, and local
+two-provider failover proof are complete. Operator-managed Webshare gateway
+credential import, durable runtime composition, deployment secret wiring, a
+live Camoufox callback gate, and a production routed canary remain.
 
 ## Phase 6 — Remaining framework connectors
 
@@ -1040,10 +1059,11 @@ Exit criterion: **not met**.
    limited browser-capable canary with the tested source-level rollback route.
 6. Run representative PrestaShop and Sio2 sources through recorded replay,
    projected output comparison, and limited canaries with independent rollback.
-7. Add provider-specific Webshare control-plane reconciliation and deployment
-   secret/profile wiring on top of the provider-keyed durable authorization;
-   keep Webshare out of production composite selection until those controls
-   and their focused integration gate pass.
+7. Define the operator-managed import/rotation contract for Webshare-issued
+   gateway credentials, add provider-specific secret/deployment wiring and a
+   durable PostgreSQL-authorizing runtime pool, then run its focused integration
+   gate. Keep Webshare out of production composite selection until all of those
+   controls pass.
 8. Run one Shopify and one page-based source through recorded replay, ceramics
    projection parity, and a production canary with rollback.
 9. Migrate configured production sources incrementally through the existing

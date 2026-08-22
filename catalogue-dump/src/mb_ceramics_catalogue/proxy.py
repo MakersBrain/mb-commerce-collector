@@ -48,6 +48,12 @@ def redact_url(value: str) -> str:
     return _USERINFO.sub(r"\g<scheme>[REDACTED]@", value)
 
 
+def _validated_provider(provider: str) -> str:
+    if re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", provider) is None:
+        raise ProxyDenied("proxy provider is invalid")
+    return provider
+
+
 @dataclass(frozen=True)
 class ProxyProfile:
     name: str
@@ -186,8 +192,7 @@ async def reserve(
         raise ProxyDenied("a proxy reservation requires exactly one job or probe")
     if requested_bytes <= 0:
         raise ProxyDenied("proxy reservation bytes must be positive")
-    if re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", provider) is None:
-        raise ProxyDenied("proxy reservation provider is invalid")
+    provider = _validated_provider(provider)
     if (profile_id is None) != (route_id is None):
         raise ProxyDenied("proxy reservation profile and route must be supplied together")
     if cycle_start is not None and cycle_start.tzinfo is None:
@@ -589,9 +594,10 @@ async def reservation_revoked(connection: AsyncConnection[Any], reservation_id: 
 
 async def reconcile(
     connection: AsyncConnection[Any], *, cycle_start: datetime,
-    provider_reported_bytes: int, successful: bool,
+    provider_reported_bytes: int, successful: bool, provider: str = "decodo",
 ) -> None:
     """Record provider usage without ever automatically lowering the ledger."""
+    provider = _validated_provider(provider)
     await connection.execute(
         """
         update catalogue.proxy_budget_cycles
@@ -599,9 +605,14 @@ async def reconcile(
                reconciled_at = case when %(ok)s then now() else reconciled_at end,
                reconciliation_ok = %(ok)s,
                kill_switch = kill_switch or greatest(provider_reported_bytes, %(reported)s) >= operational_bytes
-         where provider = 'decodo' and cycle_start = %(start)s
+         where provider = %(provider)s and cycle_start = %(start)s
         """,
-        {"reported": max(0, provider_reported_bytes), "ok": successful, "start": cycle_start},
+        {
+            "provider": provider,
+            "reported": max(0, provider_reported_bytes),
+            "ok": successful,
+            "start": cycle_start,
+        },
     )
 
 
