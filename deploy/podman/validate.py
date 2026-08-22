@@ -20,6 +20,14 @@ EXPECTED = {
     "catalogue-explorer.container",
     "rendered-values.json",
 }
+WEBSHARE_GATEWAY_MOUNT = (
+    "Volume=/etc/makersbrain/catalogue-secrets/webshare-gateway.json:"
+    "/run/secrets/webshare-gateway.json:ro"
+)
+WEBSHARE_WORKERS = {
+    "catalogue-worker@.container",
+    "catalogue-worker-browser.container",
+}
 
 
 def validate(root: Path) -> None:
@@ -36,6 +44,13 @@ def validate(root: Path) -> None:
             raise ValueError(f"{path.name} publishes a host port")
         if "WantedBy=default.target" not in content:
             raise ValueError(f"{path.name} is not a rootless user unit")
+        if "CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED" in content:
+            raise ValueError("rendered units must not enable the Webshare data plane")
+        if path.name in WEBSHARE_WORKERS:
+            if content.count(WEBSHARE_GATEWAY_MOUNT) != 1:
+                raise ValueError(f"{path.name} lacks its exact Webshare gateway mount")
+        elif "webshare-gateway.json" in content:
+            raise ValueError(f"{path.name} received the worker-only Webshare gateway secret")
 
     nats = (root / "catalogue-nats.container").read_text(encoding="utf-8")
     if (

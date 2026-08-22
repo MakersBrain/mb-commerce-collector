@@ -25,6 +25,20 @@ def test_render_produces_exact_private_rootless_bundle(tmp_path: Path) -> None:
     assert "PublishPort=" not in "\n".join(
         path.read_text(encoding="utf-8") for path in output.glob("*.container")
     )
+    mount = (
+        "Volume=/etc/makersbrain/catalogue-secrets/webshare-gateway.json:"
+        "/run/secrets/webshare-gateway.json:ro"
+    )
+    for name in ("catalogue-worker@.container", "catalogue-worker-browser.container"):
+        assert (output / name).read_text(encoding="utf-8").count(mount) == 1
+    for path in output.glob("*.container"):
+        content = path.read_text(encoding="utf-8")
+        if path.name not in {
+            "catalogue-worker@.container",
+            "catalogue-worker-browser.container",
+        }:
+            assert "webshare-gateway.json" not in content
+        assert "CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED" not in content
 
 
 def test_render_rejects_mutable_image(tmp_path: Path) -> None:

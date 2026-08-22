@@ -3,15 +3,154 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import pwd
+import secrets
+import stat
 import sys
+from contextlib import suppress
+from pathlib import Path
+
+WORKER_NAME = "catalogue"
+WEBSHARE_GATEWAY_SOURCE = Path("/run/secrets/webshare-gateway.json")
+WEBSHARE_GATEWAY_DESTINATION = Path(
+    "/run/catalogue-worker-secrets/webshare-gateway.json"
+)
+MAX_WEBSHARE_GATEWAY_BYTES = 1_048_576
 
 
-WORKER = pwd.getpwnam("catalogue")
-WORKER_UID = WORKER.pw_uid
-WORKER_GID = WORKER.pw_gid
+def _read_bounded_regular(path: Path) -> bytes | None:
+    """Read one non-empty regular file without following its final component."""
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size < 1
+            or metadata.st_size > MAX_WEBSHARE_GATEWAY_BYTES
+        ):
+            return None
+        chunks: list[bytes] = []
+        remaining = MAX_WEBSHARE_GATEWAY_BYTES + 1
+        while remaining:
+            chunk = os.read(descriptor, min(65_536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        contents = b"".join(chunks)
+        if not contents or len(contents) > MAX_WEBSHARE_GATEWAY_BYTES:
+            return None
+        return contents
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+
+
+def _remove_staged_secret(destination: Path) -> None:
+    with suppress(FileNotFoundError):
+        destination.unlink()
+
+
+def _stage_private_copy(
+    contents: bytes,
+    destination: Path,
+    *,
+    owner_uid: int,
+    owner_gid: int,
+) -> None:
+    directory = destination.parent
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    metadata = directory.lstat()
+    if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        raise RuntimeError("catalogue worker secret directory is not a regular directory")
+    os.chown(directory, owner_uid, owner_gid)
+    os.chmod(directory, 0o700)
+
+    temporary = directory / f".{destination.name}.{secrets.token_hex(8)}.tmp"
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        view = memoryview(contents)
+        while view:
+            written = os.write(descriptor, view)
+            if written < 1:
+                raise OSError("short write while staging worker secret")
+            view = view[written:]
+        os.fchown(descriptor, owner_uid, owner_gid)
+        os.fchmod(descriptor, 0o400)
+        os.fsync(descriptor)
+    except BaseException:
+        os.close(descriptor)
+        _remove_staged_secret(temporary)
+        raise
+    else:
+        os.close(descriptor)
+    try:
+        os.replace(temporary, destination)
+        directory_descriptor = os.open(
+            directory,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_DIRECTORY", 0),
+        )
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        # Before replace this removes unpublished credential material. After
+        # replace the temporary path no longer exists, including when the
+        # directory fsync reports a durability failure.
+        _remove_staged_secret(temporary)
+
+
+def _configure_webshare_gateway(
+    source: Path,
+    destination: Path,
+    *,
+    owner_uid: int,
+    owner_gid: int,
+) -> None:
+    """Stage the worker-only gateway secret without enabling paid traffic."""
+
+    # Provider management API credentials belong only to control. Strip both
+    # the current generic setting and a provider-specific spelling defensively.
+    os.environ.pop("CATALOGUE_PROXY_API_SECRET_FILE", None)
+    os.environ.pop("CATALOGUE_PROXY_WEBSHARE_API_SECRET_FILE", None)
+    os.environ.pop("CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE", None)
+    contents = _read_bounded_regular(source)
+    if contents is None:
+        _remove_staged_secret(destination)
+        return
+    _stage_private_copy(
+        contents,
+        destination,
+        owner_uid=owner_uid,
+        owner_gid=owner_gid,
+    )
+    os.environ["CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE"] = str(destination)
+
+
 def main() -> None:
+    worker = pwd.getpwnam(WORKER_NAME)
     # Control owns provider credentials and atomically replaces this file.
     # Workers read the shared volume at job start, so rotations take effect
     # without restarting processes and no worker ever receives the API key.
@@ -20,7 +159,12 @@ def main() -> None:
         os.environ["CATALOGUE_PROXY_SECRET_FILE"] = str(profiles)
     else:
         os.environ.pop("CATALOGUE_PROXY_SECRET_FILE", None)
-    os.environ.pop("CATALOGUE_PROXY_API_SECRET_FILE", None)
+    _configure_webshare_gateway(
+        WEBSHARE_GATEWAY_SOURCE,
+        WEBSHARE_GATEWAY_DESTINATION,
+        owner_uid=worker.pw_uid,
+        owner_gid=worker.pw_gid,
+    )
 
     # Docker starts this entrypoint as root so it can stage secrets and then
     # drop privileges below.  Environment variables are not updated by
@@ -29,13 +173,13 @@ def main() -> None:
     # process is already the unprivileged catalogue user.  The browser was
     # fetched into catalogue's home at image-build time, so make the runtime
     # identity internally consistent before execing the worker.
-    os.environ["HOME"] = WORKER.pw_dir
-    os.environ["USER"] = WORKER.pw_name
-    os.environ["LOGNAME"] = WORKER.pw_name
+    os.environ["HOME"] = worker.pw_dir
+    os.environ["USER"] = worker.pw_name
+    os.environ["LOGNAME"] = worker.pw_name
 
     os.setgroups([])
-    os.setgid(WORKER_GID)
-    os.setuid(WORKER_UID)
+    os.setgid(worker.pw_gid)
+    os.setuid(worker.pw_uid)
     os.execvp("catalogue-worker", ["catalogue-worker", *sys.argv[1:]])
 
 

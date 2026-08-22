@@ -6,13 +6,17 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
+import stat
 from pathlib import Path
 from urllib.parse import quote
 
 HERE = Path(__file__).resolve().parent
 TOKEN = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 PASSWORD = TOKEN
+MAX_PROVIDER_SECRET_BYTES = 1_048_576
+WEBSHARE_GATEWAY_EXPORT = "catalogue/proxy/WEBSHARE_GATEWAY_V2_JSON"
 DB_ROLES = {
     "service": ("catalogue_service", "CATALOGUE_SERVICE_DB_PASSWORD"),
     "control": ("catalogue_control", "CATALOGUE_CONTROL_DB_PASSWORD"),
@@ -49,6 +53,54 @@ def _secret(root: Path, relative: str, pattern: re.Pattern[str]) -> str:
 def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
     path.chmod(0o600)
+
+
+def _optional_secret_bytes(root: Path, relative: str, *, maximum: int) -> bytes:
+    """Read an optional bounded regular file without following a final symlink."""
+    path = root / relative
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    try:
+        descriptor = os.open(path, flags)
+    except FileNotFoundError:
+        return b""
+    except OSError:
+        raise ValueError(f"optional secret input cannot be opened safely: {relative}") from None
+
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(f"optional secret input is not a regular file: {relative}")
+        if metadata.st_size > maximum:
+            raise ValueError(f"optional secret input exceeds its size limit: {relative}")
+        chunks: list[bytes] = []
+        remaining = maximum + 1
+        while remaining:
+            chunk = os.read(descriptor, min(65_536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        content = b"".join(chunks)
+        if len(content) > maximum:
+            raise ValueError(f"optional secret input exceeds its size limit: {relative}")
+        return content
+    finally:
+        os.close(descriptor)
+
+
+def _write_bytes(path: Path, content: bytes) -> None:
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
+        0o600,
+    )
+    with os.fdopen(descriptor, "wb") as output:
+        output.write(content)
 
 
 def build(values_path: Path, secret_root: Path, output: Path) -> None:
@@ -88,6 +140,18 @@ def build(values_path: Path, secret_root: Path, output: Path) -> None:
     _write(
         config / "explorer.env",
         f"CATALOGUE_CONTROL_TOKEN={control_token}\nHOST=0.0.0.0\nPORT=3000\n",
+    )
+
+    # Gateway credentials are staged as a file and mounted only into workers.
+    # Their presence never enables paid traffic; the application gate remains
+    # absent/default-false until a separately qualified production change.
+    _write_bytes(
+        secrets / "webshare-gateway.json",
+        _optional_secret_bytes(
+            secret_root,
+            WEBSHARE_GATEWAY_EXPORT,
+            maximum=MAX_PROVIDER_SECRET_BYTES,
+        ),
     )
 
     for role, user in NATS_ROLES.items():

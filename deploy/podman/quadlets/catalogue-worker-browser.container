@@ -13,6 +13,7 @@ Environment=CATALOGUE_NATS_URL=nats://catalogue-nats:4222
 Environment=CATALOGUE_NATS_CONSUME_CREDENTIALS_FILE=/run/queue/nats-consume-credentials.json
 Environment=CATALOGUE_MAX_JOBS=25
 Volume=/etc/makersbrain/catalogue-secrets/nats-consume-credentials.json:/run/queue/nats-consume-credentials.json:ro
+Volume=/etc/makersbrain/catalogue-secrets/webshare-gateway.json:/run/secrets/webshare-gateway.json:ro
 Volume=/etc/makersbrain/tenant-runtime-secrets/postgres-ca.crt:/run/database/postgres-ca.crt:ro
 Volume=catalogue-cache.volume:/var/lib/catalogue/cache
 Volume=catalogue-dumps.volume:/var/lib/catalogue/dumps

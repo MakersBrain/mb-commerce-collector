@@ -331,6 +331,10 @@ services:
       CATALOGUE_JOB_SLOTS: ${CATALOGUE_JOB_SLOTS:-4}
       CATALOGUE_PROXY_ENABLED: ${CATALOGUE_PROXY_ENABLED:-false}
       CATALOGUE_PROXY_SECRET_FILE: /run/proxy-secrets/profiles.json
+      # A mounted gateway credential is inert until this independent gate is
+      # explicitly enabled. The entrypoint stages the file but never changes
+      # this setting.
+      CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED: ${CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED:-false}
     volumes:
       # Shared, so a replay works across workers and a run's artifacts are all
       # in one place. The cache is sharded per host and the dumps are namespaced
@@ -338,6 +342,12 @@ services:
       - cache:/var/lib/catalogue/cache
       - dumps:/var/lib/catalogue/dumps
       - proxy-secrets:/run/proxy-secrets:ro
+      # Provider-issued Webshare gateway credentials are worker data-plane
+      # material. They are never mounted into control or service containers.
+      - type: bind
+        source: ${CATALOGUE_WEBSHARE_GATEWAY_SECRET_SOURCE:-/dev/null}
+        target: /run/secrets/webshare-gateway.json
+        read_only: true
       - type: bind
         source: ${CATALOGUE_CF_CONSUME_TOKEN_FILE:-/dev/null}
         target: /run/queue-secrets/cloudflare-consume-token
@@ -397,10 +407,15 @@ services:
       CATALOGUE_BROWSER_PAGES: ${CATALOGUE_BROWSER_PAGES:-2}
       CATALOGUE_PROXY_ENABLED: ${CATALOGUE_PROXY_ENABLED:-false}
       CATALOGUE_PROXY_SECRET_FILE: /run/proxy-secrets/profiles.json
+      CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED: ${CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED:-false}
     volumes:
       - cache:/var/lib/catalogue/cache
       - dumps:/var/lib/catalogue/dumps
       - proxy-secrets:/run/proxy-secrets:ro
+      - type: bind
+        source: ${CATALOGUE_WEBSHARE_GATEWAY_SECRET_SOURCE:-/dev/null}
+        target: /run/secrets/webshare-gateway.json
+        read_only: true
       - type: bind
         source: ${CATALOGUE_CF_CONSUME_TOKEN_FILE:-/dev/null}
         target: /run/queue-secrets/cloudflare-consume-token

@@ -110,6 +110,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `ed429da` — constrain durable provider identity in PostgreSQL.
 - `db25719` — authorize durable provider gateways.
 - `2fd0386` — resolve durable Webshare routes.
+- `1d83636` — rotate Webshare gateway secrets with local CAS.
 
 ### Verification at last review
 
@@ -140,8 +141,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
     country/provider constraints are checked before secret or database access.
 - [x] Full catalogue verification:
   - Ruff passed.
-  - Mypy passed for 232 source and test files.
-  - 915 tests passed, 2 skipped, 173 deselected, and 284 subtests passed in the
+  - Mypy passed for 233 source and test files.
+  - 919 tests passed, 2 skipped, 173 deselected, and 284 subtests passed in the
     latest fast-suite run; the wider repository fast gate also passed 32
     control-plane tests, 14 service tests, and 2 explorer tests.
   - The lower fast-test count reflects deletion of the obsolete specialized
@@ -210,6 +211,9 @@ architecture rules in the plan and are not separate scope-expansion goals.
     resolver → routed transport → real HTTP proxy framing, and proves exact
     sticky credential grammar, one durable authorization/reconciliation/close,
     no direct request, and complete lease/connection cleanup.
+  - The Podman deployment suite passed 24 tests; worker entrypoint and rendered
+    Compose placement passed 4 focused tests plus Compose configuration
+    validation.
 - [x] Source configuration inventory: all 88 configured sources can be
   constructed through the current layered/library mapping.
   - All 21 `pagecrawl` sources now validate through the explicit legacy-to-
@@ -755,7 +759,22 @@ but replay/canary migration remains.
     refusal without exposing credential values.
   - An authenticated control operation plus durable non-secret recovery intent
     is still required to coordinate file generation with PostgreSQL lifecycle
-    state. Provider-specific deployment mounts also remain.
+    state. Its control-exclusive write mount and recovery wiring also remain.
+- [x] Add default-off worker-only Webshare secret staging.
+  - The authoritative Podman runtime stage copies the optional bounded regular
+    Infisical export byte-for-byte to a private mode-`0600` file, or creates an
+    empty placeholder. Validation requires one read-only mount on plain and
+    browser workers, rejects it on every other unit, and rejects any rendered
+    data-plane enable flag.
+  - Compose uses a distinct host-source variable and mounts it only into the two
+    worker variants. The worker entrypoint uses bounded non-blocking/no-follow
+    reads, strips management-secret variables, atomically stages a
+    catalogue-owned mode-`0400` copy with file/directory `fsync`, and removes
+    stale state for absent, empty, non-regular, symlink, FIFO, oversized, or
+    failed replacements. It never changes the independent enable flag.
+  - Presence remains inert and production enablement is still false. A rootless
+    Quadlet activation/readability smoke and documented worker restart on
+    credential inode replacement remain operational gates.
 - [x] Bound health state and add reason-specific health counters.
   - Process-local state is keyed per provider/endpoint/target, capped with LRU
     eviction, and exposes detached read-only snapshots. Cooldowns grow
@@ -801,9 +820,9 @@ Exit criterion: **not met**. Hard browser authorization, a verified second
 gateway adapter, provider-isolated control reconciliation, a reusable durable
 provider composition, default-off native single-route Webshare resolution, its
 focused PostgreSQL gate, and local two-provider failover proof are complete.
-Authenticated operator Webshare import/rotation, deployment wiring, a durable
-file/SQL recovery workflow, a live Camoufox callback gate, and a production
-routed canary remain.
+Authenticated operator Webshare import/rotation, its durable file/SQL recovery
+workflow and control-exclusive write mount, a rootless deployment smoke, a live
+Camoufox callback gate, and a production routed canary remain.
 
 ## Phase 6 — Remaining framework connectors
 
@@ -1143,10 +1162,13 @@ Exit criterion: **not met**.
 6. Run representative PrestaShop and Sio2 sources through recorded replay,
    projected output comparison, and limited canaries with independent rollback.
 7. Add authenticated import/rotation and a durable file/SQL recovery intent for
-   Webshare-issued gateway credentials, then add worker-only provider secret
-   mounts. The HTTP resolver-to-wire integration now passes; a live browser
-   callback integration remains. Keep Webshare out of production composite
-   selection until those controls pass.
+   Webshare-issued gateway credentials. Rotation must disable the profile and
+   move its active reservations to `revocation_requested` before file CAS;
+   profile disablement alone does not stop attempts on existing leases. The
+   worker-only read mounts and HTTP resolver-to-wire integration now pass; a
+   control-exclusive write mount, rootless smoke, and live browser callback
+   integration remain. Keep Webshare out of production composite selection
+   until those controls pass.
 8. Run one Shopify and one page-based source through recorded replay, ceramics
    projection parity, and a production canary with rollback.
 9. Migrate configured production sources incrementally through the existing

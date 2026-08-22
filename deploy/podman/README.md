@@ -13,6 +13,16 @@ containers never receive the NATS administrator credential. `release.py`
 verifies the signed record and every image, stages immutable content and
 atomically selects the Quadlet bundle with rollback on activation failure.
 
+The optional Infisical export
+`catalogue/proxy/WEBSHARE_GATEWAY_V2_JSON` is copied byte-for-byte into the
+private runtime stage as `secrets/webshare-gateway.json`. Missing input creates
+an empty mode-`0600` placeholder so the static worker mounts remain valid. Only
+plain and browser workers receive that file, read-only; control, service,
+dispatcher, explorer, and NATS never receive gateway credentials. Staging or
+mounting the file does not enable paid traffic: the Webshare data-plane enable
+setting remains absent and therefore false. Enabling it requires a separate,
+qualified deployment change after the durable runtime gate passes.
+
 The single `tenant-runtime` Podman context owns two private networks. Catalogue
 containers join `catalogue.network`; MakersBrain containers join
 `makersbrain.network`; only vmagent and cloudflared join both. No Catalogue
