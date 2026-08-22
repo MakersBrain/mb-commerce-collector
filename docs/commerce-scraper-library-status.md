@@ -123,6 +123,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `cf89f58` — preserve per-request robots policy and legacy cache provenance.
 - `a39176f` — exercise live Camoufox proxy callback ordering.
 - `97a62e4` — align rootless worker identity and add a rotation smoke.
+- `258d1fd` — verify installed catalogue and scraper wheel composition.
 
 ### Verification at last review
 
@@ -251,6 +252,12 @@ architecture rules in the plan and are not separate scope-expansion goals.
     `1 -> 2` replacement through its read-only mount as `10001:10001`, with a
     mode-`0400` secret, no capabilities, no provider API credential, and the
     data plane still disabled. This is not evidence of Quadlet activation.
+  - The isolated installed-artifact gate builds the scraper and catalogue
+    wheels with workspace source overrides disabled, installs both wheel paths
+    in one strict transaction, and runs under `python -I` outside the checkout.
+    It loads the packaged `sources.json` and constructs checked-in `ceradel`
+    through runtime plan → source projection → application registry → legacy
+    transport boundary → library pipeline on both Python versions in CI.
 - [x] Source configuration inventory: all 88 configured sources can be
   constructed through the current layered/library mapping.
   - All 21 `pagecrawl` sources now validate through the explicit legacy-to-
@@ -1263,10 +1270,7 @@ Exit criterion: **not met**.
    integration, Docker rootless-identity fallback, and live Camoufox callback
    gate now pass. Keep Webshare out of production composite selection until
    those remaining operational gates pass.
-8. Add an isolated installed-artifact gate that installs both the library and
-   catalogue distributions, constructs a representative checked-in source,
-   and proves catalogue composition does not rely on either source checkout.
-9. Migrate configured production sources incrementally through the existing
+8. Migrate configured production sources incrementally through the existing
    library registry route, and remove legacy implementations only after their
    observation windows.
 
