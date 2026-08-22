@@ -132,6 +132,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `7a3a355` — enforce supported scraper composition imports.
 - `dd2093a` — reject unprovable static proxy constraints.
 - `92f97ba` — exercise durable lineage resolution against PostgreSQL.
+- `864e87d` — review framework connector traffic profiles.
+- `0998578` — bypass the retained commerce-model compatibility shim internally.
 
 ### Verification at last review
 
@@ -157,6 +159,12 @@ architecture rules in the plan and are not separate scope-expansion goals.
   contracts, and an AST architecture gate rejects future imports from private
   connector or transport implementation modules. The focused catalogue
   architecture/runtime/pipeline slice passed 54 tests with Ruff and mypy.
+- [x] Catalogue connectors, datasets, and projection code consume neutral model
+  identities directly from the supported library namespace. The deprecated
+  catalogue commerce-model shim remains available for its compatibility
+  window, has exact export/identity coverage, and an AST gate prevents new
+  internal dependence on it. The focused compatibility, connector, dataset,
+  and pipeline slice passed 75 tests with Ruff and mypy.
 - [x] Targeted catalogue composition and intercall tests passed, covering
   the layered source/run policy, explicit native-route metadata, registry and
   projection boundaries, proxy-runtime composition, and native middleware
@@ -1049,11 +1057,19 @@ Cross-cutting work:
 - [~] Run recorded-response replay and ceramics projection comparisons.
   - The first page-based gate is implemented for `keramikbedarf-online` and
     Shopware, but cannot produce evidence until the raw archive is restored.
-- [ ] Review request counts and byte estimates.
+- [~] Review request counts and byte estimates.
+  - Focused traffic profiles now pin exact logical request order, purpose,
+    browser hint, and byte estimate for WooCommerce, PrestaShop/Sio2,
+    BigCommerce, Wix, Shopware, Starweb, NitroSell, and SumUp. BigCommerce also
+    proves an origin-equal token page does not multiply direct/rendered probes.
+    The compact five-module slice passed 56 tests. Empirical recorded-response
+    totals remain pending with the external archive.
 - [~] Review direct, browser, and proxy behavior.
-  - BigCommerce direct/browser behavior and direct-versus-paid-proxy backend
-    ownership are covered synthetically. Recorded and live route evidence is
-    still pending.
+  - The same profiles prove direct-only WooCommerce, PrestaShop/Sio2,
+    Shopware, Starweb, NitroSell, and SumUp paths; BigCommerce direct-to-rendered
+    token and browser-GraphQL fallback; and Wix direct-to-rendered entity
+    fallback. Provider routing remains connector-neutral and is covered at the
+    middleware/runtime boundary. Recorded and live route evidence is pending.
 - [ ] Canary representative sources.
 - [ ] Document intentional differences and switch stable source keys.
 
@@ -1208,12 +1224,16 @@ legacy defaults until promotion evidence exists.
 - [ ] Remove duplicate legacy framework connectors.
 - [ ] Remove `_connector` aliases and compatibility re-exports after the
   deprecation window.
+  - The pure commerce-model shim has no remaining production consumers and is
+    guarded by exact object-identity tests, but remains importable until that
+    window closes. Real legacy contracts, connectors, canary aliases, Fetcher
+    compatibility, and source loading remain untouched for rollback.
 - [x] Publish connector-authoring, proxy-integration, and migration guides.
   - The guides define dependency/lifecycle ownership, essential intercall
     tests, structured tracing and credential boundaries, provider authorization,
     replay/shadow/canary evidence, promotion, and configuration-only rollback.
 - [x] Document supported public imports and semantic-versioning policy.
-  - A reviewed manifest fixes 231 exports across nine supported modules. The
+  - A reviewed manifest fixes 233 exports across nine supported modules. The
     policy separates package SemVer from independently versioned serialized
     contracts and records pre-1.0, deprecation, and Python-support rules.
 - [x] Add changelog and release automation.
