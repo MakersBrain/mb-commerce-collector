@@ -114,6 +114,11 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `a2043ea` — stage Webshare worker secrets default-off.
 - `31285e3` — fence profile secret rotations and persist recovery intents.
 - `0559a67` — run Podman catalogue workers rootless.
+- `46a2e59` — coordinate Webshare profile imports.
+- `13bd95d` — harden Webshare import recovery and stale-probe cleanup.
+- `d3e15a6` — mount the control-owned writable Webshare gateway store.
+- `3a84514` — fence cancelled Webshare operations and settle late usage.
+- `b85a23d` — expose recent-admin Webshare profile imports.
 
 ### Verification at last review
 
@@ -218,10 +223,17 @@ architecture rules in the plan and are not separate scope-expansion goals.
     rendered Compose placement passed 4 focused tests plus Compose
     configuration validation. A combined live PostgreSQL gate passed 18
     durable-fence and schema-migration cases.
-  - The Webshare profile-import orchestration service passed 7 live PostgreSQL
-    create, rotate, drain, crash-recovery, retry, tuple-binding, and unsafe-cycle
-    cases. The control fast suite passed 32 tests with 78 PostgreSQL cases
-    deselected.
+  - The hardened Webshare profile-import service passed 15 live PostgreSQL
+    create, rotate, drain, crash-recovery, cycle-rebind, repeated-cancellation,
+    advisory-unlock, tuple-binding, and unsafe-cycle cases. Stale-probe cleanup
+    and late accounting passed 2 live cases; the authenticated HTTP boundary
+    passed 4 live create/rotate/replay/remediation cases.
+  - The current control fast suite passed 34 tests with 92 PostgreSQL cases
+    deselected. A combined focused live control gate passed 26 cases; the
+    Webshare secret and reserved-pool unit slice passed 75 cases, and the
+    durable reserved-pool PostgreSQL slice passed 4 cases.
+  - The expanded control-owned/worker-read-only deployment and entrypoint slice
+    passed 43 tests, and Compose rendering remained valid.
 - [x] Source configuration inventory: all 88 configured sources can be
   constructed through the current layered/library mapping.
   - All 21 `pagecrawl` sources now validate through the explicit legacy-to-
@@ -243,7 +255,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 | 2. HTTP transport and runtime | Partial | HTTP/fake transports, hardened middleware, conditional archive revalidation, and native Shopify policy composition exist; recorded direct-path parity and wider application rollout remain. |
 | 3. Shopify vertical slice | Partial | Registry/Fetcher/projection synthetic parity exists; recorded replay, production canary, and stable source switch remain. |
 | 4. Generic custom shops | Partial | Composable versioned discovery/parser strategies, sitemap/category/robots discovery, structured-page parsing, safe resume, current pagecrawl option translation, and a native worker gate exist; replay and production migration remain. |
-| 5. Proxy data plane | Partial | Atomic HTTP and browser-subrequest caps, real local HTTP/SOCKS and two-provider failover gates, provider-isolated Decodo/Webshare reconciliation, gateway adapters, durable default-off single-route native selection, sticky Camoufox composition, and native direct/optional-browser framework worker composition exist; Webshare credential writes/deployment wiring and live routed canaries remain. |
+| 5. Proxy data plane | Partial | Atomic HTTP and browser-subrequest caps, real local HTTP/SOCKS and two-provider failover gates, provider-isolated Decodo/Webshare reconciliation, gateway adapters, durable default-off single-route native selection, authenticated recoverable Webshare credential writes, control-owned deployment wiring, sticky Camoufox composition, and native direct/optional-browser framework worker composition exist; real rootless activation and live routed canaries remain. |
 | 6. Remaining frameworks | Implementation complete, migration pending | Eight framework connectors are extracted; replay, canary, and stable source switching remain. |
 | 7. Catalogue cutover | Partial | Every configured connector family now has an explicit native library/application-plugin route through the atomic projection pipeline; production replay/canary approval and stable switching remain. |
 | 8. Legacy removal and 1.0 | Partial | Public API/schema manifests, SemVer policy, guides, changelog/release automation, and a clean external consumer gate exist; production observation and duplicate removal remain. |
@@ -754,7 +766,7 @@ but replay/canary migration remains.
     provider/name/generation secret, verified capabilities, route UUID, and
     durable profile UUID into the composed gateway and PostgreSQL pool. Merely
     resolving the runtime remains lazy and opens no reservation.
-- [~] Define the operator-managed Webshare gateway secret contract.
+- [x] Define the operator-managed Webshare gateway secret contract.
   - A separate, read-only schema-v2 loader now accepts only provider-bound
     `webshare/<logical-name>` records with strict generations, secret-aware
     credentials, the verified HTTP backbone, explicit country/sticky-session
@@ -765,15 +777,17 @@ but replay/canary migration remains.
     traffic.
   - A whole-file local store now installs and removes provider-keyed records
     with explicit generation compare-and-swap. It uses a private no-follow
-    lock, one validated read under that lock, canonical revalidation, a private
+    lock with bounded acquisition, one validated read under that lock, canonical revalidation, a private
     same-directory temporary file, file and directory `fsync`, atomic replace,
     and cleanup. Focused tests cover stale and concurrent rotation, unrelated
     record preservation, guarded removal, replacement failure, and symlink
     refusal without exposing credential values.
-  - An authenticated control operation plus durable non-secret recovery intent
-    is still required to coordinate file generation with PostgreSQL lifecycle
-    state. Its control-exclusive write mount and recovery wiring also remain.
-- [~] Persist recoverable profile-secret operations without secret material.
+  - A separate recent-admin operation coordinates strict request validation,
+    non-secret idempotency metadata, durable intent state, local generation CAS,
+    audit/event emission, and safe replay. It never calls a provider-management
+    API and never writes credentials, fingerprints, endpoints, or capabilities
+    to PostgreSQL.
+- [x] Persist recoverable profile-secret operations without secret material.
   - An append-only migration adds one intent per mutation operation with exact
     provider/profile/logical-name/cycle foreign keys, create-versus-rotation
     generation constraints, prepared/installed/completed/failed states,
@@ -789,32 +803,41 @@ but replay/canary migration remains.
     CAS outside PostgreSQL transactions; and finalizes only after reacquiring
     locks and rechecking cycle, allocation, database generation, and installed
     file generation.
-  - Generation-only recovery finalizes a file-ahead-of-database crash, retains
-    unsafe installed state for retry, or fails a missing/conflicting generation
-    without inspecting credential values. Failed generation-one creates can be
-    resubmitted only by adopting an identical pristine pending profile and
-    allocation, and resumed operation tuples must match exactly.
-  - The authenticated/idempotent HTTP endpoint, audit/event emission, mutation
-    completion/replay integration, and control-exclusive write mount do not
-    exist yet.
-- [x] Add default-off worker-only Webshare secret staging.
-  - The authoritative Podman runtime stage copies the optional bounded regular
-    Infisical export byte-for-byte to a private mode-`0600` file, or creates an
-    empty placeholder. Validation requires one read-only mount on plain and
-    browser workers, rejects it on every other unit, and rejects any rendered
-    data-plane enable flag.
-  - Compose uses a distinct host-source variable and mounts it only into the two
-    worker variants. The worker entrypoint uses bounded non-blocking/no-follow
+  - Generation-only recovery finalizes a file-ahead-of-database crash, safely
+    completes an already-applied target generation, rebinds an expired intent
+    only to one safe current cycle with the exact profile allocation, retains a
+    disabled installed state with stable remediation when allocation is absent,
+    and fails unrelated database/file generations without inspecting values.
+  - A session advisory fence spans prepare, off-loop file CAS, and finalize.
+    Repeated cancellation cannot release it while the file thread still runs;
+    unlock is verified and an uncertain session is discarded. Draining is a
+    terminal 202 that requires a new key after leases close, while installed
+    cycle remediation resumes under the same key.
+  - Reservation close, profile rotation, and stale cleanup share cycle-first
+    lock order. Timed-out probes are cancelled after a bounded interval, late
+    actuals settle monotonically without resurrecting terminal state, and both
+    cleanup and settlement advance application accounting and the kill switch.
+- [x] Add default-off control-owned Webshare secret staging.
+  - The authoritative Podman runtime stage creates a private gateway directory
+    and optionally bootstraps the bounded Infisical export byte-for-byte as a
+    mode-`0600` file. An absent bootstrap leaves the file absent so generation
+    one can be created, and later stage rebuilds preserve a control-rotated
+    owner-only store instead of replacing it with stale bootstrap material.
+  - Compose bootstraps the same directory through its initializer. Control is
+    its sole read-write consumer; plain and browser workers mount it read-only,
+    while service, dispatcher, and explorer receive no credential mount. The
+    worker entrypoint uses bounded non-blocking/no-follow
     reads, strips management-secret variables, atomically stages a
     catalogue-owned mode-`0400` copy with file/directory `fsync`, and removes
     stale state for absent, empty, non-regular, symlink, FIFO, oversized, or
     failed replacements. It never changes the independent enable flag.
   - Presence remains inert and production enablement is still false. A rootless
     execution contract now maps both workers directly to catalogue UID/GID,
-    retains `DropCapability=all`, and validates the private mounted file without
-    privileged calls; rootful Compose retains private staging and privilege
-    drop. A real Quadlet activation/readability smoke and documented worker
-    restart on credential inode replacement remain operational gates.
+    retains `DropCapability=all`, and validates owner-only bootstrap mode 0600
+    and atomically rotated mode 0400 without privileged calls; rootful Compose
+    retains private staging and privilege drop. Directory mounts make atomic
+    replacements visible without stale bind-mounted inodes. A real Quadlet
+    activation/readability smoke remains an operational gate.
 - [x] Bound health state and add reason-specific health counters.
   - Process-local state is keyed per provider/endpoint/target, capped with LRU
     eviction, and exposes detached read-only snapshots. Cooldowns grow
@@ -1201,14 +1224,12 @@ Exit criterion: **not met**.
    limited browser-capable canary with the tested source-level rollback route.
 6. Run representative PrestaShop and Sio2 sources through recorded replay,
    projected output comparison, and limited canaries with independent rollback.
-7. Expose the implemented Webshare import/rotation service through the existing
-   recent-admin, idempotency, audit, and event controls, including safe replay
-   of started recovery operations, then add its control-exclusive write mount.
-   Rotation already disables the profile and moves active reservations to
-   `revocation_requested` before file CAS. The worker-only read mounts and HTTP
-   resolver-to-wire integration pass; a real rootless Quadlet smoke and live
-   browser callback integration remain. Keep Webshare out of production
-   composite selection until those controls pass.
+7. Run a real rootless Quadlet activation/readability smoke and a live browser
+   callback integration against the default-off Webshare route. The recent-admin
+   import/rotation endpoint, durable replay, control-exclusive write mount,
+   worker read mounts, and HTTP resolver-to-wire integration now pass. Keep
+   Webshare out of production composite selection until the remaining runtime
+   gates and an explicitly approved canary pass.
 8. Run one Shopify and one page-based source through recorded replay, ceramics
    projection parity, and a production canary with rollback.
 9. Migrate configured production sources incrementally through the existing
