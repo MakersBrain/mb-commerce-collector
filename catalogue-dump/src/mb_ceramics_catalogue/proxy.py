@@ -403,9 +403,10 @@ async def authorize_reservation_attempt(
     if maximum_requests is not None and maximum_requests < 1:
         raise ValueError("proxy request cap must be positive")
     async with connection.transaction():
-        # Lock the owning cycle before the reservation. Control-plane stop and
-        # reconciliation updates lock this same row, so a committed unsafe
-        # transition cannot race a new physical-attempt token into existence.
+        # Lock the owning cycle, profile, route, and reservation in that order.
+        # Holding each outer lock while acquiring the next prevents a committed
+        # control-plane transition from racing a new physical-attempt token into
+        # existence.
         cycle_cursor = await connection.execute(
             """
             select c.lifecycle, c.kill_switch, c.reconciliation_ok,
@@ -430,13 +431,60 @@ async def authorize_reservation_attempt(
             or cycle["reconciled_at"] is None
         ):
             raise ProxyDenied("proxy billing cycle does not authorize new paid traffic")
+        profile_cursor = await connection.execute(
+            """
+            select p.enabled, p.lifecycle,
+                   p.secret_generation = r.secret_generation as secret_current
+              from catalogue.proxy_reservations r
+              join catalogue.proxy_profiles p
+                on p.id = r.profile_id and p.provider = r.provider
+               and p.logical_name = r.profile
+             where r.id = %(id)s
+             for share of p
+            """,
+            {"id": reservation_id},
+        )
+        profile = await profile_cursor.fetchone()
+        if (
+            profile is None
+            or not profile["enabled"]
+            or profile["lifecycle"] != "enabled"
+            or not profile["secret_current"]
+        ):
+            raise ProxyDenied("proxy profile does not authorize new paid traffic")
+        route_cursor = await connection.execute(
+            """
+            select r.enabled, r.retired_at is null as current
+              from catalogue.proxy_reservations x
+              join catalogue.proxy_routes r
+                on r.id = x.route_id and r.provider = x.provider
+               and r.profile_id = x.profile_id
+             where x.id = %(id)s
+             for share of r
+            """,
+            {"id": reservation_id},
+        )
+        route = await route_cursor.fetchone()
+        if route is None or not route["enabled"] or not route["current"]:
+            raise ProxyDenied("proxy route does not authorize new paid traffic")
         cursor = await connection.execute(
             """
-            select reserved_bytes, estimated_bytes, request_count,
-                   revocation_requested or state = 'revocation_requested' as revoked
-              from catalogue.proxy_reservations
-             where id = %(id)s and state in ('active', 'revocation_requested')
-             for update
+            select x.reserved_bytes, x.estimated_bytes, x.request_count,
+                   x.revocation_requested or
+                       x.state = 'revocation_requested' as revoked
+              from catalogue.proxy_reservations x
+              join catalogue.proxy_profiles p
+                on p.id = x.profile_id and p.provider = x.provider
+               and p.logical_name = x.profile
+               and p.secret_generation = x.secret_generation
+              join catalogue.proxy_routes r
+                on r.id = x.route_id and r.provider = x.provider
+               and r.profile_id = x.profile_id
+             where x.id = %(id)s
+               and x.state in ('active', 'revocation_requested')
+               and p.enabled and p.lifecycle = 'enabled'
+               and r.enabled and r.retired_at is null
+             for update of x
             """,
             {"id": reservation_id},
         )

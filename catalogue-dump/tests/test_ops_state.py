@@ -1099,11 +1099,12 @@ class TestScheduleDefault:
 
 
 class TestSchemaMigration:
-    async def install_pre_provider_integrity_head(self, db) -> None:
+    async def install_before(self, db, migration: str) -> None:
         await db.execute("drop schema catalogue cascade")
         await db.execute(EXTENSIONS.read_text(encoding="utf-8"))
         directory = storage_db.schema_directory()
-        for name in storage_db.SCHEMA_FILES[:-1]:
+        before = storage_db.SCHEMA_FILES[:storage_db.SCHEMA_FILES.index(migration)]
+        for name in before:
             await db.execute((directory / name).read_text(encoding="utf-8"))
         await db.execute(
             """create table catalogue.schema_migrations (
@@ -1111,7 +1112,7 @@ class TestSchemaMigration:
                  applied_at timestamptz not null default now()
                )"""
         )
-        for name in storage_db.SCHEMA_FILES[:-1]:
+        for name in before:
             await db.execute(
                 "insert into catalogue.schema_migrations(filename) values (%s)",
                 (name,),
@@ -1140,7 +1141,7 @@ class TestSchemaMigration:
         assert await storage_db.apply_schema(db) == []
 
     async def test_provider_integrity_migration_backfills_existing_routes(self, db):
-        await self.install_pre_provider_integrity_head(db)
+        await self.install_before(db, storage_db.PROXY_PROVIDER_INTEGRITY_MIGRATION)
         profile = await db.execute(
             """insert into catalogue.proxy_profiles
                  (provider, logical_name, display_name, created_by, updated_by)
@@ -1157,7 +1158,8 @@ class TestSchemaMigration:
         route_id = (await route.fetchone())["id"]
 
         assert await storage_db.apply_schema(db) == [
-            storage_db.PROXY_PROVIDER_INTEGRITY_MIGRATION
+            storage_db.PROXY_PROVIDER_INTEGRITY_MIGRATION,
+            storage_db.PROXY_PROFILE_SECRET_INTENT_MIGRATION,
         ]
         assert await storage_db.apply_schema(db) == []
         migrated = await rows(
@@ -1168,7 +1170,7 @@ class TestSchemaMigration:
         assert migrated == [{"provider": "webshare"}]
 
     async def test_provider_integrity_migration_refuses_dirty_existing_allocations(self, db):
-        await self.install_pre_provider_integrity_head(db)
+        await self.install_before(db, storage_db.PROXY_PROVIDER_INTEGRITY_MIGRATION)
         start = datetime.now(UTC) - timedelta(days=1)
         end = datetime.now(UTC) + timedelta(days=1)
         await db.execute(
@@ -1199,6 +1201,236 @@ class TestSchemaMigration:
             (storage_db.PROXY_PROVIDER_INTEGRITY_MIGRATION,),
         )
         assert applied == []
+
+    async def test_profile_secret_intent_migration_is_ordered_and_idempotent(self, db):
+        await self.install_before(db, storage_db.PROXY_PROFILE_SECRET_INTENT_MIGRATION)
+
+        assert await storage_db.apply_schema(db) == [
+            storage_db.PROXY_PROFILE_SECRET_INTENT_MIGRATION
+        ]
+        assert await storage_db.apply_schema(db) == []
+        relation = await rows(
+            db,
+            """select n.nspname as schema_name, c.relname as table_name
+                 from pg_class c
+                 join pg_namespace n on n.oid = c.relnamespace
+                where n.nspname = 'catalogue'
+                  and c.relname = 'proxy_profile_secret_intents'""",
+        )
+        assert relation == [
+            {
+                "schema_name": "catalogue",
+                "table_name": "proxy_profile_secret_intents",
+            }
+        ]
+        columns = await rows(
+            db,
+            """select column_name from information_schema.columns
+                 where table_schema = 'catalogue'
+                   and table_name = 'proxy_profile_secret_intents'""",
+        )
+        assert {row["column_name"] for row in columns} == {
+            "operation_id", "provider", "profile_id", "logical_name", "cycle_start",
+            "expected_generation", "target_generation", "created_profile", "state",
+            "error_code", "created_at", "updated_at", "installed_at", "completed_at",
+        }
+
+    async def test_profile_secret_intent_constraints_bind_every_durable_identity(self, db):
+        start = datetime.now(UTC) - timedelta(hours=1)
+        end = start + timedelta(days=30)
+        await db.execute(
+            """insert into catalogue.proxy_budget_cycles
+                     (provider, cycle_start, cycle_end)
+                 values ('webshare', %s, %s), ('decodo', %s, %s)""",
+            (start, end, start, end),
+        )
+        profile_cursor = await db.execute(
+            """insert into catalogue.proxy_profiles
+                     (provider, logical_name, display_name, created_by, updated_by)
+                 values ('webshare', 'intent-webshare', 'Intent Webshare', 'test', 'test')
+                 returning id"""
+        )
+        profile_id = (await profile_cursor.fetchone())["id"]
+
+        async def operation(key: str) -> UUID:
+            operation_id = uuid4()
+            await db.execute(
+                """insert into catalogue.proxy_mutation_requests
+                         (operation_id, actor, action, idempotency_key)
+                     values (%s, 'test', 'profile.secret.install', %s)""",
+                (operation_id, key),
+            )
+            return operation_id
+
+        create_operation = await operation("valid-create")
+        await db.execute(
+            """insert into catalogue.proxy_profile_secret_intents
+                     (operation_id, provider, profile_id, logical_name, cycle_start,
+                      expected_generation, target_generation, created_profile)
+                 values (%s, 'webshare', %s, 'intent-webshare', %s, null, 1, true)""",
+            (create_operation, profile_id, start),
+        )
+        await db.execute(
+            """update catalogue.proxy_profile_secret_intents
+                   set state = 'completed', installed_at = now(), completed_at = now(),
+                       updated_at = now()
+                 where operation_id = %s""",
+            (create_operation,),
+        )
+
+        rotation_operation = await operation("valid-rotation")
+        await db.execute(
+            """insert into catalogue.proxy_profile_secret_intents
+                     (operation_id, provider, profile_id, logical_name, cycle_start,
+                      expected_generation, target_generation, created_profile)
+                 values (%s, 'webshare', %s, 'intent-webshare', %s, 1, 2, false)""",
+            (rotation_operation, profile_id, start),
+        )
+        await db.execute(
+            """update catalogue.proxy_profile_secret_intents
+                   set state = 'completed', installed_at = now(), completed_at = now(),
+                       updated_at = now()
+                 where operation_id = %s""",
+            (rotation_operation,),
+        )
+
+        wrong_operation = uuid4()
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            await db.execute(
+                """insert into catalogue.proxy_profile_secret_intents
+                         (operation_id, provider, profile_id, logical_name, cycle_start,
+                          expected_generation, target_generation, created_profile)
+                     values (%s, 'webshare', %s, 'intent-webshare', %s, 2, 3, false)""",
+                (wrong_operation, profile_id, start),
+            )
+
+        wrong_profile_operation = await operation("wrong-profile-provider")
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            await db.execute(
+                """insert into catalogue.proxy_profile_secret_intents
+                         (operation_id, provider, profile_id, logical_name, cycle_start,
+                          expected_generation, target_generation, created_profile)
+                     values (%s, 'decodo', %s, 'intent-webshare', %s, 2, 3, false)""",
+                (wrong_profile_operation, profile_id, start),
+            )
+
+        wrong_name_operation = await operation("wrong-profile-name")
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            await db.execute(
+                """insert into catalogue.proxy_profile_secret_intents
+                         (operation_id, provider, profile_id, logical_name, cycle_start,
+                          expected_generation, target_generation, created_profile)
+                     values (%s, 'webshare', %s, 'other-name', %s, 2, 3, false)""",
+                (wrong_name_operation, profile_id, start),
+            )
+
+        wrong_cycle = start + timedelta(minutes=1)
+        wrong_cycle_operation = await operation("wrong-cycle")
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            await db.execute(
+                """insert into catalogue.proxy_profile_secret_intents
+                         (operation_id, provider, profile_id, logical_name, cycle_start,
+                          expected_generation, target_generation, created_profile)
+                     values (%s, 'webshare', %s, 'intent-webshare', %s, 2, 3, false)""",
+                (wrong_cycle_operation, profile_id, wrong_cycle),
+            )
+
+    @pytest.mark.parametrize(
+        ("expected", "target", "created"),
+        [(None, 2, True), (1, 2, True), (None, 1, False), (0, 1, False), (1, 3, False)],
+    )
+    async def test_profile_secret_intent_rejects_invalid_generation_transitions(
+        self, db, expected, target, created
+    ):
+        start = datetime.now(UTC) - timedelta(hours=1)
+        await db.execute(
+            """insert into catalogue.proxy_budget_cycles
+                     (provider, cycle_start, cycle_end)
+                 values ('webshare', %s, %s)""",
+            (start, start + timedelta(days=30)),
+        )
+        profile_cursor = await db.execute(
+            """insert into catalogue.proxy_profiles
+                     (provider, logical_name, display_name, created_by, updated_by)
+                 values ('webshare', 'invalid-intent', 'Invalid intent', 'test', 'test')
+                 returning id"""
+        )
+        profile_id = (await profile_cursor.fetchone())["id"]
+        operation_id = uuid4()
+        await db.execute(
+            """insert into catalogue.proxy_mutation_requests
+                     (operation_id, actor, action, idempotency_key)
+                 values (%s, 'test', 'profile.secret.install', %s)""",
+            (operation_id, str(operation_id)),
+        )
+
+        with pytest.raises(psycopg.errors.CheckViolation):
+            await db.execute(
+                """insert into catalogue.proxy_profile_secret_intents
+                         (operation_id, provider, profile_id, logical_name, cycle_start,
+                          expected_generation, target_generation, created_profile)
+                     values (%s, 'webshare', %s, 'invalid-intent', %s, %s, %s, %s)""",
+                (operation_id, profile_id, start, expected, target, created),
+            )
+
+    async def test_profile_secret_intent_allows_only_one_active_intent_and_valid_states(self, db):
+        start = datetime.now(UTC) - timedelta(hours=1)
+        await db.execute(
+            """insert into catalogue.proxy_budget_cycles
+                     (provider, cycle_start, cycle_end)
+                 values ('webshare', %s, %s)""",
+            (start, start + timedelta(days=30)),
+        )
+        profile_cursor = await db.execute(
+            """insert into catalogue.proxy_profiles
+                     (provider, logical_name, display_name, created_by, updated_by)
+                 values ('webshare', 'unique-intent', 'Unique intent', 'test', 'test')
+                 returning id"""
+        )
+        profile_id = (await profile_cursor.fetchone())["id"]
+
+        async def insert_intent(key: str, expected: int, target: int) -> UUID:
+            operation_id = uuid4()
+            await db.execute(
+                """insert into catalogue.proxy_mutation_requests
+                         (operation_id, actor, action, idempotency_key)
+                     values (%s, 'test', 'profile.secret.install', %s)""",
+                (operation_id, key),
+            )
+            await db.execute(
+                """insert into catalogue.proxy_profile_secret_intents
+                         (operation_id, provider, profile_id, logical_name, cycle_start,
+                          expected_generation, target_generation, created_profile)
+                     values (%s, 'webshare', %s, 'unique-intent', %s, %s, %s, false)""",
+                (operation_id, profile_id, start, expected, target),
+            )
+            return operation_id
+
+        first = await insert_intent("first-active", 1, 2)
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            await insert_intent("second-active", 2, 3)
+
+        with pytest.raises(psycopg.errors.CheckViolation):
+            await db.execute(
+                """update catalogue.proxy_profile_secret_intents
+                       set state = 'unknown' where operation_id = %s""",
+                (first,),
+            )
+        with pytest.raises(psycopg.errors.CheckViolation):
+            await db.execute(
+                """update catalogue.proxy_profile_secret_intents
+                       set state = 'installed' where operation_id = %s""",
+                (first,),
+            )
+
+        await db.execute(
+            """update catalogue.proxy_profile_secret_intents
+                   set state = 'failed', completed_at = now(), updated_at = now()
+                 where operation_id = %s""",
+            (first,),
+        )
+        second = await insert_intent("third-after-terminal", 2, 3)
+        assert second is not None
 
     async def test_multi_dataset_page_and_artifact_schema_enforces_identity(self, db):
         run_id = await runs.create_run(db)

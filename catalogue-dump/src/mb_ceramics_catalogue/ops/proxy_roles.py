@@ -15,6 +15,7 @@ PROXY_TABLES = (
     "proxy_provider_snapshots",
     "proxy_admin_audit", "proxy_mutation_requests", "proxy_actor_nonces",
     "proxy_reconcile_requests", "proxy_pilot_evidence",
+    "proxy_profile_secret_intents",
 )
 
 

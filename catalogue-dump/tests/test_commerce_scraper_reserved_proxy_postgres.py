@@ -20,7 +20,12 @@ from mb_ceramics_catalogue.ops.commerce_scraper_webshare import (
     WebshareGatewayConfig,
     WebshareGatewayPool,
 )
-from mb_ceramics_catalogue.proxy import ProxyDenied
+from mb_ceramics_catalogue.proxy import (
+    ProxyDenied,
+    authorize_reservation_attempt,
+    release_reservation_attempt,
+    reserve,
+)
 
 from .conftest import requires_postgres
 
@@ -284,3 +289,80 @@ async def test_unsafe_webshare_cycle_denies_without_an_attempt_row(db: Any) -> N
     assert attempts["count"] == 0
     assert not lease.can_start(1)
     await pool.release(lease)
+
+
+@pytest.mark.parametrize(
+    ("unsafe_provider", "mutation", "safe_provider"),
+    (
+        ("decodo", "disable", "webshare"),
+        ("webshare", "rotate", "decodo"),
+    ),
+)
+async def test_profile_fence_stops_only_its_existing_provider_lease(
+    db: Any,
+    unsafe_provider: str,
+    mutation: str,
+    safe_provider: str,
+) -> None:
+    identities: dict[str, DurableProxyIdentity] = {}
+    reservations: dict[str, UUID] = {}
+    for provider in ("decodo", "webshare"):
+        start, _end = await _cycle(db, provider)
+        identity = await _identity(
+            db,
+            provider=provider,
+            cycle_start=start,
+            profile=f"{provider}-primary",
+            generation=4,
+        )
+        identities[provider] = identity
+        reservations[provider] = await reserve(
+            db,
+            job_id=await _job(db),
+            provider=provider,
+            profile=identity.profile,
+            profile_id=identity.profile_id,
+            route_id=identity.route_id,
+            secret_generation=identity.secret_generation,
+            requested_bytes=800,
+        )
+
+    if mutation == "disable":
+        await db.execute(
+            """update catalogue.proxy_profiles
+                  set enabled = false, lifecycle = 'disabled'
+                where id = %s""",
+            (identities[unsafe_provider].profile_id,),
+        )
+    else:
+        await db.execute(
+            """update catalogue.proxy_profiles
+                  set secret_generation = secret_generation + 1
+                where id = %s""",
+            (identities[unsafe_provider].profile_id,),
+        )
+
+    with pytest.raises(ProxyDenied, match="profile does not authorize"):
+        await authorize_reservation_attempt(
+            db,
+            reservation_id=reservations[unsafe_provider],
+            estimated_bytes=1,
+            maximum_requests=2,
+        )
+
+    authorization_id = await authorize_reservation_attempt(
+        db,
+        reservation_id=reservations[safe_provider],
+        estimated_bytes=1,
+        maximum_requests=2,
+    )
+    assert authorization_id is not None
+    await release_reservation_attempt(db, authorization_id=authorization_id)
+
+    attempts = await db.execute(
+        """select r.provider, count(*) as count
+             from catalogue.proxy_attempt_authorizations a
+             join catalogue.proxy_reservations r on r.id = a.reservation_id
+            group by r.provider order by r.provider"""
+    )
+    assert await attempts.fetchall() == [{"provider": safe_provider, "count": 1}]
