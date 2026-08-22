@@ -11,7 +11,7 @@ from contextlib import suppress
 from pathlib import Path
 
 WORKER_NAME = "catalogue"
-WEBSHARE_GATEWAY_SOURCE = Path("/run/secrets/webshare-gateway.json")
+WEBSHARE_GATEWAY_SOURCE = Path("/run/secrets/webshare-gateway/webshare-gateway.json")
 WEBSHARE_GATEWAY_DESTINATION = Path(
     "/run/catalogue-worker-secrets/webshare-gateway.json"
 )
@@ -179,8 +179,10 @@ def _configure_rootless_webshare_gateway(
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
             raise RuntimeError("rootless Webshare gateway secret must be a regular file")
-        if stat.S_IMODE(metadata.st_mode) != 0o600:
-            raise RuntimeError("rootless Webshare gateway secret must have mode 0600")
+        if stat.S_IMODE(metadata.st_mode) not in {0o400, 0o600}:
+            raise RuntimeError(
+                "rootless Webshare gateway secret must have private owner-only mode"
+            )
         if (metadata.st_uid, metadata.st_gid) != (owner_uid, owner_gid):
             raise RuntimeError("rootless Webshare gateway secret has an unexpected owner")
         if metadata.st_size == 0:

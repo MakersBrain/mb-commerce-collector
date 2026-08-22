@@ -32,6 +32,45 @@ NATS_ROLES = {
 }
 
 
+def _validate_existing_stage(output: Path) -> None:
+    """Allow an exact prior stage so its control-owned gateway can survive."""
+
+    if output.is_symlink() or not output.is_dir():
+        raise ValueError("runtime stage must be a real directory")
+    allowed_files = {
+        *(Path("config") / f"{process}.env" for process in DB_ROLES),
+        Path("config/explorer.env"),
+        *(Path("secrets") / f"nats-{role}-credentials.json" for role in NATS_ROLES),
+        Path("secrets/nats-server.conf"),
+        Path("secrets/webshare-gateway/webshare-gateway.json"),
+    }
+    allowed_directories = {
+        Path("config"),
+        Path("secrets"),
+        Path("secrets/webshare-gateway"),
+    }
+    for path in output.rglob("*"):
+        relative = path.relative_to(output)
+        if path.is_symlink():
+            raise ValueError(f"runtime stage contains a symlink: {relative}")
+        if path.is_dir():
+            if relative not in allowed_directories:
+                raise ValueError(f"runtime stage contains an unexpected directory: {relative}")
+        elif not path.is_file() or relative not in allowed_files:
+            raise ValueError(f"runtime stage contains an unexpected file: {relative}")
+
+    gateway_directory = output / "secrets/webshare-gateway"
+    if gateway_directory.exists() and stat.S_IMODE(gateway_directory.stat().st_mode) != 0o700:
+        raise ValueError("existing Webshare gateway directory must have mode 0700")
+    gateway = gateway_directory / "webshare-gateway.json"
+    if gateway.exists():
+        metadata = gateway.stat()
+        if stat.S_IMODE(metadata.st_mode) not in {0o400, 0o600}:
+            raise ValueError("existing Webshare gateway secret must have owner-only mode")
+        if metadata.st_size > MAX_PROVIDER_SECRET_BYTES:
+            raise ValueError("existing Webshare gateway secret exceeds its size limit")
+
+
 def _load_nats_renderer():
     spec = importlib.util.spec_from_file_location("catalogue_nats_renderer", HERE / "render_nats_config.py")
     assert spec and spec.loader
@@ -104,8 +143,8 @@ def _write_bytes(path: Path, content: bytes) -> None:
 
 
 def build(values_path: Path, secret_root: Path, output: Path) -> None:
-    if output.exists() and (output.is_symlink() or not output.is_dir() or any(output.iterdir())):
-        raise ValueError("runtime stage must be absent or an empty directory")
+    if output.exists():
+        _validate_existing_stage(output)
     values = json.loads(values_path.read_text(encoding="utf-8"))
     # Reuse the release renderer's strict public-values validation.
     render_spec = importlib.util.spec_from_file_location("catalogue_render", HERE / "render.py")
@@ -129,6 +168,11 @@ def build(values_path: Path, secret_root: Path, output: Path) -> None:
             "?sslmode=verify-full&sslrootcert=/run/database/postgres-ca.crt"
         )
         additions = "CATALOGUE_DSN=" + dsn + "\n"
+        if process == "control":
+            additions += (
+                "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE="
+                "/run/secrets/webshare-gateway/webshare-gateway.json\n"
+            )
         if process in {"worker", "worker-browser"}:
             additions += "CATALOGUE_CACHE_DIR=/var/lib/catalogue/cache\nCATALOGUE_DUMPS_DIR=/var/lib/catalogue/dumps\n"
         _write(config / f"{process}.env", common + additions)
@@ -142,17 +186,19 @@ def build(values_path: Path, secret_root: Path, output: Path) -> None:
         f"CATALOGUE_CONTROL_TOKEN={control_token}\nHOST=0.0.0.0\nPORT=3000\n",
     )
 
-    # Gateway credentials are staged as a file and mounted only into workers.
-    # Their presence never enables paid traffic; the application gate remains
-    # absent/default-false until a separately qualified production change.
-    _write_bytes(
-        secrets / "webshare-gateway.json",
-        _optional_secret_bytes(
-            secret_root,
-            WEBSHARE_GATEWAY_EXPORT,
-            maximum=MAX_PROVIDER_SECRET_BYTES,
-        ),
+    # Control receives this dedicated directory writable for atomic generation
+    # replacement; workers receive the same directory read-only. It contains no
+    # provider management credential, and presence never enables paid traffic.
+    webshare_gateway = secrets / "webshare-gateway"
+    webshare_gateway.mkdir(mode=0o700, exist_ok=True)
+    webshare_seed = _optional_secret_bytes(
+        secret_root,
+        WEBSHARE_GATEWAY_EXPORT,
+        maximum=MAX_PROVIDER_SECRET_BYTES,
     )
+    gateway_destination = webshare_gateway / "webshare-gateway.json"
+    if webshare_seed and not gateway_destination.exists():
+        _write_bytes(gateway_destination, webshare_seed)
 
     for role, user in NATS_ROLES.items():
         password = _secret(
@@ -164,7 +210,9 @@ def build(values_path: Path, secret_root: Path, output: Path) -> None:
             secrets / f"nats-{role}-credentials.json",
             json.dumps({"user": user, "password": password}) + "\n",
         )
-    _load_nats_renderer().render(secrets, secrets / "nats-server.conf")
+    nats_configuration = secrets / "nats-server.conf"
+    nats_configuration.unlink(missing_ok=True)
+    _load_nats_renderer().render(secrets, nats_configuration)
 
 
 def main() -> None:

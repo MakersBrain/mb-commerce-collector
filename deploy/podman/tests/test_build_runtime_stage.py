@@ -47,12 +47,15 @@ def test_builds_scoped_environments_and_credentials(tmp_path: Path) -> None:
     assert (output / "secrets/nats-server.conf").stat().st_mode & 0o777 == 0o400
     stats = json.loads((output / "secrets/nats-stats-credentials.json").read_text())
     assert stats["user"] == "catalogue-stats"
-    webshare = output / "secrets/webshare-gateway.json"
-    assert webshare.read_bytes() == b""
-    assert webshare.stat().st_mode & 0o777 == 0o600
-    assert "WEBSHARE" not in "".join(
-        path.read_text(encoding="utf-8") for path in (output / "config").glob("*.env")
-    )
+    webshare_dir = output / "secrets/webshare-gateway"
+    webshare = webshare_dir / "webshare-gateway.json"
+    assert not webshare.exists()
+    assert webshare_dir.stat().st_mode & 0o777 == 0o700
+    assert "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE=" in (
+        output / "config/control.env"
+    ).read_text(encoding="utf-8")
+    for process in ("service", "dispatcher", "worker", "worker-browser"):
+        assert "WEBSHARE" not in (output / f"config/{process}.env").read_text(encoding="utf-8")
 
 
 def test_stages_webshare_gateway_secret_byte_exact_without_enabling_it(
@@ -67,12 +70,32 @@ def test_stages_webshare_gateway_secret_byte_exact_without_enabling_it(
 
     runtime_stage.build(ROOT / "values.example.json", root, output)
 
-    staged = output / "secrets/webshare-gateway.json"
+    staged = output / "secrets/webshare-gateway/webshare-gateway.json"
     assert staged.read_bytes() == payload
     assert staged.stat().st_mode & 0o777 == 0o600
     assert b"issued:@secret" not in b"".join(
         path.read_bytes() for path in (output / "config").glob("*.env")
     )
+
+
+def test_rebuild_preserves_control_rotated_gateway_over_stale_bootstrap(
+    tmp_path: Path,
+) -> None:
+    root = secret_export(tmp_path / "input")
+    source = root / runtime_stage.WEBSHARE_GATEWAY_EXPORT
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b'{"generation":1,"password":"stale-bootstrap"}')
+    output = tmp_path / "output"
+    runtime_stage.build(ROOT / "values.example.json", root, output)
+
+    gateway = output / "secrets/webshare-gateway/webshare-gateway.json"
+    rotated = b'{"generation":2,"password":"control-rotated"}'
+    gateway.write_bytes(rotated)
+    gateway.chmod(0o400)
+    runtime_stage.build(ROOT / "values.example.json", root, output)
+
+    assert gateway.read_bytes() == rotated
+    assert gateway.stat().st_mode & 0o777 == 0o400
 
 
 @pytest.mark.parametrize("kind", ["symlink", "directory", "fifo", "oversized"])

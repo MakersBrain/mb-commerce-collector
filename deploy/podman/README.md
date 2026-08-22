@@ -15,13 +15,18 @@ atomically selects the Quadlet bundle with rollback on activation failure.
 
 The optional Infisical export
 `catalogue/proxy/WEBSHARE_GATEWAY_V2_JSON` is copied byte-for-byte into the
-private runtime stage as `secrets/webshare-gateway.json`. Missing input creates
-an empty mode-`0600` placeholder so the static worker mounts remain valid. Only
-plain and browser workers receive that file, read-only; control, service,
-dispatcher, explorer, and NATS never receive gateway credentials. Staging or
-mounting the file does not enable paid traffic: the Webshare data-plane enable
-setting remains absent and therefore false. Enabling it requires a separate,
-qualified deployment change after the durable runtime gate passes.
+private runtime stage as `secrets/webshare-gateway/webshare-gateway.json`.
+Missing input leaves that file absent so control can create generation 1;
+the dedicated directory still exists. Control alone receives it writable,
+which permits same-directory atomic secret generation replacement; plain and
+browser workers receive it read-only so a
+rename is immediately visible. Service, dispatcher, explorer, and NATS never
+receive gateway credentials. The directory is mode `0700` and owned by the
+rootless tenant identity; a bootstrap file is mode `0600` and control-written
+rotations are mode `0400`. Staging or mounting it does not enable paid traffic:
+the Webshare data-plane enable setting remains absent and therefore false.
+Enabling it requires a separate, qualified deployment change after the durable
+runtime gate passes.
 
 The single `tenant-runtime` Podman context owns two private networks. Catalogue
 containers join `catalogue.network`; MakersBrain containers join

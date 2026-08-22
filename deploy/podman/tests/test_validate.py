@@ -37,17 +37,32 @@ def test_validate_rejects_admin_credential_in_runtime(tmp_path: Path) -> None:
         validate.validate(tmp_path)
 
 
-def test_validate_rejects_webshare_gateway_secret_outside_workers(
+def test_validate_rejects_webshare_gateway_secret_outside_control_and_workers(
     tmp_path: Path,
 ) -> None:
     render.render(ROOT / "values.example.json", tmp_path)
-    control = tmp_path / "catalogue-control.container"
-    control.write_text(
-        control.read_text(encoding="utf-8") + "\n" + validate.WEBSHARE_GATEWAY_MOUNT + "\n",
+    service = tmp_path / "catalogue-service.container"
+    service.write_text(
+        service.read_text(encoding="utf-8") + "\n" + validate.WEBSHARE_GATEWAY_MOUNT + "\n",
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="worker-only"):
+    with pytest.raises(ValueError, match="received the Webshare"):
+        validate.validate(tmp_path)
+
+
+def test_validate_rejects_read_only_control_gateway_store(tmp_path: Path) -> None:
+    render.render(ROOT / "values.example.json", tmp_path)
+    control = tmp_path / "catalogue-control.container"
+    control.write_text(
+        control.read_text(encoding="utf-8").replace(
+            validate.WEBSHARE_CONTROL_MOUNT,
+            validate.WEBSHARE_GATEWAY_MOUNT,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"Webshare gateway store is not writable"):
         validate.validate(tmp_path)
 
 

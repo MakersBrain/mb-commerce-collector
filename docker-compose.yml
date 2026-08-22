@@ -172,6 +172,11 @@ services:
     user: "0:0"
     volumes:
       - proxy-secrets:/run/proxy-secrets
+      - webshare-gateway-secrets:/run/webshare-gateway
+      - type: bind
+        source: ${CATALOGUE_WEBSHARE_GATEWAY_SECRET_SOURCE:-/dev/null}
+        target: /seed/webshare-gateway.json
+        read_only: true
     command:
       - sh
       - -ec
@@ -182,6 +187,13 @@ services:
         fi
         chown 10001:10001 /run/proxy-secrets/profiles.json
         chmod 0400 /run/proxy-secrets/profiles.json
+        install -d -m 0700 -o 10001 -g 10001 /run/webshare-gateway
+        if [ ! -e /run/webshare-gateway/webshare-gateway.json ] && [ -s /seed/webshare-gateway.json ]; then
+          cp /seed/webshare-gateway.json /run/webshare-gateway/.webshare-gateway.json.tmp
+          chown 10001:10001 /run/webshare-gateway/.webshare-gateway.json.tmp
+          chmod 0600 /run/webshare-gateway/.webshare-gateway.json.tmp
+          mv /run/webshare-gateway/.webshare-gateway.json.tmp /run/webshare-gateway/webshare-gateway.json
+        fi
     restart: "no"
 
   # The operator control plane: run/job/worker/source control, and the live
@@ -219,6 +231,7 @@ services:
       CATALOGUE_ARTIFACTS_DIR: /var/lib/catalogue/dumps
       CATALOGUE_PROXY_ENABLED: ${CATALOGUE_PROXY_ENABLED:-false}
       CATALOGUE_PROXY_SECRET_FILE: /run/proxy-secrets/profiles.json
+      CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE: /run/secrets/webshare-gateway/webshare-gateway.json
       CATALOGUE_PROXY_ACTOR_PUBLIC_KEYS_FILE: /run/secrets/operator-public-keys.json
       CATALOGUE_PROXY_PROVIDER_LIMIT_UNIT: ${CATALOGUE_PROXY_PROVIDER_LIMIT_UNIT:-unconfirmed}
       CATALOGUE_PROXY_MUTATIONS_ENABLED: ${CATALOGUE_PROXY_MUTATIONS_ENABLED:-false}
@@ -228,6 +241,9 @@ services:
       # never needs permission to alter the audit trail.
       - dumps:/var/lib/catalogue/dumps:ro
       - proxy-secrets:/run/proxy-secrets
+      # Control alone can atomically replace gateway generations. Workers see
+      # this directory through read-only mounts so a rename becomes visible.
+      - webshare-gateway-secrets:/run/secrets/webshare-gateway
       # Provider API access exists only in control. Workers receive generated
       # sub-user credentials through the read-only shared profile volume.
       - ./decodo.env:/run/secrets/decodo.env:ro
@@ -342,12 +358,8 @@ services:
       - cache:/var/lib/catalogue/cache
       - dumps:/var/lib/catalogue/dumps
       - proxy-secrets:/run/proxy-secrets:ro
-      # Provider-issued Webshare gateway credentials are worker data-plane
-      # material. They are never mounted into control or service containers.
-      - type: bind
-        source: ${CATALOGUE_WEBSHARE_GATEWAY_SECRET_SOURCE:-/dev/null}
-        target: /run/secrets/webshare-gateway.json
-        read_only: true
+      # Control owns the writable store; workers can only observe rotations.
+      - webshare-gateway-secrets:/run/secrets/webshare-gateway:ro
       - type: bind
         source: ${CATALOGUE_CF_CONSUME_TOKEN_FILE:-/dev/null}
         target: /run/queue-secrets/cloudflare-consume-token
@@ -412,10 +424,7 @@ services:
       - cache:/var/lib/catalogue/cache
       - dumps:/var/lib/catalogue/dumps
       - proxy-secrets:/run/proxy-secrets:ro
-      - type: bind
-        source: ${CATALOGUE_WEBSHARE_GATEWAY_SECRET_SOURCE:-/dev/null}
-        target: /run/secrets/webshare-gateway.json
-        read_only: true
+      - webshare-gateway-secrets:/run/secrets/webshare-gateway:ro
       - type: bind
         source: ${CATALOGUE_CF_CONSUME_TOKEN_FILE:-/dev/null}
         target: /run/queue-secrets/cloudflare-consume-token
@@ -576,6 +585,8 @@ volumes:
   # Control replaces profiles.json atomically; workers mount the same volume
   # read-only and resolve a credential generation once per job.
   proxy-secrets:
+  # Control atomically replaces the gateway document; workers mount it RO.
+  webshare-gateway-secrets:
   # Explorer-only copy of the assertion signing key. The one-shot initializer
   # preserves the host key's 0600 mode while assigning it to the container UID.
   operator-secrets:

@@ -172,7 +172,7 @@ def test_rootless_worker_uses_private_mount_directly_without_privileged_calls(
     assert not (tmp_path / "must-not-exist.json").exists()
 
 
-@pytest.mark.parametrize("mode", [0o400, 0o640, 0o644])
+@pytest.mark.parametrize("mode", [0o440, 0o640, 0o644])
 def test_rootless_worker_rejects_gateway_mount_with_non_private_mode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -191,7 +191,7 @@ def test_rootless_worker_rejects_gateway_mount_with_non_private_mode(
         "/stale/secret.json",
     )
 
-    with pytest.raises(RuntimeError, match="mode 0600"):
+    with pytest.raises(RuntimeError, match="private owner-only mode"):
         configure(
             source,
             owner_uid=source.stat().st_uid,
@@ -199,6 +199,27 @@ def test_rootless_worker_rejects_gateway_mount_with_non_private_mode(
         )
 
     assert "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE" not in os.environ
+
+
+def test_rootless_worker_accepts_control_rotated_mode_0400_gateway(
+    tmp_path: Path,
+) -> None:
+    namespace = _entrypoint_namespace()
+    configure = cast(
+        Callable[..., None],
+        namespace["_configure_rootless_webshare_gateway"],
+    )
+    source = tmp_path / "webshare-gateway.json"
+    source.write_text('{"schema_version":2}', encoding="utf-8")
+    source.chmod(0o400)
+
+    configure(
+        source,
+        owner_uid=source.stat().st_uid,
+        owner_gid=source.stat().st_gid,
+    )
+
+    assert os.environ["CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE"] == str(source)
 
 
 def test_rootless_worker_treats_empty_private_mount_as_disabled(
@@ -307,7 +328,7 @@ def test_failed_atomic_publish_removes_temporary_secret_and_environment(
     assert "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE" not in os.environ
 
 
-def test_compose_mounts_default_off_gateway_secret_only_into_workers() -> None:
+def test_compose_mounts_default_off_gateway_store_with_scoped_permissions() -> None:
     docker = shutil.which("docker")
     if docker is None:
         pytest.skip("Docker Compose is required to render the placement contract")
@@ -338,9 +359,10 @@ def test_compose_mounts_default_off_gateway_secret_only_into_workers() -> None:
         text=True,
     )
     services = cast(dict[str, dict[str, Any]], json.loads(rendered.stdout)["services"])
-    target = "/run/secrets/webshare-gateway.json"
+    target = "/run/secrets/webshare-gateway"
+    gateway_file = target + "/webshare-gateway.json"
     namespace = runpy.run_path(str(ENTRYPOINT), run_name="worker_entrypoint_test")
-    assert namespace["WEBSHARE_GATEWAY_SOURCE"] == Path(target)
+    assert namespace["WEBSHARE_GATEWAY_SOURCE"] == Path(gateway_file)
     for name in ("worker", "worker-browser"):
         service = services[name]
         assert service["environment"][
@@ -348,12 +370,23 @@ def test_compose_mounts_default_off_gateway_secret_only_into_workers() -> None:
         ] == "false"
         mounts = [volume for volume in service["volumes"] if volume["target"] == target]
         assert len(mounts) == 1
-        assert mounts[0]["type"] == "bind"
-        assert mounts[0]["source"] == "/dev/null"
+        assert mounts[0]["type"] == "volume"
+        assert mounts[0]["source"].endswith("webshare-gateway-secrets")
         assert mounts[0]["read_only"] is True
 
+    control = services["control"]
+    assert control["environment"][
+        "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE"
+    ] == gateway_file
+    control_mounts = [
+        volume for volume in control["volumes"] if volume["target"] == target
+    ]
+    assert len(control_mounts) == 1
+    assert control_mounts[0]["type"] == "volume"
+    assert control_mounts[0].get("read_only", False) is False
+
     for name, service in services.items():
-        if name in {"worker", "worker-browser"}:
+        if name in {"control", "worker", "worker-browser"}:
             continue
         assert all(volume["target"] != target for volume in service.get("volumes", ()))
 
