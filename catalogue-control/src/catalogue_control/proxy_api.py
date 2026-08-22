@@ -1836,8 +1836,7 @@ async def probe_route(request: Request) -> Response:
             await close_reservation(connection, lease)
         latency = int((time.monotonic() - started) * 1000)
         state = "failed" if error_category else "succeeded"
-        metrics.proxy_probe(state)
-        await connection.execute(
+        probe_update = await connection.execute(
             """update catalogue.proxy_probes
                   set state = %(state)s, completed_at = now(), error_category = %(error)s,
                       estimated_bytes = %(bytes)s, provider_requests = %(requests)s,
@@ -1845,13 +1844,31 @@ async def probe_route(request: Request) -> Response:
                       exit_ip_expires_at = case when %(ip)s::inet is null
                            then null else now() + interval '7 days' end,
                       latency_ms = %(latency)s
-                where id = %(id)s""",
+                where id = %(id)s and state in ('pending', 'running')
+                returning state, error_category""",
             {
                 "state": state, "error": error_category, "bytes": lease.used_bytes,
                 "requests": lease.requests, "country": result.get("exit_country"),
                 "ip": result.get("exit_ip"), "latency": latency, "id": probe["id"],
             },
         )
+        persisted = await probe_update.fetchone()
+        if persisted is None:
+            # Stale cleanup can cancel an abandoned request while its coroutine
+            # is still unwinding. Never resurrect that terminal probe after its
+            # paid envelope has been cancelled.
+            current_cursor = await connection.execute(
+                """select state, error_category
+                     from catalogue.proxy_probes
+                    where id = %(id)s""",
+                {"id": probe["id"]},
+            )
+            current = await current_cursor.fetchone()
+            if current is None:  # pragma: no cover - protected by the local insert
+                raise RuntimeError("paid probe disappeared before completion")
+            state = current["state"]
+            error_category = current["error_category"]
+        metrics.proxy_probe(state)
         await events.emit(
             connection, events.Topic.PROXY, "proxy.probe_finished",
             payload={"probe_id": str(probe["id"]), "state": state},

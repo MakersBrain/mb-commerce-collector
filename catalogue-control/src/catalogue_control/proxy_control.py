@@ -25,6 +25,11 @@ from catalogue_control.telemetry import get_logger
 
 LOGGER = get_logger("catalogue.control.proxy")
 
+# Paid probes have a 30-second HTTP timeout. Five minutes leaves ample room for
+# scheduling and database latency while placing a hard upper bound on an
+# abandoned envelope blocking profile draining.
+STALE_PROBE_TIMEOUT_SECONDS = 5 * 60
+
 
 def _jsonb(value: Any) -> Jsonb:
     return Jsonb(value, dumps=lambda item: json.dumps(item, default=str))
@@ -459,18 +464,84 @@ async def finalize_draining_profiles(
 
 
 async def close_stale_reservations(connection: Any) -> int:
-    """Release envelopes abandoned by terminal jobs or expired worker leases."""
+    """Release envelopes abandoned by jobs or timed-out paid probes."""
     async with connection.transaction():
+        candidates_cursor = await connection.execute(
+            """select r.id, r.provider, r.cycle_start
+                 from catalogue.proxy_reservations r
+                 left join catalogue.jobs j on j.id = r.job_id
+                 left join catalogue.proxy_probes p on p.id = r.probe_id
+                where r.state in ('active', 'revocation_requested')
+                  and (
+                    (r.job_id is not null
+                     and (j.state in ('succeeded', 'degraded', 'failed', 'cancelled', 'skipped')
+                          or (j.state in ('leased', 'running')
+                              and j.lease_expires_at < now())))
+                    or
+                    (r.probe_id is not null
+                     and p.state in ('pending', 'running')
+                     and greatest(p.requested_at, r.created_at)
+                         < now() - make_interval(secs => %(probe_timeout)s))
+                  )
+                order by r.provider, r.cycle_start, r.id""",
+            {"probe_timeout": STALE_PROBE_TIMEOUT_SECONDS},
+        )
+        candidates = await candidates_cursor.fetchall()
+        if not candidates:
+            return 0
+
+        # Match the paid-traffic lock hierarchy used by reserve/close/revoke:
+        # budget cycle first, then reservation. Deterministic cycle ordering
+        # also prevents two cleanup runs from deadlocking each other.
+        cycles = sorted({(row["provider"], row["cycle_start"]) for row in candidates})
+        for provider, cycle_start in cycles:
+            await connection.execute(
+                """select 1
+                     from catalogue.proxy_budget_cycles
+                    where provider = %(provider)s and cycle_start = %(cycle_start)s
+                    for update""",
+                {"provider": provider, "cycle_start": cycle_start},
+            )
+
         cursor = await connection.execute(
             """update catalogue.proxy_reservations r
                   set state = 'cancelled', closed_at = now()
-                 from catalogue.jobs j
-                where r.job_id = j.id and r.state in ('active', 'revocation_requested')
-                  and (j.state in ('succeeded', 'degraded', 'failed', 'cancelled', 'skipped')
-                       or (j.state in ('leased', 'running') and j.lease_expires_at < now()))
-                returning r.id, r.provider"""
+                where r.id = any(%(candidate_ids)s::uuid[])
+                  and r.state in ('active', 'revocation_requested')
+                  and (
+                    exists (
+                      select 1 from catalogue.jobs j
+                       where j.id = r.job_id
+                         and (j.state in
+                                ('succeeded', 'degraded', 'failed', 'cancelled', 'skipped')
+                              or (j.state in ('leased', 'running')
+                                  and j.lease_expires_at < now()))
+                    )
+                    or exists (
+                      select 1 from catalogue.proxy_probes p
+                       where p.id = r.probe_id
+                         and p.state in ('pending', 'running')
+                         and greatest(p.requested_at, r.created_at)
+                             < now() - make_interval(secs => %(probe_timeout)s)
+                    )
+                  )
+                returning r.id, r.provider, r.probe_id""",
+            {
+                "candidate_ids": [row["id"] for row in candidates],
+                "probe_timeout": STALE_PROBE_TIMEOUT_SECONDS,
+            },
         )
         rows = await cursor.fetchall()
+        probe_ids = [row["probe_id"] for row in rows if row["probe_id"] is not None]
+        if probe_ids:
+            await connection.execute(
+                """update catalogue.proxy_probes
+                      set state = 'cancelled', completed_at = coalesce(completed_at, now()),
+                          error_category = coalesce(error_category, 'stale_timeout')
+                    where id = any(%(probe_ids)s::uuid[])
+                      and state in ('pending', 'running')""",
+                {"probe_ids": probe_ids},
+            )
         for row in rows:
             await connection.execute(
                 """insert into catalogue.proxy_reconcile_requests

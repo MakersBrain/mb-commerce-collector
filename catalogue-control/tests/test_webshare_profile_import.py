@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 from uuid import UUID, uuid4
 
+import psycopg
 import pytest
+from mb_ceramics_catalogue.proxy import close_reservation
 from mb_ceramics_catalogue.webshare_gateway_secrets import (
     WebshareGatewaySecret,
     WebshareGatewaySecretStore,
     load_webshare_gateway_secrets,
 )
+from psycopg.rows import dict_row
 from pydantic import SecretStr
 
 from catalogue_control.webshare_profile_import import (
@@ -20,7 +27,7 @@ from catalogue_control.webshare_profile_import import (
     recover_webshare_profile_import,
 )
 
-from .conftest import requires_postgres
+from .conftest import postgres_dsn, requires_postgres
 
 
 def _secret(generation: int, *, password: str = "not-in-postgres") -> WebshareGatewaySecret:
@@ -79,6 +86,50 @@ def _store(tmp_path: Path) -> WebshareGatewaySecretStore:
     return WebshareGatewaySecretStore(directory / "webshare.json")
 
 
+class _PausedCloseConnection:
+    def __init__(
+        self,
+        connection: Any,
+        reservation_locked: asyncio.Event,
+        release_close: asyncio.Event,
+    ) -> None:
+        self._connection = connection
+        self._reservation_locked = reservation_locked
+        self._release_close = release_close
+        self._paused = False
+
+    def transaction(self) -> Any:
+        return self._connection.transaction()
+
+    async def execute(self, query: str, params: Any = None) -> Any:
+        cursor = await self._connection.execute(query, params)
+        statement = " ".join(query.lower().split())
+        if (
+            not self._paused
+            and statement.startswith("update catalogue.proxy_reservations")
+            and "set estimated_bytes = greatest" in statement
+        ):
+            self._paused = True
+            self._reservation_locked.set()
+            await self._release_close.wait()
+        return cursor
+
+
+class _ObservedRotationConnection:
+    def __init__(self, connection: Any, cycle_query_started: asyncio.Event) -> None:
+        self._connection = connection
+        self._cycle_query_started = cycle_query_started
+
+    def transaction(self) -> Any:
+        return self._connection.transaction()
+
+    async def execute(self, query: str, params: Any = None) -> Any:
+        statement = " ".join(query.lower().split())
+        if "from catalogue.proxy_budget_cycles" in statement and "for update" in statement:
+            self._cycle_query_started.set()
+        return await self._connection.execute(query, params)
+
+
 async def _create(db, store: WebshareGatewaySecretStore):
     operation_id = await _operation(db)
     result = await install_webshare_profile(
@@ -92,6 +143,35 @@ async def _create(db, store: WebshareGatewaySecretStore):
         allocated_bytes=250_000,
     )
     return operation_id, result
+
+
+async def _installed_rotation_after_crash(
+    db: Any,
+    store: WebshareGatewaySecretStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Any, UUID, Any]:
+    cycle_start = await _cycle(db)
+    _, created = await _create(db, store)
+    operation_id = await _operation(db)
+
+    async def crash_after_install(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        raise RuntimeError("simulated process exit")
+
+    monkeypatch.setattr(
+        "catalogue_control.webshare_profile_import._finalize", crash_after_install
+    )
+    with pytest.raises(RuntimeError, match="simulated process exit"):
+        await install_webshare_profile(
+            db,
+            store,
+            operation_id=operation_id,
+            actor_id="operator@example.test",
+            secret=_secret(2, password="rotated-secret"),
+            expected_generation=1,
+        )
+    monkeypatch.undo()
+    return cycle_start, operation_id, created
 
 
 @pytest.mark.postgres
@@ -426,3 +506,356 @@ async def test_unsafe_cycle_rejects_before_profile_intent_or_file(db, tmp_path: 
     assert (await profiles.fetchone())["count"] == 0
     assert (await intents.fetchone())["count"] == 0
     assert not store.path.exists()
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_close_and_rotation_share_cycle_first_lock_order(db, tmp_path: Path):
+    cycle_start = await _cycle(db)
+    store = _store(tmp_path)
+    _, created = await _create(db, store)
+    route_cursor = await db.execute(
+        """insert into catalogue.proxy_routes
+                  (provider, label, profile_id, enabled, created_by, updated_by)
+           values ('webshare', 'webshare route', %(profile)s, true, 'test', 'test')
+           returning id""",
+        {"profile": created.profile_id},
+    )
+    route = await route_cursor.fetchone()
+    assert route is not None
+    probe_cursor = await db.execute(
+        """insert into catalogue.proxy_probes
+                  (route_id, profile_id, protocol, actor, request_id)
+           values (%(route)s, %(profile)s, 'http', 'test', %(request)s)
+           returning id""",
+        {"route": route["id"], "profile": created.profile_id, "request": uuid4()},
+    )
+    probe = await probe_cursor.fetchone()
+    assert probe is not None
+    reservation_cursor = await db.execute(
+        """insert into catalogue.proxy_reservations
+                  (provider, profile, cycle_start, reserved_bytes, probe_id,
+                   profile_id, route_id, purpose, secret_generation)
+           values ('webshare', 'operator-gateway', %(cycle)s, 1000, %(probe)s,
+                   %(profile)s, %(route)s, 'probe', 1)
+           returning id""",
+        {
+            "cycle": cycle_start,
+            "probe": probe["id"],
+            "profile": created.profile_id,
+            "route": route["id"],
+        },
+    )
+    reservation = await reservation_cursor.fetchone()
+    assert reservation is not None
+    operation_id = await _operation(db)
+
+    dsn = postgres_dsn()
+    assert dsn
+    close_raw = await psycopg.AsyncConnection.connect(
+        dsn, row_factory=dict_row, autocommit=True
+    )
+    rotation_raw = await psycopg.AsyncConnection.connect(
+        dsn, row_factory=dict_row, autocommit=True
+    )
+    reservation_locked = asyncio.Event()
+    rotation_cycle_query = asyncio.Event()
+    release_close = asyncio.Event()
+    close_connection = _PausedCloseConnection(
+        close_raw, reservation_locked, release_close
+    )
+    rotation_connection = _ObservedRotationConnection(
+        rotation_raw, rotation_cycle_query
+    )
+    lease = SimpleNamespace(
+        reservation_id=reservation["id"], used_bytes=12, requests=1
+    )
+    try:
+        close_task = asyncio.create_task(
+            close_reservation(close_connection, lease)  # type: ignore[arg-type]
+        )
+        await asyncio.wait_for(reservation_locked.wait(), timeout=2)
+        rotation_task = asyncio.create_task(
+            install_webshare_profile(
+                rotation_connection,
+                store,
+                operation_id=operation_id,
+                actor_id="operator@example.test",
+                secret=_secret(2, password="rotated-secret"),
+                expected_generation=1,
+            )
+        )
+        await asyncio.wait_for(rotation_cycle_query.wait(), timeout=2)
+        release_close.set()
+        _, rotated = await asyncio.wait_for(
+            asyncio.gather(close_task, rotation_task), timeout=5
+        )
+    finally:
+        release_close.set()
+        await close_raw.close()
+        await rotation_raw.close()
+
+    assert rotated.state == "completed"
+    state_cursor = await db.execute(
+        """select r.state, r.estimated_bytes, r.request_count,
+                  p.enabled, p.lifecycle, p.secret_generation,
+                  c.application_bytes
+             from catalogue.proxy_reservations r
+             join catalogue.proxy_profiles p on p.id = r.profile_id
+             join catalogue.proxy_budget_cycles c
+               on c.provider = r.provider and c.cycle_start = r.cycle_start
+            where r.id = %(reservation)s""",
+        {"reservation": reservation["id"]},
+    )
+    assert await state_cursor.fetchone() == {
+        "state": "closed",
+        "estimated_bytes": 12,
+        "request_count": 1,
+        "enabled": True,
+        "lifecycle": "enabled",
+        "secret_generation": 2,
+        "application_bytes": 12,
+    }
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_operation_lock_fences_recovery_while_secret_cas_is_in_flight(
+    db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    await _cycle(db)
+    store = _store(tmp_path)
+    operation_id = await _operation(db)
+    dsn = postgres_dsn()
+    assert dsn
+    first_connection = await psycopg.AsyncConnection.connect(
+        dsn, row_factory=dict_row, autocommit=True
+    )
+    recovery_connection = await psycopg.AsyncConnection.connect(
+        dsn, row_factory=dict_row, autocommit=True
+    )
+    entered_cas = threading.Event()
+    release_cas = threading.Event()
+    original_install = store.install
+
+    def blocked_install(*args: Any, **kwargs: Any) -> int:
+        entered_cas.set()
+        if not release_cas.wait(timeout=5):
+            raise RuntimeError("test CAS release timed out")
+        return original_install(*args, **kwargs)
+
+    monkeypatch.setattr(store, "install", blocked_install)
+    first_task = asyncio.create_task(
+        install_webshare_profile(
+            first_connection,
+            store,
+            operation_id=operation_id,
+            actor_id="operator@example.test",
+            secret=_secret(1),
+            expected_generation=None,
+            display_name="Operator gateway",
+            allocated_bytes=250_000,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(entered_cas.wait, 2)
+        with pytest.raises(WebshareProfileImportError) as raised:
+            await asyncio.wait_for(
+                recover_webshare_profile_import(
+                    recovery_connection, store, operation_id=operation_id
+                ),
+                timeout=1,
+            )
+        assert raised.value.code == "operation_busy"
+        intent_cursor = await db.execute(
+            """select state from catalogue.proxy_profile_secret_intents
+                where operation_id = %(operation)s""",
+            {"operation": operation_id},
+        )
+        assert (await intent_cursor.fetchone())["state"] == "prepared"
+        assert not store.path.exists()
+        release_cas.set()
+        result = await asyncio.wait_for(first_task, timeout=5)
+    finally:
+        release_cas.set()
+        if not first_task.done():
+            first_task.cancel()
+        await first_connection.close()
+        await recovery_connection.close()
+
+    assert result.state == "completed"
+    assert load_webshare_gateway_secrets(store.path)[
+        ("webshare", "operator-gateway")
+    ].generation == 1
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_recovery_completes_when_database_already_has_target_generation(
+    db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store = _store(tmp_path)
+    _, operation_id, created = await _installed_rotation_after_crash(
+        db, store, monkeypatch
+    )
+    await db.execute(
+        """update catalogue.proxy_profiles
+              set secret_generation = 2, enabled = false, lifecycle = 'pending'
+            where id = %(profile)s""",
+        {"profile": created.profile_id},
+    )
+
+    recovered = await recover_webshare_profile_import(
+        db, store, operation_id=operation_id
+    )
+
+    assert recovered.state == "completed"
+    assert recovered.error_code is None
+    profile = await db.execute(
+        """select enabled, lifecycle, secret_generation
+             from catalogue.proxy_profiles where id = %(profile)s""",
+        {"profile": created.profile_id},
+    )
+    assert await profile.fetchone() == {
+        "enabled": True,
+        "lifecycle": "enabled",
+        "secret_generation": 2,
+    }
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_installed_recovery_rebinds_to_allocated_current_cycle(
+    db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store = _store(tmp_path)
+    old_cycle, operation_id, created = await _installed_rotation_after_crash(
+        db, store, monkeypatch
+    )
+    await db.execute(
+        """update catalogue.proxy_budget_cycles set lifecycle = 'closed'
+            where provider = 'webshare' and cycle_start = %(cycle)s""",
+        {"cycle": old_cycle},
+    )
+    current_cycle = await _cycle(db)
+    await db.execute(
+        """insert into catalogue.proxy_profile_allocations
+                  (provider, cycle_start, profile_id, allocated_bytes, updated_by)
+           values ('webshare', %(cycle)s, %(profile)s, 250000, 'test')""",
+        {"cycle": current_cycle, "profile": created.profile_id},
+    )
+
+    recovered = await recover_webshare_profile_import(
+        db, store, operation_id=operation_id
+    )
+
+    assert recovered.state == "completed"
+    intent = await db.execute(
+        """select state, cycle_start, error_code
+             from catalogue.proxy_profile_secret_intents
+            where operation_id = %(operation)s""",
+        {"operation": operation_id},
+    )
+    assert await intent.fetchone() == {
+        "state": "completed",
+        "cycle_start": current_cycle,
+        "error_code": None,
+    }
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_installed_recovery_waits_for_current_cycle_allocation(
+    db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store = _store(tmp_path)
+    old_cycle, operation_id, created = await _installed_rotation_after_crash(
+        db, store, monkeypatch
+    )
+    await db.execute(
+        """update catalogue.proxy_budget_cycles set lifecycle = 'closed'
+            where provider = 'webshare' and cycle_start = %(cycle)s""",
+        {"cycle": old_cycle},
+    )
+    current_cycle = await _cycle(db)
+
+    first = await recover_webshare_profile_import(db, store, operation_id=operation_id)
+    repeated = await recover_webshare_profile_import(
+        db, store, operation_id=operation_id
+    )
+
+    assert (first.state, first.error_code) == ("installed", "cycle_rebind_required")
+    assert repeated == first
+    state = await db.execute(
+        """select i.state, i.error_code, i.cycle_start,
+                  p.enabled, p.lifecycle, p.secret_generation
+             from catalogue.proxy_profile_secret_intents i
+             join catalogue.proxy_profiles p on p.id = i.profile_id
+            where i.operation_id = %(operation)s""",
+        {"operation": operation_id},
+    )
+    assert await state.fetchone() == {
+        "state": "installed",
+        "error_code": "cycle_rebind_required",
+        "cycle_start": old_cycle,
+        "enabled": False,
+        "lifecycle": "pending",
+        "secret_generation": 1,
+    }
+    assert created.profile_id == first.profile_id
+    await db.execute(
+        """insert into catalogue.proxy_profile_allocations
+                  (provider, cycle_start, profile_id, allocated_bytes, updated_by)
+           values ('webshare', %(cycle)s, %(profile)s, 250000, 'test')""",
+        {"cycle": current_cycle, "profile": created.profile_id},
+    )
+    completed = await recover_webshare_profile_import(
+        db, store, operation_id=operation_id
+    )
+    assert (completed.state, completed.error_code) == ("completed", None)
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_installed_recovery_fails_closed_on_database_generation_conflict(
+    db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store = _store(tmp_path)
+    _, operation_id, created = await _installed_rotation_after_crash(
+        db, store, monkeypatch
+    )
+    await db.execute(
+        """update catalogue.proxy_profiles
+              set secret_generation = 9, enabled = true, lifecycle = 'enabled'
+            where id = %(profile)s""",
+        {"profile": created.profile_id},
+    )
+
+    recovered = await recover_webshare_profile_import(
+        db, store, operation_id=operation_id
+    )
+    repeated = await recover_webshare_profile_import(
+        db, store, operation_id=operation_id
+    )
+
+    assert (recovered.state, recovered.error_code) == (
+        "failed",
+        "database_generation_conflict",
+    )
+    assert repeated == recovered
+    state = await db.execute(
+        """select i.state, i.error_code, i.completed_at is not null as terminal,
+                  p.enabled, p.lifecycle, p.secret_generation
+             from catalogue.proxy_profile_secret_intents i
+             join catalogue.proxy_profiles p on p.id = i.profile_id
+            where i.operation_id = %(operation)s""",
+        {"operation": operation_id},
+    )
+    assert await state.fetchone() == {
+        "state": "failed",
+        "error_code": "database_generation_conflict",
+        "terminal": True,
+        "enabled": False,
+        "lifecycle": "pending",
+        "secret_generation": 9,
+    }

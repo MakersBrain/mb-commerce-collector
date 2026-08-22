@@ -338,16 +338,47 @@ async def close_reservation(
 ) -> None:
     """Close a reservation and monotonically advance application accounting."""
     async with connection.transaction():
+        identity_cursor = await connection.execute(
+            """
+            select provider, cycle_start
+              from catalogue.proxy_reservations
+             where id = %(id)s
+            """,
+            {"id": lease.reservation_id},
+        )
+        identity = await identity_cursor.fetchone()
+        if identity is None:
+            return
+        # Every paid-traffic transition takes the cycle before an individual
+        # reservation. Profile draining uses the same order, so worker cleanup
+        # cannot deadlock against a concurrent control-plane revocation.
+        await connection.execute(
+            """
+            select 1
+              from catalogue.proxy_budget_cycles
+             where provider = %(provider)s and cycle_start = %(start)s
+             for update
+            """,
+            {"provider": identity["provider"], "start": identity["cycle_start"]},
+        )
         cursor = await connection.execute(
             """
             update catalogue.proxy_reservations
                set estimated_bytes = greatest(estimated_bytes, %(bytes)s),
                    request_count = greatest(request_count, %(requests)s),
                    state = 'closed', closed_at = now()
-             where id = %(id)s and state in ('active', 'revocation_requested')
+             where id = %(id)s and provider = %(provider)s
+               and cycle_start = %(start)s
+               and state in ('active', 'revocation_requested')
             returning provider, cycle_start, estimated_bytes
             """,
-            {"id": lease.reservation_id, "bytes": lease.used_bytes, "requests": lease.requests},
+            {
+                "id": lease.reservation_id,
+                "provider": identity["provider"],
+                "start": identity["cycle_start"],
+                "bytes": lease.used_bytes,
+                "requests": lease.requests,
+            },
         )
         row = await cursor.fetchone()
         if row:

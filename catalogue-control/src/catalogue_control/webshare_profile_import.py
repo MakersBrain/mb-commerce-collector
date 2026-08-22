@@ -7,7 +7,10 @@ outside PostgreSQL transactions.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 from uuid import UUID
 
@@ -44,6 +47,7 @@ class WebshareProfileImportResult:
     generation: int
     state: ImportState
     created_profile: bool
+    error_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +61,7 @@ class _Intent:
     target_generation: int
     created_profile: bool
     state: str
+    error_code: str | None
 
 
 def _strict_expected(value: int | None) -> int | None:
@@ -67,7 +72,12 @@ def _strict_expected(value: int | None) -> int | None:
     return value
 
 
-def _result(intent: _Intent, state: ImportState) -> WebshareProfileImportResult:
+def _result(
+    intent: _Intent,
+    state: ImportState,
+    *,
+    error_code: str | None = None,
+) -> WebshareProfileImportResult:
     return WebshareProfileImportResult(
         operation_id=intent.operation_id,
         profile_id=intent.profile_id,
@@ -76,6 +86,7 @@ def _result(intent: _Intent, state: ImportState) -> WebshareProfileImportResult:
         generation=intent.target_generation,
         state=state,
         created_profile=intent.created_profile,
+        error_code=error_code,
     )
 
 
@@ -90,19 +101,44 @@ def _intent(row: dict[str, Any]) -> _Intent:
         target_generation=row["target_generation"],
         created_profile=row["created_profile"],
         state=row["state"],
+        error_code=row["error_code"],
     )
 
 
 async def _intent_for_operation(connection: Any, operation_id: UUID) -> _Intent | None:
     cursor = await connection.execute(
         """select operation_id, provider, profile_id, logical_name, cycle_start,
-                  expected_generation, target_generation, created_profile, state
+                  expected_generation, target_generation, created_profile, state,
+                  error_code
              from catalogue.proxy_profile_secret_intents
             where operation_id = %(operation)s""",
         {"operation": operation_id},
     )
     row = await cursor.fetchone()
     return None if row is None else _intent(row)
+
+
+@asynccontextmanager
+async def _operation_lock(connection: Any, operation_id: UUID) -> AsyncIterator[None]:
+    """Fence one operation across transactions and the external file CAS."""
+    cursor = await connection.execute(
+        """select pg_try_advisory_lock(
+                      hashtextextended(%(operation)s::text, 0)
+                  ) as locked""",
+        {"operation": operation_id},
+    )
+    row = await cursor.fetchone()
+    if row is None or not row["locked"]:
+        raise WebshareProfileImportError("operation_busy")
+    try:
+        yield
+    finally:
+        await connection.execute(
+            """select pg_advisory_unlock(
+                      hashtextextended(%(operation)s::text, 0)
+                  )""",
+            {"operation": operation_id},
+        )
 
 
 async def _lock_cycle(connection: Any, cycle_start: Any | None = None) -> dict[str, Any]:
@@ -350,7 +386,8 @@ async def _prepare(
                values (%(operation)s, %(provider)s, %(profile)s, %(logical_name)s,
                        %(cycle)s, %(expected)s, %(target)s, %(created)s)
                returning operation_id, provider, profile_id, logical_name, cycle_start,
-                         expected_generation, target_generation, created_profile, state""",
+                         expected_generation, target_generation, created_profile, state,
+                         error_code""",
             {
                 "operation": operation_id,
                 "provider": PROVIDER,
@@ -379,6 +416,25 @@ def _secret_generation(store: WebshareGatewaySecretStore, intent: _Intent) -> in
     return None if profile is None else profile.generation
 
 
+async def _install_secret(
+    store: WebshareGatewaySecretStore,
+    secret: WebshareGatewaySecret,
+    expected_generation: int | None,
+) -> int:
+    """Keep the session fence held until a dispatched file CAS truly stops."""
+    task = asyncio.create_task(
+        asyncio.to_thread(store.install, secret, expected_generation=expected_generation)
+    )
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # Cancelling ``to_thread`` cannot stop the underlying file operation.
+        # Wait it out before the surrounding context releases the session lock.
+        with suppress(Exception):
+            await task
+        raise
+
+
 async def _mark_failed(connection: Any, intent: _Intent, code: str) -> WebshareProfileImportResult:
     async with connection.transaction():
         await _lock_cycle(connection, intent.cycle_start)
@@ -402,11 +458,10 @@ async def _mark_failed(connection: Any, intent: _Intent, code: str) -> WebshareP
             current = await _intent_for_operation(connection, intent.operation_id)
             if current is None or current.state != "failed":
                 raise WebshareProfileImportError("intent_state_conflict")
-    return _result(intent, "failed")
+    return _result(intent, "failed", error_code=code)
 
 
 async def _finalize(connection: Any, intent: _Intent) -> WebshareProfileImportResult:
-    outcome: ImportState = "installed"
     async with connection.transaction():
         cycle = await _database_now(connection, await _lock_cycle(connection, intent.cycle_start))
         profile_cursor = await connection.execute(
@@ -420,7 +475,8 @@ async def _finalize(connection: Any, intent: _Intent) -> WebshareProfileImportRe
             raise WebshareProfileImportError("profile_not_found")
         intent_cursor = await connection.execute(
             """select operation_id, provider, profile_id, logical_name, cycle_start,
-                      expected_generation, target_generation, created_profile, state
+                      expected_generation, target_generation, created_profile, state,
+                      error_code
                  from catalogue.proxy_profile_secret_intents
                 where operation_id = %(operation)s
                 for update""",
@@ -433,14 +489,60 @@ async def _finalize(connection: Any, intent: _Intent) -> WebshareProfileImportRe
         if current.state == "completed":
             return _result(current, "completed")
         if current.state == "failed":
-            return _result(current, "failed")
+            return _result(current, "failed", error_code=current.error_code)
         await connection.execute(
             """update catalogue.proxy_profile_secret_intents
                   set state = 'installed', installed_at = coalesce(installed_at, now()),
-                      updated_at = now()
+                      error_code = null, updated_at = now()
                 where operation_id = %(operation)s""",
             {"operation": intent.operation_id},
         )
+
+        # An installed file may outlive the cycle in which its intent was
+        # prepared. Rebind only to the one current, safe Webshare cycle and only
+        # when that exact profile already has an allocation there.
+        if not _cycle_is_safe(cycle):
+            cycle_is_current = bool(
+                cycle["lifecycle"] == "active"
+                and cycle["cycle_start"] <= cycle["database_now"] < cycle["cycle_end"]
+            )
+            if not cycle_is_current:
+                current_cursor = await connection.execute(
+                    """select *, now() as database_now
+                         from catalogue.proxy_budget_cycles
+                        where provider = %(provider)s and lifecycle = 'active'
+                          and cycle_start <= now() and cycle_end > now()
+                        order by cycle_start
+                        for update""",
+                    {"provider": intent.provider},
+                )
+                current_cycles = await current_cursor.fetchall()
+                current_cycle = current_cycles[0] if len(current_cycles) == 1 else None
+                if current_cycle is not None and _cycle_is_safe(current_cycle):
+                    rebind_allocation = await connection.execute(
+                        """select 1 from catalogue.proxy_profile_allocations
+                            where provider = %(provider)s and cycle_start = %(cycle)s
+                              and profile_id = %(profile)s
+                            for update""",
+                        {
+                            "provider": intent.provider,
+                            "cycle": current_cycle["cycle_start"],
+                            "profile": intent.profile_id,
+                        },
+                    )
+                    if await rebind_allocation.fetchone() is not None:
+                        await connection.execute(
+                            """update catalogue.proxy_profile_secret_intents
+                                  set cycle_start = %(cycle)s, updated_at = now()
+                                where operation_id = %(operation)s""",
+                            {
+                                "cycle": current_cycle["cycle_start"],
+                                "operation": intent.operation_id,
+                            },
+                        )
+                        intent = replace(intent, cycle_start=current_cycle["cycle_start"])
+                        cycle = current_cycle
+
         allocation_cursor = await connection.execute(
             """select 1 from catalogue.proxy_profile_allocations
                 where provider = %(provider)s and cycle_start = %(cycle)s
@@ -454,48 +556,81 @@ async def _finalize(connection: Any, intent: _Intent) -> WebshareProfileImportRe
         )
         allocation_exists = await allocation_cursor.fetchone() is not None
         expected_database_generation = intent.expected_generation or 0
-        if (
-            _cycle_is_safe(cycle)
-            and allocation_exists
-            and profile["secret_generation"] == expected_database_generation
-        ):
+        database_generation = profile["secret_generation"]
+        if database_generation not in {
+            expected_database_generation,
+            intent.target_generation,
+        }:
             await connection.execute(
                 """update catalogue.proxy_profiles
-                      set secret_generation = %(target)s, secret_installed_at = now(),
-                          enabled = true, lifecycle = 'enabled', pending_action = null,
+                      set enabled = false, lifecycle = 'pending', pending_action = null,
+                          updated_at = now()
+                    where provider = %(provider)s and id = %(profile)s""",
+                {"provider": intent.provider, "profile": intent.profile_id},
+            )
+            await connection.execute(
+                """update catalogue.proxy_profile_secret_intents
+                      set state = 'failed', error_code = 'database_generation_conflict',
+                          updated_at = now(), completed_at = now()
+                    where operation_id = %(operation)s""",
+                {"operation": intent.operation_id},
+            )
+            return _result(intent, "failed", error_code="database_generation_conflict")
+
+        if not _cycle_is_safe(cycle) or not allocation_exists:
+            await connection.execute(
+                """update catalogue.proxy_profiles
+                      set enabled = false, lifecycle = 'pending', pending_action = null,
                           updated_at = now()
                     where provider = %(provider)s and id = %(profile)s""",
                 {
-                    "target": intent.target_generation,
                     "provider": intent.provider,
                     "profile": intent.profile_id,
                 },
             )
             await connection.execute(
                 """update catalogue.proxy_profile_secret_intents
-                      set state = 'completed', error_code = null, updated_at = now(),
-                          completed_at = now()
+                      set error_code = 'cycle_rebind_required', updated_at = now()
                     where operation_id = %(operation)s""",
                 {"operation": intent.operation_id},
             )
-            outcome = "completed"
-    return _result(intent, outcome)
+            return _result(intent, "installed", error_code="cycle_rebind_required")
+
+        await connection.execute(
+            """update catalogue.proxy_profiles
+                  set secret_generation = %(target)s, secret_installed_at = now(),
+                      enabled = true, lifecycle = 'enabled', pending_action = null,
+                      updated_at = now()
+                where provider = %(provider)s and id = %(profile)s""",
+            {
+                "target": intent.target_generation,
+                "provider": intent.provider,
+                "profile": intent.profile_id,
+            },
+        )
+        await connection.execute(
+            """update catalogue.proxy_profile_secret_intents
+                  set state = 'completed', error_code = null, updated_at = now(),
+                      completed_at = now()
+                where operation_id = %(operation)s""",
+            {"operation": intent.operation_id},
+        )
+        return _result(intent, "completed")
 
 
-async def recover_webshare_profile_import(
+async def _recover_unlocked(
     connection: Any,
     store: WebshareGatewaySecretStore,
     *,
     operation_id: UUID,
 ) -> WebshareProfileImportResult:
-    """Recover one durable intent using only the installed file generation."""
     intent = await _intent_for_operation(connection, operation_id)
     if intent is None:
         raise WebshareProfileImportError("intent_not_found")
     if intent.state == "completed":
         return _result(intent, "completed")
     if intent.state == "failed":
-        return _result(intent, "failed")
+        return _result(intent, "failed", error_code=intent.error_code)
     generation = _secret_generation(store, intent)
     if generation == intent.target_generation:
         return await _finalize(connection, intent)
@@ -504,6 +639,17 @@ async def recover_webshare_profile_import(
     ):
         return await _mark_failed(connection, intent, "credential_resubmission_required")
     return await _mark_failed(connection, intent, "secret_generation_conflict")
+
+
+async def recover_webshare_profile_import(
+    connection: Any,
+    store: WebshareGatewaySecretStore,
+    *,
+    operation_id: UUID,
+) -> WebshareProfileImportResult:
+    """Recover one intent under its session fence using only file generation."""
+    async with _operation_lock(connection, operation_id):
+        return await _recover_unlocked(connection, store, operation_id=operation_id)
 
 
 async def install_webshare_profile(
@@ -530,41 +676,42 @@ async def install_webshare_profile(
     target = 1 if expected is None else expected + 1
     if secret.generation != target:
         raise WebshareProfileImportError("invalid_target_generation")
-    existing = await _intent_for_operation(connection, operation_id)
-    if existing is not None:
-        operation_cursor = await connection.execute(
-            """select actor, action, state from catalogue.proxy_mutation_requests
-                where operation_id = %(operation)s""",
-            {"operation": operation_id},
+    async with _operation_lock(connection, operation_id):
+        existing = await _intent_for_operation(connection, operation_id)
+        if existing is not None:
+            operation_cursor = await connection.execute(
+                """select actor, action, state from catalogue.proxy_mutation_requests
+                    where operation_id = %(operation)s""",
+                {"operation": operation_id},
+            )
+            operation = await operation_cursor.fetchone()
+            if (
+                operation is None
+                or operation["actor"] != actor_id
+                or operation["action"] != MUTATION_ACTION
+                or operation["state"] != "started"
+                or existing.provider != secret.provider
+                or existing.logical_name != secret.logical_name
+                or existing.expected_generation != expected
+                or existing.target_generation != secret.generation
+            ):
+                raise WebshareProfileImportError("operation_intent_mismatch")
+            return await _recover_unlocked(connection, store, operation_id=operation_id)
+        prepared = await _prepare(
+            connection,
+            operation_id=operation_id,
+            actor_id=actor_id,
+            secret=secret,
+            expected_generation=expected,
+            display_name=display_name,
+            allocated_bytes=allocated_bytes,
         )
-        operation = await operation_cursor.fetchone()
-        if (
-            operation is None
-            or operation["actor"] != actor_id
-            or operation["action"] != MUTATION_ACTION
-            or operation["state"] != "started"
-            or existing.provider != secret.provider
-            or existing.logical_name != secret.logical_name
-            or existing.expected_generation != expected
-            or existing.target_generation != secret.generation
-        ):
-            raise WebshareProfileImportError("operation_intent_mismatch")
-        return await recover_webshare_profile_import(connection, store, operation_id=operation_id)
-    prepared = await _prepare(
-        connection,
-        operation_id=operation_id,
-        actor_id=actor_id,
-        secret=secret,
-        expected_generation=expected,
-        display_name=display_name,
-        allocated_bytes=allocated_bytes,
-    )
-    if isinstance(prepared, WebshareProfileImportResult):
-        return prepared
-    try:
-        installed = store.install(secret, expected_generation=expected)
-    except ProxyDenied:
-        return await recover_webshare_profile_import(connection, store, operation_id=operation_id)
-    if installed != prepared.target_generation:
-        return await _mark_failed(connection, prepared, "secret_generation_conflict")
-    return await _finalize(connection, prepared)
+        if isinstance(prepared, WebshareProfileImportResult):
+            return prepared
+        try:
+            installed = await _install_secret(store, secret, expected)
+        except ProxyDenied:
+            return await _recover_unlocked(connection, store, operation_id=operation_id)
+        if installed != prepared.target_generation:
+            return await _mark_failed(connection, prepared, "secret_generation_conflict")
+        return await _finalize(connection, prepared)
