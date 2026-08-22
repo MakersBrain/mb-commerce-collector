@@ -15,23 +15,35 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from mb_commerce_scraper import ProxyMode, ProxyPolicyConfig, SourceDefinition
-from mb_commerce_scraper.proxy import (
-    HttpxProxyTransportFactory,
-    ProxyRouting,
-    RoutedTransport,
-    RoutingMode,
+from mb_commerce_scraper import (
+    BrowserPolicy,
+    FetchPolicy,
+    ProxyMode,
+    ProxyPolicyConfig,
+    RobotsPolicy,
+    SourceDefinition,
 )
-from mb_commerce_scraper.testing import FakeTransport
-from mb_commerce_scraper.transports import (
-    RequestPriority,
-    RequestPurpose,
-    TransportRequest,
-)
+from mb_commerce_scraper import CollectionRequest as LibraryCollectionRequest
+from mb_commerce_scraper import RefreshMode as LibraryRefreshMode
+from mb_commerce_scraper import SnapshotField as LibrarySnapshotField
 
+from mb_ceramics_catalogue.connectors import (
+    CollectionRequest as CatalogueCollectionRequest,
+)
+from mb_ceramics_catalogue.connectors import RefreshMode as CatalogueRefreshMode
+from mb_ceramics_catalogue.connectors import (
+    SnapshotField as CatalogueSnapshotField,
+)
 from mb_ceramics_catalogue.ops import commerce_scraper_proxy as durable
+from mb_ceramics_catalogue.ops.commerce_scraper_adapter import CatalogueSourceConfig
 from mb_ceramics_catalogue.ops.commerce_scraper_proxy_runtime import (
     resolve_native_proxy_runtime,
+)
+from mb_ceramics_catalogue.ops.commerce_scraper_runtime import (
+    CatalogueCachePolicy,
+    CatalogueCommerceRuntime,
+    NativeCollectionSpec,
+    NativeRouteBindings,
 )
 from mb_ceramics_catalogue.ops.commerce_scraper_webshare import WebshareGatewayPool
 from mb_ceramics_catalogue.proxy import ProxyDenied, ProxyReservationUsage
@@ -157,11 +169,31 @@ def _snapshot(profile_id: UUID, route_id: UUID) -> dict[str, Any]:
     }
 
 
-async def test_mounted_secret_resolver_routes_one_durably_accounted_loopback_request(
+async def test_native_shopify_routes_one_durably_accounted_loopback_request(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    body = b'{"products":[1]}'
+    body = json.dumps(
+        {
+            "products": [
+                {
+                    "id": 1,
+                    "handle": "loopback-cup",
+                    "title": "Loopback cup",
+                    "variants": [
+                        {
+                            "id": 11,
+                            "title": "Default",
+                            "sku": "LOOP-1",
+                            "price": "12.50",
+                            "available": True,
+                        }
+                    ],
+                }
+            ]
+        },
+        separators=(",", ":"),
+    ).encode()
     gateway = LoopbackHTTPGateway(body)
     reservation_id = uuid4()
     authorization_id = uuid4()
@@ -223,6 +255,10 @@ async def test_mounted_secret_resolver_routes_one_durably_accounted_loopback_req
             label="Shop",
             base_url="http://shop.test/",
             connector="shopify",
+            connector_options={
+                "currency": "EUR",
+                "discovery_request_estimated_bytes": 300,
+            },
         )
         source_policy = ProxyPolicyConfig(
             mode=ProxyMode.ALWAYS,
@@ -290,47 +326,67 @@ async def test_mounted_secret_resolver_routes_one_durably_accounted_loopback_req
             return real_getaddrinfo(resolved, service, *args, **kwargs)
 
         monkeypatch.setattr(socket, "getaddrinfo", loopback_only)
-        direct = FakeTransport()
-        transport = RoutedTransport(
-            direct,
-            pool=spec.pool,
-            proxy_factory=HttpxProxyTransportFactory(
-                allowed_origins=("http://shop.test",),
-                timeout=2.0,
-            ),
-            routing=ProxyRouting(
-                mode=RoutingMode.ALWAYS,
-                country=spec.policy.country,
-                provider_preferences=spec.policy.provider_preferences,
-            ),
-            source_id=spec.source_id,
-            base_url=spec.base_url,
-            maximum_requests=spec.policy.maximum_requests,
-            maximum_bytes=spec.policy.maximum_bytes,
+        library_request = LibraryCollectionRequest(
+            source_id="shop",
+            base_url=source.base_url,
+            refresh_mode=LibraryRefreshMode.FULL,
+            requested_fields=frozenset({LibrarySnapshotField.IDENTITY}),
         )
-        request = TransportRequest(
-            url="http://shop.test/catalog",
-            query={"cursor": "next"},
-            purpose=RequestPurpose.ENTITY,
-            priority=RequestPriority.IDENTITY,
-            estimated_bytes=300,
+        catalogue_request = CatalogueCollectionRequest(
+            source_id="shop",
+            base_url=source.base_url,
+            refresh_mode=CatalogueRefreshMode.FULL,
+            requested_fields=frozenset({CatalogueSnapshotField.IDENTITY}),
         )
-        try:
-            response = await transport.request(request)
-        finally:
-            await transport.aclose()
+        configuration = CatalogueSourceConfig(
+            source=source,
+            fetch=FetchPolicy(
+                delay=0,
+                concurrency=1,
+                robots=RobotsPolicy.IGNORE,
+                timeout_seconds=2,
+                browser=BrowserPolicy.NEVER,
+            ),
+            proxy=source_policy,
+            datasets=("ceramics.catalogue_item.v2",),
+        )
+        collection = NativeCollectionSpec(
+            configuration=configuration,
+            request=library_request,
+            checkpoint=None,
+            cache=CatalogueCachePolicy(
+                directory=tmp_path / "cache",
+                mode="off",
+                maximum_age_seconds=None,
+            ),
+            cancelled=lambda: False,
+            collection_id="loopback-shopify",
+        )
+        runtime = CatalogueCommerceRuntime()
+        async with runtime.open_collection(
+            collection,
+            NativeRouteBindings(proxy=spec),
+        ) as opened:
+            pages = [
+                page
+                async for page in opened.connector.collect(catalogue_request)
+            ]
+            telemetry = opened.telemetry
 
-    assert response.status == 200
-    assert response.content == body
-    assert response.route.provider == "webshare"
-    assert direct.requests == []
+    assert len(pages) == 1
+    assert pages[0].terminal
+    assert len(pages[0].items) == 1
+    assert pages[0].items[0].external_id == "1"
+    assert telemetry.transport_totals()["proxy_requests"] == 1
+    assert telemetry.transport_totals()["direct_requests"] == 0
+    assert telemetry.outcome_counts() == {"2xx": 1}
     assert set(resolved_hosts) == {"shop.test", "p.webshare.io"}
     assert gateway.peers == ["127.0.0.1"]
     assert gateway.closed_connections == 1
     assert len(gateway.requests) == 1
     request_head = gateway.requests[0]
     assert request_head.startswith(
-        b"GET http://93.184.216.34/catalog?cursor=next HTTP/1.1\r\n"
+        b"GET http://93.184.216.34/products.json?limit=250&page=1 HTTP/1.1\r\n"
     )
     assert b"Host: shop.test\r\n" in request_head
     authorization_header = next(
@@ -362,10 +418,7 @@ async def test_mounted_secret_resolver_routes_one_durably_accounted_loopback_req
     assert len(reconciliations) == 1
     assert reconciliations[0][0] == authorization_id
     assert reconciliations[0][2] == 1
-    assert response.accounting is not None
-    assert reconciliations[0][1] == (
-        response.accounting.transmitted_bytes + response.accounting.received_bytes
-    )
+    assert reconciliations[0][1] > len(body)
     assert closed == [
         (
             reservation_id,
