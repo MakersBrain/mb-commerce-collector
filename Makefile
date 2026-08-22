@@ -72,6 +72,17 @@ test:  ## The fast suites: no network, no database, no cache replay
 test-golden:  ## Replay every cached source and compare against its frozen dump
 	$(RUN) pytest -m golden
 
+CAMOUFOX_TEST_IMAGE ?= catalogue-ceramics-worker-browser:latest
+
+.PHONY: test-camoufox-live
+test-camoufox-live:  ## Real browser callback ordering through a local authenticated proxy
+	docker run --rm --user catalogue \
+	  -e PYTHONPATH=/workspace/catalogue-dump/src:/workspace/commerce-scraper/src \
+	  -v "$(CURDIR)/catalogue-dump:/workspace/catalogue-dump:ro" \
+	  -v "$(CURDIR)/commerce-scraper:/workspace/commerce-scraper:ro" \
+	  --entrypoint python $(CAMOUFOX_TEST_IMAGE) \
+	  /workspace/catalogue-dump/scripts/run_live_camoufox_callback.py
+
 .PHONY: cache-pull
 cache-pull:  ## Fetch the recorded response cache the golden tests replay
 	$(RUN) catalogue-cache-archive pull --force

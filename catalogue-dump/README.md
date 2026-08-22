@@ -276,6 +276,14 @@ nix develop path:catalogue-dump --command \
   uv run --directory catalogue-dump catalogue-dump --source all --out catalogue-dumps
 ```
 
+The opt-in callback-ordering integration uses the packaged browser-worker
+runtime, synthetic local credentials, and an authenticated loopback proxy. It
+does not contact Webshare or enable the durable route:
+
+```bash
+make test-camoufox-live
+```
+
 Common invocations:
 
 ```bash

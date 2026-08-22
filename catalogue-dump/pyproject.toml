@@ -113,12 +113,13 @@ asyncio_mode = "auto"
 # Replaying every cached source reads ten thousand entries and takes minutes,
 # which is the wrong default for a suite that should be run on every save. CI
 # runs `pytest -m golden` as its own step.
-addopts = "-m 'not golden and not postgres'"
+addopts = "-m 'not golden and not postgres and not camoufox'"
 filterwarnings = ["error::DeprecationWarning:mb_ceramics_catalogue.*"]
 markers = [
   "golden: replays recorded responses and compares against a frozen dump",
   "postgres: needs a live PostgreSQL; skipped when CATALOGUE_TEST_DSN is unset",
   "nats: needs a live disposable NATS JetStream; skipped when CATALOGUE_TEST_NATS_URL is unset",
+  "camoufox: needs the downloaded local Camoufox browser runtime",
 ]
 
 [tool.ruff]
