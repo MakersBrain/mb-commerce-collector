@@ -817,6 +817,29 @@ async def test_runtime_composes_policy_limiter_and_correlated_telemetry() -> Non
     } == {"1"}
 
 
+async def test_runtime_without_telemetry_does_not_allocate_trace_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mb_commerce_scraper.runtime import client as runtime_client
+
+    backend = FakeTransport()
+    backend.add("https://shop.test/products.json", json_body={"products": []})
+    monkeypatch.setattr(
+        runtime_client,
+        "uuid4",
+        lambda: (_ for _ in ()).throw(AssertionError("trace identity allocated")),
+    )
+    scraper = CommerceScraper(
+        registry=ConnectorRegistry.with_builtins(),
+        transport=backend,
+        fetch_policy=FetchPolicy(robots=RobotsPolicy.IGNORE),
+    )
+
+    pages = [page async for page in scraper.collect(source())]
+
+    assert pages[-1].terminal
+
+
 async def test_fallback_uses_independent_direct_and_proxy_rate_gates() -> None:
     direct = FakeTransport()
     direct.add("https://shop.test/products.json", status=429)

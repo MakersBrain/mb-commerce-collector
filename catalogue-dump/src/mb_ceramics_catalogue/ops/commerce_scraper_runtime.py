@@ -231,8 +231,13 @@ class LibraryDebugTelemetry:
 
     @staticmethod
     def _transport_outcome(event: str, fields: dict[str, Any]) -> str:
+        del event
         status = fields.get("status")
-        if event == "request.completed" and isinstance(status, int) and not isinstance(status, bool):
+        if (
+            isinstance(status, int)
+            and not isinstance(status, bool)
+            and 100 <= status <= 599
+        ):
             if status in {403, 429}:
                 return str(status)
             return f"{status // 100}xx"

@@ -339,6 +339,7 @@ def test_native_telemetry_accumulates_terminal_attempt_accounting_once():
         "request.retry",
         {
             "route": "direct",
+            "status": 503,
             "physical_requests": 1,
             "transmitted_bytes": 20,
             "received_bytes": 30,
@@ -349,6 +350,7 @@ def test_native_telemetry_accumulates_terminal_attempt_accounting_once():
         {
             "route": "browser",
             "provider": "decodo",
+            "status": 200,
             "physical_requests": 3,
             "transmitted_bytes": 100,
             "received_bytes": 200,
@@ -376,6 +378,25 @@ def test_native_telemetry_accumulates_terminal_attempt_accounting_once():
     assert totals["http_rx_bytes_estimated"] == 30
     assert totals["browser_tx_bytes_estimated"] == 100
     assert totals["browser_rx_bytes_estimated"] == 200
+    assert telemetry.outcome_counts() == {
+        "5xx": 1,
+        "2xx": 3,
+        "transport_error": 1,
+    }
+
+
+@pytest.mark.parametrize(("status", "outcome"), ((403, "403"), (429, "429")))
+def test_native_retry_telemetry_preserves_dedicated_http_outcomes(
+    status: int, outcome: str
+) -> None:
+    telemetry = LibraryDebugTelemetry()
+
+    telemetry.emit(
+        "request.retry",
+        {"status": status, "physical_requests": 1, "route": "direct"},
+    )
+
+    assert telemetry.outcome_counts() == {outcome: 1}
 
 
 def test_native_telemetry_projects_declared_levels_and_defaults_to_debug(

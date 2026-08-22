@@ -436,13 +436,16 @@ class CommerceScraper:
         selected_routing = _routing_from_policy(selected_proxy_policy)
         selected_budget = budget if budget is not None else self.budget
         selected_browser = browser_transport if browser_transport is not None else self.browser_transport
-        trace_id = collection_id or uuid4().hex
-        telemetry_context: dict[str, JsonValue] = {
-            "collection_id": trace_id,
-            "source_id": source.id,
-            "connector": source.connector,
-            "connector_version": self.registry.connector_version(source.connector),
-        }
+        telemetry_context: dict[str, JsonValue] = (
+            {
+                "collection_id": collection_id or uuid4().hex,
+                "source_id": source.id,
+                "connector": source.connector,
+                "connector_version": self.registry.connector_version(source.connector),
+            }
+            if self.telemetry is not None
+            else {}
+        )
         attempt_transport: CommerceTransport = self.transport
         routed: RoutedTransport | None = None
         limiter: RateLimiter | None = None
