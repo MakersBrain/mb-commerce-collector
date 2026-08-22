@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from mb_commerce_scraper import CollectionRequest as LibraryCollectionRequest
 
 from mb_ceramics_catalogue import scrapers
 from mb_ceramics_catalogue.config.sources import SourcesFile
@@ -29,7 +30,7 @@ from mb_ceramics_catalogue.connectors.prestashop import (
     declared_partition_keys,
 )
 from mb_ceramics_catalogue.connectors.shopify import ShopifyConnector, ShopifyOptions
-from mb_ceramics_catalogue.ops import events, leases, outputs, runs, worker
+from mb_ceramics_catalogue.ops import events, leases, library_lineages, outputs, runs, worker
 from mb_ceramics_catalogue.ops.sink import JobLogHandler, PostgresSink
 from mb_ceramics_catalogue.pipeline.outputs import BatchIdentity, LocalArtifactStore, StoredBatch
 from mb_ceramics_catalogue.pipeline.runner import DatasetPageOutcome, DatasetPageState
@@ -680,6 +681,132 @@ class TestCheckpointOutputs:
             )
             is None
         )
+
+    async def test_library_resolver_resumes_cursor_and_fences_option_drift(self, db):
+        run_id = await runs.create_run(db)
+        job_id = (await runs.create_jobs(db, run_id, SOURCES, ["ceradel"]))[
+            "ceradel"
+        ]
+        request = LibraryCollectionRequest(
+            source_id="ceradel",
+            base_url="https://shop.test/",
+        )
+        dataset = outputs.DatasetKey("ceramics", "2", "projector-1")
+
+        def spec(page_limit: int) -> library_lineages.LibraryLineageSpec:
+            return library_lineages.LibraryLineageSpec(
+                request=request,
+                connector="shopify",
+                connector_version="1",
+                connector_options={"page_limit": page_limit},
+                connector_configuration={"partitions": ["main"]},
+                dataset_fingerprint="d" * 64,
+                dataset_selection=[
+                    {
+                        "dataset": dataset.dataset,
+                        "contract_version": dataset.contract_version,
+                        "projector_version": dataset.projector_version,
+                    }
+                ],
+            )
+
+        original_spec = spec(50)
+        created = await library_lineages.resolve_library_lineage(
+            db,
+            job_id,
+            spec=original_spec,
+            datasets=[dataset],
+        )
+        assert not created.resuming
+        assert created.checkpoint is None
+        assert created.progress is outputs.LineageProgressState.EMPTY
+
+        await outputs.commit_page(
+            db,
+            job_id,
+            created.lineage,
+            partition_key="main",
+            page_id="main:1",
+            page_sequence=0,
+            resume_after={"partition": "main", "page": 2},
+            terminal=False,
+            enumeration_intact=True,
+            connector_version="1",
+            batches=[],
+        )
+        await db.execute(
+            """update catalogue.job_datasets
+                  set state = 'degraded', records = 7, rejected = 2,
+                      error = 'interrupted'
+                where job_id = %s and dataset = %s and contract_version = %s
+                  and projector_version = %s""",
+            (
+                job_id,
+                dataset.dataset,
+                dataset.contract_version,
+                dataset.projector_version,
+            ),
+        )
+
+        resumed = await library_lineages.resolve_library_lineage(
+            db,
+            job_id,
+            spec=original_spec,
+            datasets=[dataset],
+        )
+        assert resumed.lineage == created.lineage
+        assert resumed.resuming
+        assert resumed.restart_reason is None
+        assert resumed.progress is outputs.LineageProgressState.RESUMABLE
+        assert resumed.checkpoint is not None
+        assert resumed.checkpoint.collection_fingerprint == (
+            original_spec.connector_config_fingerprint
+        )
+        assert resumed.checkpoint.resume_after == {"partition": "main", "page": 2}
+        assert await rows(
+            db,
+            """select state, records, rejected, error
+                 from catalogue.job_datasets
+                where job_id = %(job)s and dataset = %(dataset)s""",
+            {"job": job_id, "dataset": dataset.dataset},
+        ) == [{"state": "staged", "records": 7, "rejected": 2, "error": None}]
+
+        drifted_spec = spec(51)
+        restarted = await library_lineages.resolve_library_lineage(
+            db,
+            job_id,
+            spec=drifted_spec,
+            datasets=[dataset],
+        )
+        assert restarted.lineage != created.lineage
+        assert not restarted.resuming
+        assert restarted.checkpoint is None
+        assert restarted.progress is outputs.LineageProgressState.EMPTY
+        assert await rows(
+            db,
+            """select checkpoint_lineage, status
+                 from catalogue.job_checkpoint_lineages
+                where job_id = %(job)s
+                order by created_at""",
+            {"job": job_id},
+        ) == [
+            {"checkpoint_lineage": created.lineage, "status": "rejected"},
+            {"checkpoint_lineage": restarted.lineage, "status": "active"},
+        ]
+        assert await outputs.lineage_runtime_configuration(
+            db, job_id, restarted.lineage
+        ) == outputs.LineageRuntimeConfiguration(
+            runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+            collection_request=request.model_dump(mode="json"),
+            connector_options=drifted_spec.connector_options,
+        )
+        assert await rows(
+            db,
+            """select state, records, rejected, error
+                 from catalogue.job_datasets
+                where job_id = %(job)s and dataset = %(dataset)s""",
+            {"job": job_id, "dataset": dataset.dataset},
+        ) == [{"state": "pending", "records": 0, "rejected": 0, "error": None}]
 
     async def test_completed_library_lineage_remains_recoverable_for_publication(
         self, db
