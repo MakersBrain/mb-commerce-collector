@@ -107,6 +107,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `e7c4662` — preserve HTTP retry outcomes in protocol telemetry.
 - `38be13c` — trace logical requests and owned runtime cleanup.
 - `5977d8f` — isolate provider reconciliation and control mutations.
+- `ed429da` — constrain durable provider identity in PostgreSQL.
 
 ### Verification at last review
 
@@ -137,8 +138,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
     country/provider constraints are checked before secret or database access.
 - [x] Full catalogue verification:
   - Ruff passed.
-  - Mypy passed for 227 source and test files.
-  - 824 tests passed, 2 skipped, 171 deselected, and 284 subtests passed in the
+  - Mypy passed for 230 source and test files.
+  - 881 tests passed, 2 skipped, 171 deselected, and 284 subtests passed in the
     latest fast-suite run; the wider repository fast gate also passed 32
     control-plane tests, 14 service tests, and 2 explorer tests.
   - The lower fast-test count reflects deletion of the obsolete specialized
@@ -198,6 +199,9 @@ architecture rules in the plan and are not separate scope-expansion goals.
   migration/round-trip tests passed against a throwaway database.
 - [x] Current implementation batch passed the verification gates recorded
   below.
+  - The provider-neutral durable Webshare composition and existing Decodo and
+    Webshare adapter suites passed 29 focused tests.
+  - The strict Webshare gateway-secret contract passed 47 focused tests.
 - [x] Source configuration inventory: all 88 configured sources can be
   constructed through the current layered/library mapping.
   - All 21 `pagecrawl` sources now validate through the explicit legacy-to-
@@ -695,6 +699,32 @@ but replay/canary migration remains.
     idempotent and dirty cross-provider allocations refuse the upgrade without
     recording it. Fresh-schema regressions assert each named relationship
     constraint while retaining valid Decodo and Webshare reservations.
+- [x] Add provider-neutral durable accounting composition.
+  - `PostgresReservedProxyPool` decorates a provider data-plane pool without
+    importing vendor behavior into the neutral library. It binds the immutable
+    provider, profile, route UUID, and secret generation to one PostgreSQL
+    reservation, then makes durable authorization the final gate before every
+    physical HTTP or browser request.
+  - Provider-local and durable attempt tokens reconcile the same outcome once;
+    reporting remains health-only. Rotation preserves one reservation, pending
+    attempts block rotation and release, and partial acquisition, rotation,
+    authorization, reconciliation, and close failures remain fail closed with
+    retryable ownership.
+  - Focused intercall tests compose the decorator with the Webshare gateway and
+    prove exact reservation arguments, denial cleanup, accounting without
+    double counting, sticky rotation, invalid replacement cleanup, and one
+    durable authorization per browser subrequest. Native worker selection and
+    PostgreSQL integration for this composition remain pending.
+- [~] Define the operator-managed Webshare gateway secret contract.
+  - A separate, read-only schema-v2 loader now accepts only provider-bound
+    `webshare/<logical-name>` records with strict generations, secret-aware
+    credentials, the verified HTTP backbone, explicit country/sticky-session
+    capabilities, duplicate-key rejection, bounded private regular-file reads,
+    provider-keyed lookup, and immediate redaction values.
+  - The contract is deliberately isolated from the legacy Decodo secret store;
+    loading a Webshare secret neither creates a durable profile nor enables
+    traffic. Authenticated import/rotation with compare-and-swap recovery,
+    provider-specific deployment mounts, and native runtime wiring remain.
 - [x] Bound health state and add reason-specific health counters.
   - Process-local state is keyed per provider/endpoint/target, capped with LRU
     eviction, and exposes detached read-only snapshots. Cooldowns grow
@@ -737,10 +767,11 @@ but replay/canary migration remains.
     legacy decoding returns a sanitized new-lineage restart outcome.
 
 Exit criterion: **not met**. Hard browser authorization, a verified second
-gateway adapter, provider-isolated control reconciliation, and local
-two-provider failover proof are complete. Operator-managed Webshare gateway
-credential import, durable runtime composition, deployment secret wiring, a
-live Camoufox callback gate, and a production routed canary remain.
+gateway adapter, provider-isolated control reconciliation, a reusable durable
+provider composition, and local two-provider failover proof are complete.
+Operator-managed Webshare credential writes/rotation, native runtime and
+deployment wiring, a focused PostgreSQL composition gate, a live Camoufox
+callback gate, and a production routed canary remain.
 
 ## Phase 6 — Remaining framework connectors
 
