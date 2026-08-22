@@ -126,13 +126,14 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `258d1fd` — verify installed catalogue and scraper wheel composition.
 - `0ff6788` — type strict numeric-boundary regression factories.
 - `52425ad` — route native Shopify through durable Webshare locally.
+- `b1479fa` — exercise active routed worker recovery and summaries.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 76 source and test files.
-  - 307 library tests passed.
+  - 317 library tests passed.
   - Wheel and source distribution built.
   - 4 dependency-boundary tests passed.
   - The installed-wheel matrix verified all 231 reviewed public exports across
@@ -269,6 +270,13 @@ architecture rules in the plan and are not separate scope-expansion goals.
     authorization → real authenticated loopback gateway. It emitted one
     product, one proxy 2xx and no direct request, then reconciled and closed the
     reservation exactly once with no active route lease or connection left.
+  - The PostgreSQL-backed outer worker intercall passed through
+    `_crawl_connector_canary` with an active immutable Webshare route. It proves
+    proxy-only summary accounting, exact reservation/authorization/
+    reconciliation/close identity, credential-free retained summaries, no
+    legacy lease or browser ownership, and terminal recovery with no second
+    route resolution or physical request. The complete adjacent worker module
+    passed 17 cases; the resolver-to-wire test also remained green.
 - [x] Source configuration inventory: all 88 configured sources can be
   constructed through the current layered/library mapping.
   - All 21 `pagecrawl` sources now validate through the explicit legacy-to-
@@ -1261,18 +1269,13 @@ Exit criterion: **not met**.
 3. Restore the `keramikbedarf-online` archive, run its implemented Shopware
    projected-output parity gate, review request/discovery totals, and then run
    a limited page-based canary.
-4. Exercise the native Shopify worker through a local routed proxy integration,
-   then a limited production canary. The live Camoufox callback-ordering gate
-   now passes inside the packaged browser-worker runtime using an authenticated
-   loopback proxy: authorization precedes every forwarded navigation/script/
-   fetch request, blocked images never reach the proxy, and reconciliation and
-   byte/request accounting complete without credential disclosure. The native
-   runtime now also proves real Shopify/middleware/Webshare routing, durable
-   attempt authorization, accounting, telemetry, and cleanup against a local
-   gateway. Still cross the outer worker summary/recovery boundary with active
-   routing and run the explicitly approved production canary; browser lease
-   ownership is covered independently because Shopify itself declares browser
-   capability `never`.
+4. Run a limited, explicitly approved routed Shopify production canary. The
+   local gates now cover the real outer worker, native runtime, Shopify,
+   middleware, immutable Webshare route, durable attempt accounting, summary
+   and artifact persistence, cleanup, and terminal recovery without legacy
+   lease ownership. The live Camoufox callback gate independently covers
+   physical browser authorization because Shopify declares browser capability
+   `never`.
 5. Run BigCommerce recorded replay and projected-output comparison, then a
    limited browser-capable canary with the tested source-level rollback route.
 6. Run representative PrestaShop and Sio2 sources through recorded replay,
