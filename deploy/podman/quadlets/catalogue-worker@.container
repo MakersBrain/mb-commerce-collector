@@ -8,6 +8,9 @@ Image=@@WORKER_IMAGE@@
 Pull=never
 ContainerName=catalogue-worker-%i
 Network=catalogue.network
+UserNS=keep-id:uid=10001,gid=10001
+User=10001
+Group=10001
 EnvironmentFile=/etc/makersbrain/catalogue/worker.env
 Environment=CATALOGUE_NATS_URL=nats://catalogue-nats:4222
 Environment=CATALOGUE_NATS_CONSUME_CREDENTIALS_FILE=/run/queue/nats-consume-credentials.json

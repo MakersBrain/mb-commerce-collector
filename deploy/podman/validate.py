@@ -28,6 +28,12 @@ WEBSHARE_WORKERS = {
     "catalogue-worker@.container",
     "catalogue-worker-browser.container",
 }
+ROOTLESS_WORKER_FIELDS = (
+    "UserNS=keep-id:uid=10001,gid=10001",
+    "User=10001",
+    "Group=10001",
+    "DropCapability=all",
+)
 
 
 def validate(root: Path) -> None:
@@ -44,9 +50,14 @@ def validate(root: Path) -> None:
             raise ValueError(f"{path.name} publishes a host port")
         if "WantedBy=default.target" not in content:
             raise ValueError(f"{path.name} is not a rootless user unit")
+        if "AddCapability=" in content:
+            raise ValueError(f"{path.name} adds a runtime capability")
         if "CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED" in content:
             raise ValueError("rendered units must not enable the Webshare data plane")
         if path.name in WEBSHARE_WORKERS:
+            for field in ROOTLESS_WORKER_FIELDS:
+                if content.count(field) != 1:
+                    raise ValueError(f"{path.name} lacks its exact rootless identity contract")
             if content.count(WEBSHARE_GATEWAY_MOUNT) != 1:
                 raise ValueError(f"{path.name} lacks its exact Webshare gateway mount")
         elif "webshare-gateway.json" in content:

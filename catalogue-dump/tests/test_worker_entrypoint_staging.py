@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import runpy
 import shutil
 import stat
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -24,6 +26,10 @@ def _entrypoint() -> tuple[Callable[..., None], int]:
     configure = cast(Callable[..., None], namespace["_configure_webshare_gateway"])
     maximum = cast(int, namespace["MAX_WEBSHARE_GATEWAY_BYTES"])
     return configure, maximum
+
+
+def _entrypoint_namespace() -> dict[str, Any]:
+    return runpy.run_path(str(ENTRYPOINT), run_name="worker_entrypoint_test")
 
 
 def test_worker_stages_private_gateway_copy_without_enabling_paid_traffic(
@@ -106,6 +112,168 @@ def test_invalid_sources_remove_stale_stage_and_environment(
         assert not destination.exists()
         assert "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE" not in os.environ
         assert "CATALOGUE_PROXY_API_SECRET_FILE" not in os.environ
+
+
+def test_rootless_worker_uses_private_mount_directly_without_privileged_calls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    namespace = _entrypoint_namespace()
+    main = cast(Callable[[], None], namespace["main"])
+    source = tmp_path / "webshare-gateway.json"
+    source.write_text('{"schema_version":2,"profiles":{}}', encoding="utf-8")
+    source.chmod(0o600)
+    owner_uid = source.stat().st_uid or 10_001
+    owner_gid = source.stat().st_gid or 10_001
+    if source.stat().st_uid == 0:
+        os.chown(source, owner_uid, owner_gid)
+    main.__globals__["WEBSHARE_GATEWAY_SOURCE"] = source
+    main.__globals__["WEBSHARE_GATEWAY_DESTINATION"] = tmp_path / "must-not-exist.json"
+    monkeypatch.setattr(
+        pwd,
+        "getpwnam",
+        lambda _name: SimpleNamespace(
+            pw_uid=owner_uid,
+            pw_gid=owner_gid,
+            pw_dir=str(tmp_path),
+            pw_name="catalogue",
+        ),
+    )
+    monkeypatch.setattr(os, "geteuid", lambda: owner_uid)
+    monkeypatch.setattr(os, "getegid", lambda: owner_gid)
+
+    for operation in ("chown", "setgroups", "setgid", "setuid"):
+        monkeypatch.setattr(
+            os,
+            operation,
+            lambda *_args, name=operation: pytest.fail(
+                f"rootless entrypoint called privileged operation {name}"
+            ),
+        )
+
+    command: list[str] = []
+
+    class ExecCalled(RuntimeError):
+        pass
+
+    def execvp(_executable: str, arguments: list[str]) -> None:
+        command.extend(arguments)
+        raise ExecCalled
+
+    monkeypatch.setattr(os, "execvp", execvp)
+
+    with pytest.raises(ExecCalled):
+        main()
+
+    assert command[0] == "catalogue-worker"
+    assert os.environ["CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE"] == str(source)
+    assert source.read_text(encoding="utf-8").startswith('{"schema_version":2')
+    assert stat.S_IMODE(source.stat().st_mode) == 0o600
+    assert not (tmp_path / "must-not-exist.json").exists()
+
+
+@pytest.mark.parametrize("mode", [0o400, 0o640, 0o644])
+def test_rootless_worker_rejects_gateway_mount_with_non_private_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: int,
+) -> None:
+    namespace = _entrypoint_namespace()
+    configure = cast(
+        Callable[..., None],
+        namespace["_configure_rootless_webshare_gateway"],
+    )
+    source = tmp_path / "webshare-gateway.json"
+    source.write_text("{}", encoding="utf-8")
+    source.chmod(mode)
+    monkeypatch.setenv(
+        "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE",
+        "/stale/secret.json",
+    )
+
+    with pytest.raises(RuntimeError, match="mode 0600"):
+        configure(
+            source,
+            owner_uid=source.stat().st_uid,
+            owner_gid=source.stat().st_gid,
+        )
+
+    assert "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE" not in os.environ
+
+
+def test_rootless_worker_treats_empty_private_mount_as_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    namespace = _entrypoint_namespace()
+    configure = cast(
+        Callable[..., None],
+        namespace["_configure_rootless_webshare_gateway"],
+    )
+    source = tmp_path / "webshare-gateway.json"
+    source.touch(mode=0o600)
+    monkeypatch.setenv(
+        "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE",
+        "/stale/secret.json",
+    )
+
+    configure(
+        source,
+        owner_uid=source.stat().st_uid,
+        owner_gid=source.stat().st_gid,
+    )
+
+    assert "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE" not in os.environ
+
+
+def test_rootless_worker_rejects_gateway_mount_with_unexpected_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    namespace = _entrypoint_namespace()
+    configure = cast(
+        Callable[..., None],
+        namespace["_configure_rootless_webshare_gateway"],
+    )
+    source = tmp_path / "webshare-gateway.json"
+    source.write_text("{}", encoding="utf-8")
+    source.chmod(0o600)
+    monkeypatch.setenv(
+        "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE",
+        "/stale/secret.json",
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected owner"):
+        configure(
+            source,
+            owner_uid=source.stat().st_uid + 1,
+            owner_gid=source.stat().st_gid,
+        )
+
+    assert "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE" not in os.environ
+
+
+def test_entrypoint_rejects_unexpected_non_root_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    namespace = _entrypoint_namespace()
+    main = cast(Callable[[], None], namespace["main"])
+    monkeypatch.setattr(
+        pwd,
+        "getpwnam",
+        lambda _name: SimpleNamespace(
+            pw_uid=10_001,
+            pw_gid=10_001,
+            pw_dir=str(tmp_path),
+            pw_name="catalogue",
+        ),
+    )
+    monkeypatch.setattr(os, "geteuid", lambda: 20_001)
+    monkeypatch.setattr(os, "getegid", lambda: 20_001)
+
+    with pytest.raises(RuntimeError, match="unexpected process identity"):
+        main()
 
 
 def test_failed_atomic_publish_removes_temporary_secret_and_environment(

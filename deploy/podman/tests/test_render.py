@@ -30,7 +30,13 @@ def test_render_produces_exact_private_rootless_bundle(tmp_path: Path) -> None:
         "/run/secrets/webshare-gateway.json:ro"
     )
     for name in ("catalogue-worker@.container", "catalogue-worker-browser.container"):
-        assert (output / name).read_text(encoding="utf-8").count(mount) == 1
+        worker = (output / name).read_text(encoding="utf-8")
+        assert worker.count(mount) == 1
+        assert worker.count("UserNS=keep-id:uid=10001,gid=10001") == 1
+        assert worker.count("User=10001") == 1
+        assert worker.count("Group=10001") == 1
+        assert worker.count("DropCapability=all") == 1
+        assert "AddCapability=" not in worker
     for path in output.glob("*.container"):
         content = path.read_text(encoding="utf-8")
         if path.name not in {

@@ -111,6 +111,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `db25719` — authorize durable provider gateways.
 - `2fd0386` — resolve durable Webshare routes.
 - `1d83636` — rotate Webshare gateway secrets with local CAS.
+- `a2043ea` — stage Webshare worker secrets default-off.
 
 ### Verification at last review
 
@@ -141,8 +142,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
     country/provider constraints are checked before secret or database access.
 - [x] Full catalogue verification:
   - Ruff passed.
-  - Mypy passed for 233 source and test files.
-  - 919 tests passed, 2 skipped, 173 deselected, and 284 subtests passed in the
+  - Mypy passed for 235 source and test files.
+  - 930 tests passed, 2 skipped, 183 deselected, and 284 subtests passed in the
     latest fast-suite run; the wider repository fast gate also passed 32
     control-plane tests, 14 service tests, and 2 explorer tests.
   - The lower fast-test count reflects deletion of the obsolete specialized
@@ -211,9 +212,10 @@ architecture rules in the plan and are not separate scope-expansion goals.
     resolver → routed transport → real HTTP proxy framing, and proves exact
     sticky credential grammar, one durable authorization/reconciliation/close,
     no direct request, and complete lease/connection cleanup.
-  - The Podman deployment suite passed 24 tests; worker entrypoint and rendered
-    Compose placement passed 4 focused tests plus Compose configuration
-    validation.
+  - The Podman/rootless deployment suite passed 29 tests; worker entrypoint and
+    rendered Compose placement passed 4 focused tests plus Compose
+    configuration validation. A combined live PostgreSQL gate passed 18
+    durable-fence and schema-migration cases.
 - [x] Source configuration inventory: all 88 configured sources can be
   constructed through the current layered/library mapping.
   - All 21 `pagecrawl` sources now validate through the explicit legacy-to-
@@ -668,6 +670,11 @@ but replay/canary migration remains.
     missing reconciliation, a closed lifecycle, and an expired cycle therefore
     stop existing leases as well as new reservations, with no authorization row
     inserted after the unsafe transition.
+  - Attempt authorization also locks and revalidates the exact enabled profile,
+    secret generation, enabled/non-retired route, and reservation identity in
+    cycle → profile → route → reservation order. Disabling or rotating a
+    profile therefore stops its existing leases before attempt insertion;
+    focused PostgreSQL tests prove Decodo and Webshare remain isolated.
   - Reservation SQL is provider-keyed and verifies the enabled profile, route,
     allocation, logical identity, and secret generation together. Job snapshots
     persist the profile generation, and both legacy and native workers reject a
@@ -760,6 +767,17 @@ but replay/canary migration remains.
   - An authenticated control operation plus durable non-secret recovery intent
     is still required to coordinate file generation with PostgreSQL lifecycle
     state. Its control-exclusive write mount and recovery wiring also remain.
+- [~] Persist recoverable profile-secret operations without secret material.
+  - An append-only migration adds one intent per mutation operation with exact
+    provider/profile/logical-name/cycle foreign keys, create-versus-rotation
+    generation constraints, prepared/installed/completed/failed states,
+    timestamp consistency, and at most one active intent per profile. The table
+    contains no credentials, credential fingerprints, endpoints, or provider
+    capabilities and is included in proxy role ownership.
+  - Migration ordering, idempotence, identity foreign keys, generation/state
+    checks, timestamp rules, and active-intent uniqueness pass focused live
+    PostgreSQL tests. The orchestration/recovery state machine and authenticated
+    endpoint do not exist yet.
 - [x] Add default-off worker-only Webshare secret staging.
   - The authoritative Podman runtime stage copies the optional bounded regular
     Infisical export byte-for-byte to a private mode-`0600` file, or creates an
@@ -773,8 +791,11 @@ but replay/canary migration remains.
     stale state for absent, empty, non-regular, symlink, FIFO, oversized, or
     failed replacements. It never changes the independent enable flag.
   - Presence remains inert and production enablement is still false. A rootless
-    Quadlet activation/readability smoke and documented worker restart on
-    credential inode replacement remain operational gates.
+    execution contract now maps both workers directly to catalogue UID/GID,
+    retains `DropCapability=all`, and validates the private mounted file without
+    privileged calls; rootful Compose retains private staging and privilege
+    drop. A real Quadlet activation/readability smoke and documented worker
+    restart on credential inode replacement remain operational gates.
 - [x] Bound health state and add reason-specific health counters.
   - Process-local state is keyed per provider/endpoint/target, capped with LRU
     eviction, and exposes detached read-only snapshots. Cooldowns grow
@@ -1161,8 +1182,9 @@ Exit criterion: **not met**.
    limited browser-capable canary with the tested source-level rollback route.
 6. Run representative PrestaShop and Sio2 sources through recorded replay,
    projected output comparison, and limited canaries with independent rollback.
-7. Add authenticated import/rotation and a durable file/SQL recovery intent for
-   Webshare-issued gateway credentials. Rotation must disable the profile and
+7. Implement the authenticated import/rotation orchestration over the new
+   durable file/SQL recovery intent for Webshare-issued gateway credentials.
+   Rotation must disable the profile and
    move its active reservations to `revocation_requested` before file CAS;
    profile disablement alone does not stop attempts on existing leases. The
    worker-only read mounts and HTTP resolver-to-wire integration now pass; a
