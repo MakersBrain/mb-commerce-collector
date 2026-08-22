@@ -124,6 +124,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `a39176f` — exercise live Camoufox proxy callback ordering.
 - `97a62e4` — align rootless worker identity and add a rotation smoke.
 - `258d1fd` — verify installed catalogue and scraper wheel composition.
+- `0ff6788` — type strict numeric-boundary regression factories.
+- `52425ad` — route native Shopify through durable Webshare locally.
 
 ### Verification at last review
 
@@ -258,6 +260,15 @@ architecture rules in the plan and are not separate scope-expansion goals.
     It loads the packaged `sources.json` and constructs checked-in `ceradel`
     through runtime plan → source projection → application registry → legacy
     transport boundary → library pipeline on both Python versions in CI.
+  - The complete scraper release gate passed: Ruff, mypy over 76 files, 317
+    tests, frozen schemas, wheel/sdist builds, 4 dependency-boundary tests,
+    isolated wheel/extras checks, the external connector consumer, and release
+    metadata verification.
+  - The native Shopify/Webshare intercall passed through catalogue runtime →
+    registry-built connector → middleware → routed proxy → durable attempt
+    authorization → real authenticated loopback gateway. It emitted one
+    product, one proxy 2xx and no direct request, then reconciled and closed the
+    reservation exactly once with no active route lease or connection left.
 - [x] Source configuration inventory: all 88 configured sources can be
   constructed through the current layered/library mapping.
   - All 21 `pagecrawl` sources now validate through the explicit legacy-to-
@@ -1255,10 +1266,13 @@ Exit criterion: **not met**.
    now passes inside the packaged browser-worker runtime using an authenticated
    loopback proxy: authorization precedes every forwarded navigation/script/
    fetch request, blocked images never reach the proxy, and reconciliation and
-   byte/request accounting complete without credential disclosure. Still prove
-   fallback/always selection, durable attempt authorization, lease-bound
-   browser credentials, cleanup, summary accounting, and rollback without
-   legacy lease ownership in the native worker flow.
+   byte/request accounting complete without credential disclosure. The native
+   runtime now also proves real Shopify/middleware/Webshare routing, durable
+   attempt authorization, accounting, telemetry, and cleanup against a local
+   gateway. Still cross the outer worker summary/recovery boundary with active
+   routing and run the explicitly approved production canary; browser lease
+   ownership is covered independently because Shopify itself declares browser
+   capability `never`.
 5. Run BigCommerce recorded replay and projected-output comparison, then a
    limited browser-capable canary with the tested source-level rollback route.
 6. Run representative PrestaShop and Sio2 sources through recorded replay,
