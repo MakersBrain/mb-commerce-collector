@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -49,7 +50,9 @@ from mb_commerce_scraper.transports import RotationReason
         ),
     ],
 )
-def test_proxy_integer_boundaries_reject_booleans(build) -> None:
+def test_proxy_integer_boundaries_reject_booleans(
+    build: Callable[[], object],
+) -> None:
     with pytest.raises(ValidationError):
         build()
 

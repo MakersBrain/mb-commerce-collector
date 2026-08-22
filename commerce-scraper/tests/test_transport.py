@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Callable
 
 import httpx
 import pytest
@@ -55,7 +56,9 @@ from mb_commerce_scraper.transports.url_policy import URLPolicy
         ),
     ],
 )
-def test_transport_integer_boundaries_reject_booleans(build) -> None:
+def test_transport_integer_boundaries_reject_booleans(
+    build: Callable[[], object],
+) -> None:
     with pytest.raises(ValidationError):
         build()
 
