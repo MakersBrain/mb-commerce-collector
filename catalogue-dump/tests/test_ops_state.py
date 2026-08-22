@@ -13,9 +13,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
+import psycopg
 import pytest
 
 from mb_ceramics_catalogue import scrapers
@@ -34,7 +36,7 @@ from mb_ceramics_catalogue.pipeline.runner import DatasetPageOutcome, DatasetPag
 from mb_ceramics_catalogue.scrapers.activity import CURRENT_JOB
 from mb_ceramics_catalogue.storage import db as storage_db
 
-from .conftest import requires_postgres
+from .conftest import EXTENSIONS, requires_postgres
 from .test_prestashop_connector import Transport as PrestaTransport
 from .test_shopify_connector import FakeFetcher as ShopifyFetcher
 
@@ -1097,6 +1099,24 @@ class TestScheduleDefault:
 
 
 class TestSchemaMigration:
+    async def install_pre_provider_integrity_head(self, db) -> None:
+        await db.execute("drop schema catalogue cascade")
+        await db.execute(EXTENSIONS.read_text(encoding="utf-8"))
+        directory = storage_db.schema_directory()
+        for name in storage_db.SCHEMA_FILES[:-1]:
+            await db.execute((directory / name).read_text(encoding="utf-8"))
+        await db.execute(
+            """create table catalogue.schema_migrations (
+                 filename text primary key,
+                 applied_at timestamptz not null default now()
+               )"""
+        )
+        for name in storage_db.SCHEMA_FILES[:-1]:
+            await db.execute(
+                "insert into catalogue.schema_migrations(filename) values (%s)",
+                (name,),
+            )
+
     async def test_an_existing_schema_is_adopted_rather_than_reapplied(self, db):
         # The fixture preloads every DDL file without a migration ledger. The
         # baseline is adopted; the idempotent incremental migration is recorded
@@ -1118,6 +1138,67 @@ class TestSchemaMigration:
         await db.execute("drop schema catalogue cascade")
         assert await storage_db.apply_schema(db) == list(storage_db.SCHEMA_FILES)
         assert await storage_db.apply_schema(db) == []
+
+    async def test_provider_integrity_migration_backfills_existing_routes(self, db):
+        await self.install_pre_provider_integrity_head(db)
+        profile = await db.execute(
+            """insert into catalogue.proxy_profiles
+                 (provider, logical_name, display_name, created_by, updated_by)
+                 values ('webshare', 'existing-webshare', 'Existing Webshare', 'test', 'test')
+                 returning id"""
+        )
+        profile_id = (await profile.fetchone())["id"]
+        route = await db.execute(
+            """insert into catalogue.proxy_routes
+                 (label, profile_id, created_by, updated_by)
+                 values ('Existing route', %s, 'test', 'test') returning id""",
+            (profile_id,),
+        )
+        route_id = (await route.fetchone())["id"]
+
+        assert await storage_db.apply_schema(db) == [
+            storage_db.PROXY_PROVIDER_INTEGRITY_MIGRATION
+        ]
+        assert await storage_db.apply_schema(db) == []
+        migrated = await rows(
+            db,
+            "select provider from catalogue.proxy_routes where id = %s",
+            (route_id,),
+        )
+        assert migrated == [{"provider": "webshare"}]
+
+    async def test_provider_integrity_migration_refuses_dirty_existing_allocations(self, db):
+        await self.install_pre_provider_integrity_head(db)
+        start = datetime.now(UTC) - timedelta(days=1)
+        end = datetime.now(UTC) + timedelta(days=1)
+        await db.execute(
+            """insert into catalogue.proxy_budget_cycles
+                 (provider, cycle_start, cycle_end)
+                 values ('webshare', %s, %s)""",
+            (start, end),
+        )
+        profile = await db.execute(
+            """insert into catalogue.proxy_profiles
+                 (provider, logical_name, display_name, created_by, updated_by)
+                 values ('decodo', 'dirty-decodo', 'Dirty Decodo', 'test', 'test')
+                 returning id"""
+        )
+        profile_id = (await profile.fetchone())["id"]
+        await db.execute(
+            """insert into catalogue.proxy_profile_allocations
+                 (provider, cycle_start, profile_id, allocated_bytes, updated_by)
+                 values ('webshare', %s, %s, 1000, 'test')""",
+            (start, profile_id),
+        )
+
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            await storage_db.apply_schema(db)
+        applied = await rows(
+            db,
+            "select filename from catalogue.schema_migrations where filename = %s",
+            (storage_db.PROXY_PROVIDER_INTEGRITY_MIGRATION,),
+        )
+        assert applied == []
 
     async def test_multi_dataset_page_and_artifact_schema_enforces_identity(self, db):
         run_id = await runs.create_run(db)

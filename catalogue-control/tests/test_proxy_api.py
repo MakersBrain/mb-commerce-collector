@@ -172,9 +172,9 @@ async def test_promoted_source_can_transition_to_always(proxy_client, db):
     )
     await db.execute(
         """insert into catalogue.proxy_routes
-                  (id, label, profile_id, protocol, max_bytes, pilot, enabled,
+                  (id, provider, label, profile_id, protocol, max_bytes, pilot, enabled,
                    created_by, updated_by)
-           values (%(id)s, 'Promoted route', %(profile)s, 'http', 25000000,
+           values (%(id)s, 'decodo', 'Promoted route', %(profile)s, 'http', 25000000,
                    true, true, 'operator@example.test', 'operator@example.test')""",
         {"id": route_id, "profile": profile_id},
     )

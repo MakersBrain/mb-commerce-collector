@@ -772,6 +772,9 @@ async def create_route(request: Request) -> Response:
     actor = await actor_for(request, admin=True)
     if isinstance(actor, Response):
         return actor
+    pspec = provider_spec(request)
+    if isinstance(pspec, Response):
+        return pspec
     try:
         body = await request.json()
         profile_id = UUID(str(body["profile_id"]))
@@ -792,16 +795,18 @@ async def create_route(request: Request) -> Response:
         cursor = await connection.execute(
             """
             insert into catalogue.proxy_routes
-                   (label, profile_id, protocol, country, state, city, session_mode,
+                   (provider, label, profile_id, protocol, country, state, city, session_mode,
                     session_minutes, max_bytes, pilot, enabled, created_by, updated_by)
-            select %(label)s, p.id, %(protocol)s, %(country)s, %(state)s, %(city)s,
+            select p.provider, %(label)s, p.id, %(protocol)s, %(country)s, %(state)s, %(city)s,
                    %(mode)s, %(minutes)s, %(bytes)s, %(pilot)s, %(enabled)s,
                    %(actor)s, %(actor)s
               from catalogue.proxy_profiles p
-             where p.id = %(profile)s and p.enabled and p.lifecycle = 'enabled'
+             where p.id = %(profile)s and p.provider = %(provider)s
+               and p.enabled and p.lifecycle = 'enabled'
             returning *
             """,
             {
+                "provider": pspec.name,
                 "label": str(body.get("label", "New route"))[:200], "profile": profile_id,
                 "protocol": protocol, "country": country, "state": body.get("state"),
                 "city": body.get("city"), "mode": session_mode, "minutes": session_minutes,
@@ -1356,8 +1361,15 @@ async def profile_action(request: Request) -> Response:
                 await connection.execute(
                     """update catalogue.proxy_profile_allocations set allocated_bytes = %(bytes)s,
                               updated_at = now(), updated_by = %(actor)s
-                        where profile_id = %(id)s and cycle_start = %(start)s""",
-                    {"bytes": allocation, "actor": actor.id, "id": profile_id, "start": profile["cycle_start"]},
+                        where provider = %(provider)s and profile_id = %(id)s
+                          and cycle_start = %(start)s""",
+                    {
+                        "provider": pspec.name,
+                        "bytes": allocation,
+                        "actor": actor.id,
+                        "id": profile_id,
+                        "start": profile["cycle_start"],
+                    },
                 )
             return await mutation_payload(
                 connection, mutation, actor, mutation_action, profile_id,

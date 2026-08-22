@@ -193,8 +193,8 @@ async def reserve(
     if requested_bytes <= 0:
         raise ProxyDenied("proxy reservation bytes must be positive")
     provider = _validated_provider(provider)
-    if (profile_id is None) != (route_id is None):
-        raise ProxyDenied("proxy reservation profile and route must be supplied together")
+    if profile_id is None or route_id is None:
+        raise ProxyDenied("durable proxy reservation requires profile and route identities")
     if cycle_start is not None and cycle_start.tzinfo is None:
         raise ProxyDenied("proxy billing-cycle boundaries must include UTC offsets")
     if cycle_end is not None and cycle_end.tzinfo is None:
@@ -228,52 +228,51 @@ async def reserve(
             raise ProxyDenied(
                 f"{provider} reconciliation is unsafe or the kill switch is active"
             )
-        if profile_id is not None:
-            identity_cursor = await connection.execute(
-                """
-                select p.id
-                  from catalogue.proxy_profiles p
-                  join catalogue.proxy_routes r
-                    on r.id = %(route_id)s and r.profile_id = p.id
-                 where p.id = %(profile_id)s and p.provider = %(provider)s
-                   and p.logical_name = %(profile)s
-                   and p.secret_generation = %(generation)s
-                   and p.enabled and p.lifecycle = 'enabled'
-                   and r.enabled and r.retired_at is null
-                 for share of p, r
-                """,
-                {
-                    "provider": provider,
-                    "profile": profile,
-                    "profile_id": profile_id,
-                    "route_id": route_id,
-                    "generation": secret_generation,
-                },
-            )
-            if await identity_cursor.fetchone() is None:
-                raise ProxyDenied("proxy profile or route snapshot is no longer active")
-            allocation_cursor = await connection.execute(
-                """
-                select a.allocated_bytes,
-                       coalesce(sum(r.reserved_bytes) filter (where r.state in
-                         ('active', 'revocation_requested')), 0) as active
-                  from catalogue.proxy_profile_allocations a
-                  left join catalogue.proxy_reservations r
-                    on r.profile_id = a.profile_id and r.provider = a.provider
-                   and r.cycle_start = a.cycle_start
-                 where a.provider = %(provider)s and a.cycle_start = %(start)s
-                   and a.profile_id = %(profile_id)s
-                 group by a.allocated_bytes
-                """,
-                {
-                    "provider": provider,
-                    "start": cycle_start,
-                    "profile_id": profile_id,
-                },
-            )
-            allocation = await allocation_cursor.fetchone()
-            if allocation is None or allocation["active"] + requested_bytes > allocation["allocated_bytes"]:
-                raise ProxyDenied("proxy profile allocation would be exceeded")
+        identity_cursor = await connection.execute(
+            """
+            select p.id
+              from catalogue.proxy_profiles p
+              join catalogue.proxy_routes r
+                on r.id = %(route_id)s and r.profile_id = p.id
+             where p.id = %(profile_id)s and p.provider = %(provider)s
+               and p.logical_name = %(profile)s
+               and p.secret_generation = %(generation)s
+               and p.enabled and p.lifecycle = 'enabled'
+               and r.enabled and r.retired_at is null
+             for share of p, r
+            """,
+            {
+                "provider": provider,
+                "profile": profile,
+                "profile_id": profile_id,
+                "route_id": route_id,
+                "generation": secret_generation,
+            },
+        )
+        if await identity_cursor.fetchone() is None:
+            raise ProxyDenied("proxy profile or route snapshot is no longer active")
+        allocation_cursor = await connection.execute(
+            """
+            select a.allocated_bytes,
+                   coalesce(sum(r.reserved_bytes) filter (where r.state in
+                     ('active', 'revocation_requested')), 0) as active
+              from catalogue.proxy_profile_allocations a
+              left join catalogue.proxy_reservations r
+                on r.profile_id = a.profile_id and r.provider = a.provider
+               and r.cycle_start = a.cycle_start
+             where a.provider = %(provider)s and a.cycle_start = %(start)s
+               and a.profile_id = %(profile_id)s
+             group by a.allocated_bytes
+            """,
+            {
+                "provider": provider,
+                "start": cycle_start,
+                "profile_id": profile_id,
+            },
+        )
+        allocation = await allocation_cursor.fetchone()
+        if allocation is None or allocation["active"] + requested_bytes > allocation["allocated_bytes"]:
+            raise ProxyDenied("proxy profile allocation would be exceeded")
         usage_cursor = await connection.execute(
             """
             select

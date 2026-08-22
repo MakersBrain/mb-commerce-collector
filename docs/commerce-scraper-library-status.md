@@ -105,6 +105,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `be50039` — reconcile completed Phase 7 implementation status.
 - `3bdd0a2` — revalidate durable proxy safety before every physical attempt.
 - `e7c4662` — preserve HTTP retry outcomes in protocol telemetry.
+- `38be13c` — trace logical requests and owned runtime cleanup.
+- `5977d8f` — isolate provider reconciliation and control mutations.
 
 ### Verification at last review
 
@@ -136,7 +138,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - [x] Full catalogue verification:
   - Ruff passed.
   - Mypy passed for 227 source and test files.
-  - 824 tests passed, 2 skipped, 168 deselected, and 284 subtests passed in the
+  - 824 tests passed, 2 skipped, 171 deselected, and 284 subtests passed in the
     latest fast-suite run; the wider repository fast gate also passed 32
     control-plane tests, 14 service tests, and 2 explorer tests.
   - The lower fast-test count reflects deletion of the obsolete specialized
@@ -188,7 +190,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
   role is absent and checks the invoking session rather than the privileged
   owner of its `SECURITY DEFINER` function.
 - [x] Full PostgreSQL verification after the audit migration:
-  - Catalogue dump: 163 passed, 1 skipped, and 830 deselected.
+  - Catalogue dump: 166 passed, 1 skipped, and 830 deselected.
   - Control plane: 71 passed and 32 deselected.
 - [x] Frozen `catalogue-control` and `catalogue-service` lockfiles resolve and
   import both `mb_ceramics_catalogue` and `mb_commerce_scraper==0.1.0`.
@@ -675,6 +677,24 @@ but replay/canary migration remains.
     create, rotate, disable, and retirement operations fail before local intent
     because provider-issued credentials and missing status controls do not
     satisfy those mutation contracts.
+- [x] Enforce provider/profile/route integrity in PostgreSQL.
+  - An append-only, idempotent migration backfills an explicit route provider
+    from its profile, then constrains route, allocation, reservation, probe,
+    and reconciliation-request identities with composite unique and foreign
+    keys. Provider changes and route reparenting can no longer silently move
+    existing durable identities across billing ledgers.
+  - New reservations require both profile and route IDs. Their provider,
+    logical profile name, route ownership, optional probe identity, and later
+    reconciliation requests must all describe the same durable graph; runtime
+    reservation code rejects missing identities before opening a transaction.
+  - Existing legacy reservations without IDs are not guessed or rewritten.
+    The new non-null identity check is installed `NOT VALID`, so it protects
+    all new writes while an operator can inventory any historical rows before
+    a later validation migration.
+  - PostgreSQL migration tests prove clean old-schema route backfill is
+    idempotent and dirty cross-provider allocations refuse the upgrade without
+    recording it. Fresh-schema regressions assert each named relationship
+    constraint while retaining valid Decodo and Webshare reservations.
 - [x] Bound health state and add reason-specific health counters.
   - Process-local state is keyed per provider/endpoint/target, capped with LRU
     eviction, and exposes detached read-only snapshots. Cooldowns grow

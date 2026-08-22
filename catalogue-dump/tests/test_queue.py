@@ -91,9 +91,9 @@ async def test_proxy_snapshot_is_immutable_after_control_plane_changes(db):
         db,
         """
         insert into catalogue.proxy_routes
-               (label, profile_id, protocol, country, state, city, session_mode,
+               (provider, label, profile_id, protocol, country, state, city, session_mode,
                 session_minutes, max_bytes, pilot, enabled, created_by, updated_by)
-        values ('Snapshot route', %(profile_id)s, 'https', 'FR', 'IDF', 'Paris', 'sticky',
+        values ('decodo', 'Snapshot route', %(profile_id)s, 'https', 'FR', 'IDF', 'Paris', 'sticky',
                 45, 9000, false, true, 'test', 'test')
         returning id
         """,
@@ -138,8 +138,7 @@ async def test_proxy_snapshot_is_immutable_after_control_plane_changes(db):
     }
 
     await db.execute(
-        "update catalogue.proxy_profiles set provider = 'replacement', "
-        "logical_name = 'replacement-profile', secret_generation = 5, "
+        "update catalogue.proxy_profiles set logical_name = 'replacement-profile', secret_generation = 5, "
         "enabled = false, lifecycle = 'disabled' "
         "where id = %(id)s",
         {"id": profile["id"]},

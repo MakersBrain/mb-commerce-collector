@@ -11,6 +11,9 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import psycopg
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
+
 from mb_ceramics_catalogue.providers.base import ProviderError
 from mb_ceramics_catalogue.providers.decodo import DecodoProvider
 from mb_ceramics_catalogue.proxy_secrets import (
@@ -19,8 +22,6 @@ from mb_ceramics_catalogue.proxy_secrets import (
     mask_username,
     username_fingerprint,
 )
-from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
 
 CONFIRMATION = "ROTATE AND ADOPT EXISTING DECODO USER"
 ALLOCATION_BYTES = 300_000_000
@@ -227,9 +228,9 @@ async def run(options: argparse.Namespace) -> None:
             route_cursor = await connection.execute(
                 """
                 insert into catalogue.proxy_routes
-                       (label, profile_id, protocol, country, session_mode,
+                       (provider, label, profile_id, protocol, country, session_mode,
                         session_minutes, max_bytes, pilot, enabled, created_by, updated_by)
-                values ('The Ceramic Shop pilot', %(profile)s, 'http', 'US', 'random',
+                values ('decodo', 'The Ceramic Shop pilot', %(profile)s, 'http', 'US', 'random',
                         30, %(bytes)s, true, true, %(actor)s, %(actor)s)
                 returning id
                 """,

@@ -130,6 +130,7 @@ LINEAGE_RUNTIME_MIGRATION = "catalogue-lineage-runtime-v1.sql"
 LINEAGE_LIMITED_MIGRATION = "catalogue-lineage-limited-v1.sql"
 PROXY_ATTEMPT_AUTHORIZATION_MIGRATION = "catalogue-proxy-attempt-authorization-v1.sql"
 PROXY_AUDIT_ROLE_MIGRATION = "catalogue-proxy-audit-role-v1.sql"
+PROXY_PROVIDER_INTEGRITY_MIGRATION = "catalogue-proxy-provider-integrity-v1.sql"
 
 SCHEMA_FILES = (
     BASELINE,
@@ -137,6 +138,7 @@ SCHEMA_FILES = (
     LINEAGE_LIMITED_MIGRATION,
     PROXY_ATTEMPT_AUTHORIZATION_MIGRATION,
     PROXY_AUDIT_ROLE_MIGRATION,
+    PROXY_PROVIDER_INTEGRITY_MIGRATION,
 )
 
 #: The table added by the last file that went into the baseline. Its presence
