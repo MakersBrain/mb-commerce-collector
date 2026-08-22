@@ -2,7 +2,7 @@ import asyncio
 
 import httpx
 import pytest
-from pydantic import JsonValue
+from pydantic import JsonValue, ValidationError
 
 from mb_commerce_scraper.models import BrowserPolicy
 from mb_commerce_scraper.testing import FakeTransport
@@ -20,6 +20,7 @@ from mb_commerce_scraper.transports import (
     ResponseBodyTooLarge,
     ResponseDecodeFailure,
     RotationReason,
+    TransportAccounting,
     TransportFailure,
     TransportRequest,
     TransportResponse,
@@ -31,6 +32,32 @@ from mb_commerce_scraper.transports import (
 from mb_commerce_scraper.transports.httpx import HttpxTransport
 from mb_commerce_scraper.transports.middleware import BudgetExhausted, RobotsDenied
 from mb_commerce_scraper.transports.url_policy import URLPolicy
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: TransportAccounting(physical_requests=True),
+        lambda: BrowserEvaluation(
+            action_id="shop.action.v1", script="() => null", wait_milliseconds=True
+        ),
+        lambda: TransportRequest(
+            url="https://shop.test/product",
+            purpose=RequestPurpose.ENTITY,
+            priority=RequestPriority.IDENTITY,
+            estimated_bytes=True,
+        ),
+        lambda: TransportRequest(
+            url="https://shop.test/product",
+            purpose=RequestPurpose.ENTITY,
+            priority=RequestPriority.IDENTITY,
+            trace_attempt=True,
+        ),
+    ],
+)
+def test_transport_integer_boundaries_reject_booleans(build) -> None:
+    with pytest.raises(ValidationError):
+        build()
 
 
 class RecordingTelemetry:

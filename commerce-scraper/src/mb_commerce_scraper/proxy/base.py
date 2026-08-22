@@ -45,9 +45,9 @@ class ProxyRequest(BaseModel):
     region: str | None = None
     city: str | None = None
     sticky: bool = True
-    session_ttl_seconds: int | None = Field(default=None, ge=1)
-    maximum_requests: int | None = Field(default=None, ge=1)
-    maximum_bytes: int | None = Field(default=None, ge=1)
+    session_ttl_seconds: int | None = Field(default=None, ge=1, strict=True)
+    maximum_requests: int | None = Field(default=None, ge=1, strict=True)
+    maximum_bytes: int | None = Field(default=None, ge=1, strict=True)
     preferred_providers: tuple[str, ...] = ()
     excluded_providers: tuple[str, ...] = ()
 
@@ -58,7 +58,7 @@ class ProxyEndpoint(BaseModel):
     endpoint_id: str
     protocol: Literal["http", "https", "socks5"]
     host: str
-    port: int = Field(ge=1, le=65535)
+    port: int = Field(ge=1, le=65535, strict=True)
     kind: ProxyKind
     countries: frozenset[str] = frozenset()
 
@@ -89,10 +89,10 @@ class BrowserProxyCredentials(BaseModel):
 class ProxyOutcome(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     target_host: str
-    status: int | None = None
-    physical_requests: int = Field(default=1, ge=0)
-    transmitted_bytes: int = Field(default=0, ge=0)
-    received_bytes: int = Field(default=0, ge=0)
+    status: int | None = Field(default=None, strict=True)
+    physical_requests: int = Field(default=1, ge=0, strict=True)
+    transmitted_bytes: int = Field(default=0, ge=0, strict=True)
+    received_bytes: int = Field(default=0, ge=0, strict=True)
     classification: str
 
 
@@ -105,9 +105,9 @@ class BrowserSubrequestOutcome(BaseModel):
     """Secret-free accounting for one continued browser network request."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    status: int | None = Field(default=None, ge=100, le=599)
-    transmitted_bytes: int = Field(default=0, ge=0)
-    received_bytes: int = Field(default=0, ge=0)
+    status: int | None = Field(default=None, ge=100, le=599, strict=True)
+    transmitted_bytes: int = Field(default=0, ge=0, strict=True)
+    received_bytes: int = Field(default=0, ge=0, strict=True)
     classification: str
 
 

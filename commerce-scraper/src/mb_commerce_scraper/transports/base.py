@@ -22,9 +22,9 @@ class TransportAccounting(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    physical_requests: int = Field(default=1, ge=0)
-    transmitted_bytes: int = Field(default=0, ge=0)
-    received_bytes: int = Field(default=0, ge=0)
+    physical_requests: int = Field(default=1, ge=0, strict=True)
+    transmitted_bytes: int = Field(default=0, ge=0, strict=True)
+    received_bytes: int = Field(default=0, ge=0, strict=True)
 
 
 class TransportFailure(RuntimeError):
@@ -100,7 +100,7 @@ class BrowserEvaluation(BaseModel):
     action_id: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,63}$")
     script: str = Field(min_length=1, max_length=65_536, repr=False)
     wait_for: str | None = Field(default=None, max_length=512)
-    wait_milliseconds: int = Field(default=2_000, ge=0, le=30_000)
+    wait_milliseconds: int = Field(default=2_000, ge=0, le=30_000, strict=True)
 
 
 class RotationReason(StrEnum):
@@ -124,12 +124,12 @@ class TransportRequest(BaseModel):
     purpose: RequestPurpose
     priority: RequestPriority
     required: bool = True
-    estimated_bytes: int = Field(default=0, ge=0)
+    estimated_bytes: int = Field(default=0, ge=0, strict=True)
     cache: CachePolicy = CachePolicy.DEFAULT
     browser: BrowserHint = BrowserHint.NEVER
     evaluation: BrowserEvaluation | None = None
     trace_request_id: str | None = Field(default=None, min_length=1, max_length=128)
-    trace_attempt: int | None = Field(default=None, ge=1)
+    trace_attempt: int | None = Field(default=None, ge=1, strict=True)
 
     @model_validator(mode="after")
     def evaluation_is_an_explicit_browser_action(self) -> TransportRequest:

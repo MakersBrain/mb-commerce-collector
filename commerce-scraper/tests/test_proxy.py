@@ -2,9 +2,10 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from mb_commerce_scraper.proxy import (
+    BrowserSubrequestOutcome,
     InMemoryProxyHealth,
     ProxyBudgetExhausted,
     ProxyCredentials,
@@ -18,6 +19,39 @@ from mb_commerce_scraper.proxy import (
 )
 from mb_commerce_scraper.testing import fake_proxy_pool
 from mb_commerce_scraper.transports import RotationReason
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: ProxyRequest(
+            source_id="shop", target_host="shop.test", session_ttl_seconds=True
+        ),
+        lambda: ProxyRequest(
+            source_id="shop", target_host="shop.test", maximum_requests=True
+        ),
+        lambda: ProxyRequest(
+            source_id="shop", target_host="shop.test", maximum_bytes=True
+        ),
+        lambda: ProxyEndpoint(
+            provider="one",
+            endpoint_id="edge",
+            protocol="http",
+            host="proxy.test",
+            port=True,
+            kind=ProxyKind.RESIDENTIAL,
+        ),
+        lambda: ProxyOutcome(
+            target_host="shop.test", physical_requests=True, classification="success"
+        ),
+        lambda: BrowserSubrequestOutcome(
+            transmitted_bytes=True, classification="success"
+        ),
+    ],
+)
+def test_proxy_integer_boundaries_reject_booleans(build) -> None:
+    with pytest.raises(ValidationError):
+        build()
 
 
 async def test_static_pool_round_robin_rotation_and_idempotent_release() -> None:
