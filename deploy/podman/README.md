@@ -33,6 +33,25 @@ containers join `catalogue.network`; MakersBrain containers join
 `makersbrain.network`; only vmagent and cloudflared join both. No Catalogue
 container publishes a host port.
 
+### Gateway rotation smoke
+
+On a deployment host, prefer a generated Quadlet/container smoke with Podman.
+When Podman is unavailable but Docker is present, the executable fallback runs
+the actual worker entrypoint and store implementation as `10001:10001`, with a
+read-only root filesystem, no network, no capabilities, and the gateway store
+mounted read-only in the worker:
+
+```sh
+python deploy/podman/smoke_webshare_rotation.py \
+  --image catalogue-ceramics-worker:<candidate-tag>
+```
+
+It installs generation 1, starts the worker entrypoint, atomically replaces the
+credential with generation 2 from a separate writable container, and requires
+the already-running worker process to observe the replacement. The result is
+explicitly Docker rootless-identity emulation, not evidence of Quadlet
+generation or activation; use it only as the strongest local fallback.
+
 ## Database transfer
 
 The signed `database_transfer` image contains PostgreSQL 17 client tools and

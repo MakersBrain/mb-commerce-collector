@@ -27,7 +27,8 @@ COPY catalogue-dump/pyproject.toml catalogue-dump/sources.json ./catalogue-dump/
 COPY catalogue-dump/src ./catalogue-dump/src
 COPY docker/verify-python-distributions.py /usr/local/bin/verify-python-distributions.py
 
-RUN useradd --system --uid 10001 --create-home catalogue
+RUN groupadd --system --gid 10001 catalogue \
+ && useradd --system --uid 10001 --gid 10001 --create-home catalogue
 
 # Shared volumes. The cache is per-host sharded so two workers never write one
 # entry; the dumps are namespaced <run-id>/<job-id>/ so two runs of one source
