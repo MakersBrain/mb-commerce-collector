@@ -127,13 +127,14 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `0ff6788` — type strict numeric-boundary regression factories.
 - `52425ad` — route native Shopify through durable Webshare locally.
 - `b1479fa` — exercise active routed worker recovery and summaries.
+- `7d0f673` — verify deadline-triggered runtime cleanup.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 76 source and test files.
-  - 317 library tests passed.
+  - 318 library tests passed.
   - Wheel and source distribution built.
   - 4 dependency-boundary tests passed.
   - The installed-wheel matrix verified all 231 reviewed public exports across
@@ -277,6 +278,12 @@ architecture rules in the plan and are not separate scope-expansion goals.
     legacy lease or browser ownership, and terminal recovery with no second
     route resolution or physical request. The complete adjacent worker module
     passed 17 cases; the resolver-to-wire test also remained green.
+  - The aware-deadline runtime gate enters a blocking routed attempt and proves
+    `TimeoutError` interrupts the collection without a completion event, closes
+    the route-scoped transport, releases its lease exactly once, and leaves no
+    active lease. The outer owned HTTP and browser transports remain valid
+    until scraper exit and then both close. The full 318-test scraper release
+    gate, schemas, artifacts, isolated consumers, and release checks pass.
 - [x] Source configuration inventory: all 88 configured sources can be
   constructed through the current layered/library mapping.
   - All 21 `pagecrawl` sources now validate through the explicit legacy-to-
@@ -532,6 +539,10 @@ direct-path parity and migration-wide application composition are incomplete.
   - A PostgreSQL worker test proves initial collection and a later
     terminal-complete recovery with no second runtime, proxy resolution,
     legacy session, or network request.
+  - A focused aware-deadline intercall proves the active routed request is
+    interrupted with typed `TimeoutError` telemetry, its route transport and
+    lease close immediately, and scraper-owned HTTP/browser resources close at
+    the outer lifecycle boundary without a false completion event.
   - The local `catalogue-dump --pipeline connector_canary` compatibility shell
     now enters the same application-owned native runtime as the worker and
     probe. It constructs no legacy Fetcher/session and uses direct-only local
@@ -1083,7 +1094,7 @@ canaries have not run.
     routes until explicit application metadata and their required evidence are
     added. This is a generic approval boundary rather than storefront-specific
     worker logic.
-- [~] Map library telemetry to catalogue observability.
+- [x] Map library telemetry to catalogue observability.
   - Sanitized Fetcher bridge protocol events map to catalogue DEBUG logging;
     worker summaries retain direct/impersonated/browser/proxy route counters
     and HTTP/browser byte estimates across direct and fallback Fetchers.
