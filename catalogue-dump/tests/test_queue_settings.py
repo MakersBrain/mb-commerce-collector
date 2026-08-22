@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -20,6 +21,24 @@ def test_visibility_must_cover_the_complete_delivery_lifetime() -> None:
 def test_cloudflare_selection_requires_every_route_and_recovery_queue() -> None:
     with pytest.raises(ValidationError, match="CATALOGUE_CF_ACCOUNT_ID"):
         Settings(queue_provider="cloudflare")
+
+
+def test_webshare_data_plane_is_separately_default_off() -> None:
+    defaults = Settings()
+
+    assert defaults.proxy_webshare_data_plane_enabled is False
+    assert defaults.proxy_webshare_gateway_secret_file is None
+
+    configured = Settings(
+        proxy_webshare_data_plane_enabled=True,
+        proxy_webshare_gateway_secret_file=Path(
+            "/run/secrets/webshare-gateway.json"
+        ),
+    )
+    assert configured.proxy_webshare_data_plane_enabled is True
+    assert configured.proxy_webshare_gateway_secret_file == Path(
+        "/run/secrets/webshare-gateway.json"
+    )
 
 
 def test_role_scoped_nats_clients_do_not_provision(tmp_path) -> None:

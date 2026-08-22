@@ -11,30 +11,47 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from mb_commerce_scraper import ProxyMode, ProxyPolicyConfig, SourceDefinition
+from mb_commerce_scraper.proxy import ProxyPool
 
 from mb_ceramics_catalogue.observability import logging as obs
 from mb_ceramics_catalogue.proxy import (
     ProxyDenied,
     load_profiles,
-    secret_values,
+)
+from mb_ceramics_catalogue.proxy import secret_values as decodo_secret_values
+from mb_ceramics_catalogue.webshare_gateway_secrets import (
+    load_webshare_gateway_secrets,
+)
+from mb_ceramics_catalogue.webshare_gateway_secrets import (
+    secret_values as webshare_secret_values,
 )
 
-from .commerce_scraper_proxy import ConnectionPool, PostgresDecodoProxyPool
+from .commerce_scraper_proxy import (
+    ConnectionPool,
+    DurableProxyIdentity,
+    PostgresDecodoProxyPool,
+    PostgresReservedProxyPool,
+)
+from .commerce_scraper_webshare import WebshareGatewayConfig, WebshareGatewayPool
 
 _COUNTRY = re.compile(r"^[A-Z]{2}$")
-_PROVIDER = "decodo"
+_DECODO = "decodo"
+_WEBSHARE = "webshare"
+_SUPPORTED_PROVIDERS = frozenset({_DECODO, _WEBSHARE})
 
 
 class ProxyRuntimeSettings(Protocol):
     proxy_enabled: bool
     proxy_secret_file: Path | None
+    proxy_webshare_data_plane_enabled: bool
+    proxy_webshare_gateway_secret_file: Path | None
 
 
 @dataclass(frozen=True, slots=True)
 class NativeProxyRuntimeSpec:
     source_id: str
     base_url: str
-    pool: PostgresDecodoProxyPool
+    pool: ProxyPool
     policy: ProxyPolicyConfig
 
 
@@ -49,11 +66,13 @@ def resolve_native_proxy_runtime(
     source: SourceDefinition,
     source_policy: ProxyPolicyConfig,
 ) -> NativeProxyRuntimeSpec | None:
-    """Validate immutable job policy and construct a non-acquired Decodo pool.
+    """Validate immutable job policy and construct one non-acquired provider pool.
 
     Operator policy may enable a route; ordinary run parameters can only turn
     it off or lower its byte allowance. Returning a spec performs no database
-    operation and therefore cannot reserve paid traffic.
+    operation and therefore cannot reserve paid traffic. A job names exactly
+    one immutable route: this resolver does not discover or compose fallback
+    providers at execution time.
     """
     policy = str(proxy_snapshot.get("policy", "never"))
     if policy == "never" or run_proxy_policy == "never" or not settings.proxy_enabled:
@@ -65,12 +84,15 @@ def resolve_native_proxy_runtime(
     if source_policy.mode is ProxyMode.NEVER:
         raise ProxyDenied(f"source {source.id!r} is not checked-in as proxy eligible")
     _validate_source(source.id, source.base_url)
-    if proxy_snapshot.get("provider") != _PROVIDER:
-        raise ProxyDenied("native proxy runtime supports snapshotted Decodo routes only")
+    provider = proxy_snapshot.get("provider")
+    if not isinstance(provider, str) or provider not in _SUPPORTED_PROVIDERS:
+        raise ProxyDenied("native proxy runtime does not support the snapshotted provider")
+    if provider == _WEBSHARE and not settings.proxy_webshare_data_plane_enabled:
+        raise ProxyDenied("native Webshare data-plane routing is not enabled")
     if proxy_snapshot.get("state") is not None or proxy_snapshot.get("city") is not None:
-        raise ProxyDenied("native Decodo routing does not support state or city selection")
+        raise ProxyDenied("native proxy routing does not support state or city selection")
     if proxy_snapshot.get("session_mode") != "sticky":
-        raise ProxyDenied("native Decodo routing requires a sticky session mode")
+        raise ProxyDenied("native proxy routing requires a sticky session mode")
 
     profile_id = _uuid(proxy_snapshot, "profile_id")
     route_id = _uuid(proxy_snapshot, "route_id")
@@ -79,7 +101,7 @@ def resolve_native_proxy_runtime(
     country = _country(proxy_snapshot)
     if source_policy.country is not None and country != source_policy.country:
         raise ProxyDenied("snapshotted proxy country is outside source policy")
-    if source_policy.provider_preferences and _PROVIDER not in source_policy.provider_preferences:
+    if source_policy.provider_preferences and provider not in source_policy.provider_preferences:
         raise ProxyDenied("snapshotted proxy provider is outside source policy")
     session_minutes = _bounded_int(proxy_snapshot, "session_minutes", minimum=1, maximum=1_440)
     configured_maximum = _bounded_int(proxy_snapshot, "max_bytes", minimum=1, maximum=25_000_000)
@@ -96,48 +118,157 @@ def resolve_native_proxy_runtime(
     pilot = proxy_snapshot.get("pilot", False)
     if not isinstance(pilot, bool):
         raise ProxyDenied("snapshotted proxy pilot flag must be boolean")
-
-    secret_file = settings.proxy_secret_file
-    if secret_file is None:
-        raise ProxyDenied("proxy is enabled but its secret file is absent")
-    profiles = load_profiles(secret_file)
-    obs.register_secrets(secret_values(profiles))
-    profile = profiles.get(logical_name)
-    if profile is None:
-        raise ProxyDenied(f"unknown logical proxy profile {logical_name!r}")
     snapshotted_generation = _bounded_int(
         proxy_snapshot,
         "secret_generation",
         minimum=0,
         maximum=2_147_483_647,
     )
-    if profile.generation != snapshotted_generation:
-        raise ProxyDenied("proxy secret generation does not match the immutable job snapshot")
+
+    pool: ProxyPool
+    if provider == _DECODO:
+        pool = _decodo_pool(
+            database,
+            settings=settings,
+            job_id=job_id,
+            logical_name=logical_name,
+            profile_id=profile_id,
+            route_id=route_id,
+            secret_generation=snapshotted_generation,
+            maximum_bytes=configured_maximum,
+            country=country,
+            protocol=protocol,
+            session_minutes=session_minutes,
+            pilot=pilot,
+        )
+    else:
+        pool = _webshare_pool(
+            database,
+            settings=settings,
+            job_id=job_id,
+            logical_name=logical_name,
+            profile_id=profile_id,
+            route_id=route_id,
+            secret_generation=snapshotted_generation,
+            maximum_bytes=configured_maximum,
+            country=country,
+            protocol=protocol,
+            session_minutes=session_minutes,
+            pilot=pilot,
+        )
 
     effective_policy = ProxyPolicyConfig(
         mode=ProxyMode(policy),
         country=country,
-        provider_preferences=(_PROVIDER,),
+        provider_preferences=(provider,),
         maximum_requests=source_policy.maximum_requests,
         maximum_bytes=configured_maximum,
-    )
-    pool = PostgresDecodoProxyPool(
-        database,
-        job_id=job_id,
-        profile=profile,
-        profile_id=profile_id,
-        route_id=route_id,
-        maximum_bytes=configured_maximum,
-        route_country=country,
-        protocol=protocol,
-        session_minutes=session_minutes,
-        pilot=pilot,
     )
     return NativeProxyRuntimeSpec(
         source_id=source.id,
         base_url=source.base_url,
         pool=pool,
         policy=effective_policy,
+    )
+
+
+def _decodo_pool(
+    database: ConnectionPool,
+    *,
+    settings: ProxyRuntimeSettings,
+    job_id: UUID,
+    logical_name: str,
+    profile_id: UUID,
+    route_id: UUID,
+    secret_generation: int,
+    maximum_bytes: int,
+    country: str | None,
+    protocol: Literal["http", "https", "socks5"],
+    session_minutes: int,
+    pilot: bool,
+) -> PostgresDecodoProxyPool:
+    secret_file = settings.proxy_secret_file
+    if secret_file is None:
+        raise ProxyDenied("proxy is enabled but its secret file is absent")
+    profiles = load_profiles(secret_file)
+    obs.register_secrets(decodo_secret_values(profiles))
+    profile = profiles.get(logical_name)
+    if profile is None:
+        raise ProxyDenied(f"unknown logical proxy profile {logical_name!r}")
+    if profile.generation != secret_generation:
+        raise ProxyDenied("proxy secret generation does not match the immutable job snapshot")
+    return PostgresDecodoProxyPool(
+        database,
+        job_id=job_id,
+        profile=profile,
+        profile_id=profile_id,
+        route_id=route_id,
+        maximum_bytes=maximum_bytes,
+        route_country=country,
+        protocol=protocol,
+        session_minutes=session_minutes,
+        pilot=pilot,
+    )
+
+
+def _webshare_pool(
+    database: ConnectionPool,
+    *,
+    settings: ProxyRuntimeSettings,
+    job_id: UUID,
+    logical_name: str,
+    profile_id: UUID,
+    route_id: UUID,
+    secret_generation: int,
+    maximum_bytes: int,
+    country: str | None,
+    protocol: Literal["http", "https", "socks5"],
+    session_minutes: int,
+    pilot: bool,
+) -> PostgresReservedProxyPool:
+    if protocol != "http":
+        raise ProxyDenied("native Webshare routing requires the verified HTTP gateway")
+    secret_file = settings.proxy_webshare_gateway_secret_file
+    if secret_file is None:
+        raise ProxyDenied("Webshare data-plane routing is enabled but its secret file is absent")
+    profiles = load_webshare_gateway_secrets(secret_file)
+    obs.register_secrets(webshare_secret_values(profiles))
+    secret = profiles.get((_WEBSHARE, logical_name))
+    if secret is None:
+        raise ProxyDenied(f"unknown logical Webshare gateway profile {logical_name!r}")
+    if secret.provider != _WEBSHARE or secret.logical_name != logical_name:
+        raise ProxyDenied("Webshare gateway secret identity does not match the job snapshot")
+    if secret.generation != secret_generation:
+        raise ProxyDenied("proxy secret generation does not match the immutable job snapshot")
+    if session_minutes * 60 > secret.sticky_session_ttl_seconds:
+        raise ProxyDenied("snapshotted Webshare session exceeds the verified gateway duration")
+    if country is not None and country not in secret.countries:
+        raise ProxyDenied("snapshotted Webshare country is not supported by the gateway secret")
+
+    gateway = WebshareGatewayPool(
+        WebshareGatewayConfig(
+            username=secret.username,
+            password=secret.password,
+            endpoint_id=str(route_id),
+            host=secret.host,
+            port=secret.port,
+            countries=secret.countries,
+            sticky_session_ttl_seconds=secret.sticky_session_ttl_seconds,
+        )
+    )
+    return PostgresReservedProxyPool(
+        database,
+        gateway,
+        job_id=job_id,
+        identity=DurableProxyIdentity(
+            provider=secret.provider,
+            profile=secret.logical_name,
+            profile_id=profile_id,
+            route_id=route_id,
+            secret_generation=secret.generation,
+        ),
+        maximum_bytes=maximum_bytes,
+        pilot=pilot,
     )
 
 

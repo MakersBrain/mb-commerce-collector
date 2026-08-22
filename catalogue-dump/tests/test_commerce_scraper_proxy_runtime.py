@@ -9,9 +9,11 @@ from uuid import uuid4
 import pytest
 from mb_commerce_scraper import ProxyMode, ProxyPolicyConfig, SourceDefinition
 from mb_commerce_scraper.proxy import RoutingMode
+from pydantic import SecretStr
 
 from mb_ceramics_catalogue.ops import commerce_scraper_proxy_runtime as runtime
 from mb_ceramics_catalogue.proxy import ProxyDenied, ProxyProfile
+from mb_ceramics_catalogue.webshare_gateway_secrets import WebshareGatewaySecret
 
 
 class Database:
@@ -29,6 +31,10 @@ class Database:
 class Settings:
     proxy_enabled: bool = True
     proxy_secret_file: Path | None = Path("/mounted/proxy.json")
+    proxy_webshare_data_plane_enabled: bool = False
+    proxy_webshare_gateway_secret_file: Path | None = Path(
+        "/mounted/webshare-gateway.json"
+    )
 
 
 def snapshot(**changes: Any) -> dict[str, Any]:
@@ -50,6 +56,24 @@ def snapshot(**changes: Any) -> dict[str, Any]:
     }
     value.update(changes)
     return value
+
+
+def webshare_secret(**changes: Any) -> WebshareGatewaySecret:
+    values: dict[str, Any] = {
+        "provider": "webshare",
+        "logical_name": "primary",
+        "generation": 7,
+        "endpoint_id": "webshare-residential-backbone",
+        "protocol": "http",
+        "host": "p.webshare.io",
+        "port": 80,
+        "username": SecretStr("issued-user"),
+        "password": SecretStr("issued-password"),
+        "countries": frozenset({"FR", "US"}),
+        "sticky_session_ttl_seconds": 1_800,
+    }
+    values.update(changes)
+    return WebshareGatewaySecret(**values)
 
 
 def resolve(
@@ -151,6 +175,235 @@ def test_active_policy_constructs_a_lazy_frozen_runtime(
     assert database.connections == 0
     with pytest.raises(FrozenInstanceError):
         spec.policy = ProxyPolicyConfig()  # type: ignore[misc]
+
+
+def test_webshare_is_default_off_before_secret_or_database_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runtime,
+        "load_webshare_gateway_secrets",
+        lambda _path: (_ for _ in ()).throw(AssertionError("secret read")),
+    )
+    database = Database()
+
+    with pytest.raises(ProxyDenied, match="not enabled"):
+        resolve(database, snapshot(provider="webshare", secret_generation=7))
+
+    assert database.connections == 0
+
+
+def test_enabled_webshare_constructs_one_lazy_durable_snapshotted_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected_route = uuid4()
+    selected_profile = uuid4()
+    secret = webshare_secret()
+    registered: list[set[str]] = []
+    monkeypatch.setattr(
+        runtime,
+        "load_profiles",
+        lambda _path: (_ for _ in ()).throw(AssertionError("Decodo secret read")),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "load_webshare_gateway_secrets",
+        lambda path: {
+            ("webshare", "primary"): secret
+            if path == Path("/mounted/webshare-gateway.json")
+            else pytest.fail("wrong provider secret path")
+        },
+    )
+    monkeypatch.setattr(runtime.obs, "register_secrets", lambda values: registered.append(values))
+    database = Database()
+
+    spec = resolve(
+        database,
+        snapshot(
+            provider="webshare",
+            profile_id=str(selected_profile),
+            route_id=str(selected_route),
+            secret_generation=7,
+        ),
+        settings=Settings(proxy_webshare_data_plane_enabled=True),
+        source_country="FR",
+        source_providers=("decodo", "webshare"),
+        source_maximum_requests=4,
+    )
+
+    assert spec is not None
+    assert isinstance(spec.pool, runtime.PostgresReservedProxyPool)
+    assert spec.policy == ProxyPolicyConfig(
+        mode=ProxyMode.FALLBACK,
+        country="FR",
+        provider_preferences=("webshare",),
+        maximum_requests=4,
+        maximum_bytes=5_000_000,
+    )
+    assert spec.pool._identity == runtime.DurableProxyIdentity(
+        provider="webshare",
+        profile="primary",
+        profile_id=selected_profile,
+        route_id=selected_route,
+        secret_generation=7,
+    )
+    assert isinstance(spec.pool._inner, runtime.WebshareGatewayPool)
+    assert spec.pool._inner._config.endpoint_id == str(selected_route)
+    assert spec.pool._inner._config.host == "p.webshare.io"
+    assert registered == [{"issued-user", "issued-password"}]
+    assert database.connections == 0
+
+
+def test_enabled_webshare_requires_its_separate_gateway_secret_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runtime,
+        "load_profiles",
+        lambda _path: (_ for _ in ()).throw(AssertionError("Decodo secret read")),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "load_webshare_gateway_secrets",
+        lambda _path: (_ for _ in ()).throw(AssertionError("Webshare secret read")),
+    )
+    database = Database()
+
+    with pytest.raises(ProxyDenied, match="secret file is absent"):
+        resolve(
+            database,
+            snapshot(provider="webshare", secret_generation=7),
+            settings=Settings(
+                proxy_webshare_data_plane_enabled=True,
+                proxy_webshare_gateway_secret_file=None,
+            ),
+        )
+
+    assert database.connections == 0
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"protocol": "https"}, "verified HTTP"),
+        ({"state": "IDF"}, "state or city"),
+        ({"city": "Paris"}, "state or city"),
+        ({"session_mode": "rotate"}, "sticky session"),
+    ],
+)
+def test_webshare_snapshot_capabilities_fail_before_secret_access(
+    monkeypatch: pytest.MonkeyPatch,
+    changes: dict[str, Any],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        runtime,
+        "load_webshare_gateway_secrets",
+        lambda _path: (_ for _ in ()).throw(AssertionError("secret read")),
+    )
+    database = Database()
+
+    with pytest.raises(ProxyDenied, match=message):
+        resolve(
+            database,
+            snapshot(provider="webshare", **{"secret_generation": 7, **changes}),
+            settings=Settings(proxy_webshare_data_plane_enabled=True),
+        )
+
+    assert database.connections == 0
+
+
+@pytest.mark.parametrize(
+    ("changes", "secret", "message"),
+    [
+        ({"session_minutes": 31}, webshare_secret(), "verified gateway duration"),
+        ({"country": "DE"}, webshare_secret(), "not supported"),
+        ({"secret_generation": 6}, webshare_secret(), "immutable job snapshot"),
+        (
+            {},
+            webshare_secret(provider="decodo"),
+            "identity does not match",
+        ),
+        (
+            {},
+            webshare_secret(logical_name="other"),
+            "identity does not match",
+        ),
+    ],
+)
+def test_webshare_secret_must_match_snapshot_and_route_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+    changes: dict[str, Any],
+    secret: WebshareGatewaySecret,
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        runtime,
+        "load_webshare_gateway_secrets",
+        lambda _path: {("webshare", "primary"): secret},
+    )
+    monkeypatch.setattr(runtime.obs, "register_secrets", lambda _values: None)
+    database = Database()
+
+    with pytest.raises(ProxyDenied, match=message):
+        resolve(
+            database,
+            snapshot(provider="webshare", **{"secret_generation": 7, **changes}),
+            settings=Settings(proxy_webshare_data_plane_enabled=True),
+        )
+
+    assert database.connections == 0
+
+
+def test_unknown_webshare_profile_registers_all_loaded_secrets_before_denial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = webshare_secret(logical_name="other")
+    registered: list[set[str]] = []
+    monkeypatch.setattr(
+        runtime,
+        "load_webshare_gateway_secrets",
+        lambda _path: {("webshare", "other"): loaded},
+    )
+    monkeypatch.setattr(runtime.obs, "register_secrets", lambda values: registered.append(values))
+
+    with pytest.raises(ProxyDenied, match="unknown logical Webshare"):
+        resolve(
+            Database(),
+            snapshot(provider="webshare", secret_generation=7),
+            settings=Settings(proxy_webshare_data_plane_enabled=True),
+        )
+
+    assert registered == [{"issued-user", "issued-password"}]
+
+
+@pytest.mark.parametrize(
+    "source_constraints",
+    [
+        {"source_country": "US"},
+        {"source_providers": ("decodo",)},
+    ],
+)
+def test_webshare_cannot_broaden_source_constraints_before_secret_access(
+    monkeypatch: pytest.MonkeyPatch,
+    source_constraints: dict[str, Any],
+) -> None:
+    monkeypatch.setattr(
+        runtime,
+        "load_webshare_gateway_secrets",
+        lambda _path: (_ for _ in ()).throw(AssertionError("secret read")),
+    )
+    database = Database()
+
+    with pytest.raises(ProxyDenied, match="outside source policy"):
+        resolve(
+            database,
+            snapshot(provider="webshare", secret_generation=7),
+            settings=Settings(proxy_webshare_data_plane_enabled=True),
+            **source_constraints,
+        )
+
+    assert database.connections == 0
 
 
 def test_run_byte_cap_can_only_narrow_operator_snapshot(
