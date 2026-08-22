@@ -105,6 +105,14 @@ def resolve_native_proxy_runtime(
     profile = profiles.get(logical_name)
     if profile is None:
         raise ProxyDenied(f"unknown logical proxy profile {logical_name!r}")
+    snapshotted_generation = _bounded_int(
+        proxy_snapshot,
+        "secret_generation",
+        minimum=0,
+        maximum=2_147_483_647,
+    )
+    if profile.generation != snapshotted_generation:
+        raise ProxyDenied("proxy secret generation does not match the immutable job snapshot")
 
     effective_policy = ProxyPolicyConfig(
         mode=ProxyMode(policy),

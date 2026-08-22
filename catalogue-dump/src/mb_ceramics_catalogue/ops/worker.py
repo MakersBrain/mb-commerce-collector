@@ -1268,6 +1268,16 @@ class Worker:
         profile = profiles.get(logical_name)
         if profile is None:
             raise ProxyDenied(f"unknown logical proxy profile {logical_name!r}")
+        snapshotted_generation = snapshot.get("secret_generation")
+        if (
+            isinstance(snapshotted_generation, bool)
+            or not isinstance(snapshotted_generation, int)
+            or snapshotted_generation < 0
+            or profile.generation != snapshotted_generation
+        ):
+            raise ProxyDenied(
+                "proxy secret generation does not match the immutable job snapshot"
+            )
         configured_maximum = int(snapshot.get("max_bytes", 0))
         if configured_maximum <= 0:
             raise ProxyDenied("job proxy snapshot has no valid byte maximum")

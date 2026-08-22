@@ -339,6 +339,100 @@ async def test_atomic_reservations_cannot_oversubscribe_a_cycle(db):
 
 @pytest.mark.postgres
 @requires_postgres
+async def test_reservation_uses_the_selected_provider_profile_route_and_generation(db):
+    start = datetime.now(UTC) - timedelta(days=1)
+    end = datetime.now(UTC) + timedelta(hours=12)
+    await db.execute(
+        """insert into catalogue.proxy_budget_cycles
+           (provider, cycle_start, cycle_end, purchased_bytes, operational_bytes,
+            daily_bytes, reconciled_at, reconciliation_ok, kill_switch)
+           values ('webshare', %s, %s, 100000000, 25000000, 80000000,
+                   now(), true, false)""",
+        (start, end),
+    )
+    profile_cursor = await db.execute(
+        """insert into catalogue.proxy_profiles
+           (provider, logical_name, display_name, enabled, lifecycle,
+            secret_generation, created_by, updated_by)
+           values ('webshare', 'webshare-main', 'Webshare main', true, 'enabled',
+                   3, 'test', 'test') returning id"""
+    )
+    profile_id = (await profile_cursor.fetchone())["id"]
+    route_cursor = await db.execute(
+        """insert into catalogue.proxy_routes
+           (label, profile_id, protocol, country, session_mode, session_minutes,
+            max_bytes, enabled, created_by, updated_by)
+           values ('Webshare FR', %s, 'http', 'FR', 'sticky', 30,
+                   1000, true, 'test', 'test') returning id""",
+        (profile_id,),
+    )
+    route_id = (await route_cursor.fetchone())["id"]
+    await db.execute(
+        """insert into catalogue.proxy_profile_allocations
+           (provider, cycle_start, profile_id, allocated_bytes, updated_by)
+           values ('webshare', %s, %s, 1000, 'test')""",
+        (start, profile_id),
+    )
+    run_id, job_id = uuid4(), uuid4()
+    await db.execute(
+        "insert into catalogue.runs(id, kind, status) values (%s, 'manual', 'running')",
+        (run_id,),
+    )
+    await db.execute(
+        """insert into catalogue.jobs(id, run_id, source_id, host, state)
+           values (%s, %s, 'shop', 'shop.test', 'running')""",
+        (job_id, run_id),
+    )
+
+    reservation_id = await reserve(
+        db,
+        job_id=job_id,
+        provider="webshare",
+        profile="webshare-main",
+        profile_id=profile_id,
+        route_id=route_id,
+        cycle_start=start,
+        cycle_end=end,
+        requested_bytes=100,
+        secret_generation=3,
+    )
+    cursor = await db.execute(
+        """select provider, profile_id, route_id, secret_generation
+             from catalogue.proxy_reservations where id = %s""",
+        (reservation_id,),
+    )
+    assert await cursor.fetchone() == {
+        "provider": "webshare",
+        "profile_id": profile_id,
+        "route_id": route_id,
+        "secret_generation": 3,
+    }
+
+    await db.execute(
+        "update catalogue.proxy_profiles set secret_generation = 4 where id = %s",
+        (profile_id,),
+    )
+    second_job = uuid4()
+    await db.execute(
+        """insert into catalogue.jobs(id, run_id, source_id, host, state)
+           values (%s, %s, 'second-shop', 'shop.test', 'running')""",
+        (second_job, run_id),
+    )
+    with pytest.raises(ProxyDenied, match="snapshot is no longer active"):
+        await reserve(
+            db,
+            job_id=second_job,
+            provider="webshare",
+            profile="webshare-main",
+            profile_id=profile_id,
+            route_id=route_id,
+            requested_bytes=100,
+            secret_generation=3,
+        )
+
+
+@pytest.mark.postgres
+@requires_postgres
 async def test_attempt_authorizations_are_atomic_and_reconcile_exactly_once(db):
     start = datetime.now(UTC) - timedelta(days=1)
     end = datetime.now(UTC) + timedelta(hours=12)
@@ -416,6 +510,82 @@ async def test_attempt_authorizations_are_atomic_and_reconcile_exactly_once(db):
     finally:
         await first.close()
         await second.close()
+
+
+@pytest.mark.postgres
+@requires_postgres
+@pytest.mark.parametrize(
+    "unsafe_state",
+    (
+        {"kill_switch": True},
+        {"reconciliation_ok": False},
+        {"reconciled_at": None},
+        {"lifecycle": "closed"},
+    ),
+)
+async def test_existing_reservation_rechecks_cycle_safety_before_each_attempt(
+    db, unsafe_state
+):
+    start = datetime.now(UTC) - timedelta(days=1)
+    end = datetime.now(UTC) + timedelta(hours=12)
+    await db.execute(
+        """insert into catalogue.proxy_budget_cycles
+           (provider, cycle_start, cycle_end, purchased_bytes, operational_bytes,
+            daily_bytes, reconciled_at, reconciliation_ok, kill_switch)
+           values ('decodo', %s, %s, 100000000, 25000000, 80000000,
+                   now(), true, false)""",
+        (start, end),
+    )
+    run_id, job_id = uuid4(), uuid4()
+    await db.execute(
+        "insert into catalogue.runs(id, kind, status) values (%s, 'manual', 'running')",
+        (run_id,),
+    )
+    await db.execute(
+        """insert into catalogue.jobs(id, run_id, source_id, host, state)
+           values (%s, %s, 'shop', 'shop.test', 'running')""",
+        (job_id, run_id),
+    )
+    reservation_id = await reserve(
+        db,
+        job_id=job_id,
+        profile="default",
+        cycle_start=start,
+        cycle_end=end,
+        requested_bytes=100,
+    )
+
+    state = {
+        "kill_switch": False,
+        "reconciliation_ok": True,
+        "reconciled_at": datetime.now(UTC),
+        "lifecycle": "active",
+        **unsafe_state,
+        "start": start,
+    }
+    await db.execute(
+        """update catalogue.proxy_budget_cycles
+              set kill_switch = %(kill_switch)s,
+                  reconciliation_ok = %(reconciliation_ok)s,
+                  reconciled_at = %(reconciled_at)s,
+                  lifecycle = %(lifecycle)s
+            where provider = 'decodo' and cycle_start = %(start)s""",
+        state,
+    )
+
+    with pytest.raises(ProxyDenied, match="does not authorize new paid traffic"):
+        await authorize_reservation_attempt(
+            db,
+            reservation_id=reservation_id,
+            estimated_bytes=1,
+            maximum_requests=1,
+        )
+    cursor = await db.execute(
+        "select count(*) as count from catalogue.proxy_attempt_authorizations "
+        "where reservation_id = %s",
+        (reservation_id,),
+    )
+    assert (await cursor.fetchone())["count"] == 0
 
 
 @pytest.mark.postgres

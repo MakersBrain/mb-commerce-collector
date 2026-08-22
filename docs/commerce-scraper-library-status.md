@@ -102,6 +102,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `1b05488` — publish intentional bounded collections as sealed limited output.
 - `de23085` — make catalogue connector runtime plans data-only.
 - `bdefd58` — derive worker placement capabilities from adapter metadata.
+- `be50039` — reconcile completed Phase 7 implementation status.
 
 ### Verification at last review
 
@@ -133,7 +134,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - [x] Full catalogue verification:
   - Ruff passed.
   - Mypy passed for 227 source and test files.
-  - 821 tests passed, 6 skipped, and 159 deselected in the latest fast-suite
+  - 822 tests passed, 6 skipped, and 164 deselected in the latest fast-suite
     run; the wider repository fast gate also passed 32 control-plane tests, 14
     service tests, and 2 explorer tests.
   - The lower fast-test count reflects deletion of the obsolete specialized
@@ -635,13 +636,25 @@ but replay/canary migration remains.
   - Runtime composition can require this physical-subrequest capability and
     rejects unmarked proxy-browser factories before lease acquisition. Native
     catalogue composition enables the fail-closed requirement explicitly.
-- [~] Add application-owned fail-closed PostgreSQL budget authorization.
+- [x] Add application-owned fail-closed PostgreSQL budget authorization.
   - Durable authorization rows reserve capacity under the reservation lock,
     release only proven-undispatched attempts, and reconcile actual counters
     exactly once. The live PostgreSQL concurrency/idempotency test passes and
     worker runtime selection is wired. A small borrowed-pool adapter exposes
     the already-fenced job connection, avoiding nested pool checkout and
     legacy/native double ownership; proxy operations remain serialized.
+  - Every physical-attempt authorization now locks and revalidates its owning
+    billing cycle before the reservation. Kill-switch activation, failed or
+    missing reconciliation, a closed lifecycle, and an expired cycle therefore
+    stop existing leases as well as new reservations, with no authorization row
+    inserted after the unsafe transition.
+  - Reservation SQL is provider-keyed and verifies the enabled profile, route,
+    allocation, logical identity, and secret generation together. Job snapshots
+    persist the profile generation, and both legacy and native workers reject a
+    rotated secret rather than silently changing credentials for queued work.
+    Focused PostgreSQL tests cover provider-isolated Webshare ledger rows and
+    all unsafe-cycle denials; Webshare runtime/control composition remains a
+    separate incomplete item.
 - [x] Bound health state and add reason-specific health counters.
   - Process-local state is keyed per provider/endpoint/target, capped with LRU
     eviction, and exposes detached read-only snapshots. Cooldowns grow

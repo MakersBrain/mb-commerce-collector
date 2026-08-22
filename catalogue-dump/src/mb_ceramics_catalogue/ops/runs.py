@@ -121,6 +121,7 @@ async def create_jobs(
                r.city, r.session_mode, r.session_minutes, r.max_bytes as route_max_bytes,
                r.enabled as route_enabled,
                f.id as profile_id, f.provider, f.logical_name as profile,
+               f.secret_generation,
                f.enabled as profile_enabled, f.lifecycle as profile_lifecycle
           from catalogue.source_proxy_policies p
           left join catalogue.proxy_routes r on r.id = p.route_id
@@ -157,6 +158,7 @@ async def create_jobs(
                 "profile_id": str(policy["profile_id"]),
                 "provider": policy["provider"],
                 "profile": policy["profile"],
+                "secret_generation": policy["secret_generation"],
                 "protocol": policy["protocol"],
                 "country": policy["country"] or (config.country.upper() if config.country else None),
                 "state": policy["route_state"],

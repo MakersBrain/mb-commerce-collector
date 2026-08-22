@@ -79,8 +79,10 @@ async def test_proxy_snapshot_is_immutable_after_control_plane_changes(db):
         db,
         """
         insert into catalogue.proxy_profiles
-               (provider, logical_name, display_name, enabled, lifecycle, created_by, updated_by)
-        values ('decodo', 'snapshot-profile', 'Snapshot profile', true, 'enabled', 'test', 'test')
+               (provider, logical_name, display_name, enabled, lifecycle,
+                secret_generation, created_by, updated_by)
+        values ('decodo', 'snapshot-profile', 'Snapshot profile', true, 'enabled',
+                4, 'test', 'test')
         returning id
         """,
     )
@@ -124,6 +126,7 @@ async def test_proxy_snapshot_is_immutable_after_control_plane_changes(db):
         "profile_id": str(profile["id"]),
         "provider": "decodo",
         "profile": "snapshot-profile",
+        "secret_generation": 4,
         "protocol": "https",
         "country": "FR",
         "state": "IDF",
@@ -136,7 +139,8 @@ async def test_proxy_snapshot_is_immutable_after_control_plane_changes(db):
 
     await db.execute(
         "update catalogue.proxy_profiles set provider = 'replacement', "
-        "logical_name = 'replacement-profile', enabled = false, lifecycle = 'disabled' "
+        "logical_name = 'replacement-profile', secret_generation = 5, "
+        "enabled = false, lifecycle = 'disabled' "
         "where id = %(id)s",
         {"id": profile["id"]},
     )

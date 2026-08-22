@@ -38,6 +38,7 @@ def snapshot(**changes: Any) -> dict[str, Any]:
         "profile_id": str(uuid4()),
         "route_id": str(uuid4()),
         "profile": "primary",
+        "secret_generation": 0,
         "protocol": "http",
         "country": "FR",
         "state": None,
@@ -168,6 +169,32 @@ def test_run_byte_cap_can_only_narrow_operator_snapshot(
 
     assert narrowed is not None and narrowed.policy.maximum_bytes == 3_000_000
     assert unchanged is not None and unchanged.policy.maximum_bytes == 2_000_000
+    assert database.connections == 0
+
+
+def test_rotated_secret_cannot_replace_the_generation_snapshotted_for_a_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runtime,
+        "load_profiles",
+        lambda _path: {
+            "primary": ProxyProfile(
+                "primary",
+                "gate.test",
+                7000,
+                "user",
+                "rotated-secret",
+                generation=2,
+            )
+        },
+    )
+    monkeypatch.setattr(runtime.obs, "register_secrets", lambda _values: None)
+    database = Database()
+
+    with pytest.raises(ProxyDenied, match="immutable job snapshot"):
+        resolve(database, snapshot(secret_generation=1))
+
     assert database.connections == 0
 
 
