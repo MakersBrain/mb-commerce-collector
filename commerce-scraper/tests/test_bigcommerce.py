@@ -18,6 +18,7 @@ from mb_commerce_scraper.testing import FakeTransport, assert_connector_pages
 from mb_commerce_scraper.transports import (
     BrowserHint,
     BudgetExhausted,
+    RequestPurpose,
     RobotsDenied,
     TransportRequest,
     TransportResponse,
@@ -117,6 +118,18 @@ async def test_public_graphql_snapshot_is_neutral() -> None:
     assert snapshot.documents[0].url == f"{ORIGIN}/docs/sds.pdf"
     assert snapshot.variants[0].offers[0].price.amount == 12.50
     assert transport.requests[-1].json_body is not None
+    assert [
+        (item.url, item.purpose, item.browser, item.estimated_bytes)
+        for item in transport.requests
+    ] == [
+        (
+            f"{ORIGIN}/catalogue",
+            RequestPurpose.DISCOVERY,
+            BrowserHint.NEVER,
+            500_000,
+        ),
+        (GRAPHQL, RequestPurpose.DISCOVERY, BrowserHint.NEVER, 1_000_000),
+    ]
 
 
 async def test_http_denial_uses_rendered_token_and_browser_graphql() -> None:
@@ -159,6 +172,35 @@ async def test_http_denial_uses_rendered_token_and_browser_graphql() -> None:
     assert isinstance(graphql.json_body["query"], str)
     assert graphql.json_body["variables"] == {"after": None, "first": 50}
     assert pages[0].diagnostics == ()
+    assert [
+        (item.purpose, item.browser, item.estimated_bytes)
+        for item in transport.requests
+    ] == [
+        (RequestPurpose.DISCOVERY, BrowserHint.NEVER, 500_000),
+        (RequestPurpose.DISCOVERY, BrowserHint.REQUIRED, 500_000),
+        (RequestPurpose.DISCOVERY, BrowserHint.REQUIRED, 1_000_000),
+    ]
+
+
+async def test_origin_token_page_is_not_retried_as_a_second_candidate() -> None:
+    transport = FakeTransport()
+    transport.add(ORIGIN, body="no storefront token")
+    transport.add(ORIGIN, body="no storefront token")
+    connector = BigCommerceConnector(
+        transport,
+        BigCommerceOptions(token_page=ORIGIN),
+    )
+
+    page = await anext(connector.collect(request()))
+
+    assert page.diagnostics[0].code.value == "parser_unsupported"
+    assert [
+        (item.url, item.purpose, item.browser, item.estimated_bytes)
+        for item in transport.requests
+    ] == [
+        (ORIGIN, RequestPurpose.DISCOVERY, BrowserHint.NEVER, 500_000),
+        (ORIGIN, RequestPurpose.DISCOVERY, BrowserHint.REQUIRED, 500_000),
+    ]
 
 
 async def test_result_limit_produces_resumable_checkpoint() -> None:

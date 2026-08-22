@@ -12,6 +12,7 @@ from mb_commerce_scraper.connectors import (
     WooCommerceOptions,
 )
 from mb_commerce_scraper.testing import FakeTransport, assert_connector_pages
+from mb_commerce_scraper.transports import BrowserHint, RequestPurpose
 
 NOW = datetime(2026, 8, 15, 10, 0, tzinfo=UTC)
 API = "https://shop.test/wp-json/wc/store/v1/products"
@@ -83,6 +84,10 @@ async def test_simple_product_preserves_neutral_fields() -> None:
     assert snapshot.variants[0].offers[0].price.amount == 12.50
     stock = snapshot.variants[0].stock
     assert stock is not None and stock.quantity == 7
+    assert [
+        (item.url, item.purpose, item.browser, item.estimated_bytes)
+        for item in transport.requests
+    ] == [(API, RequestPurpose.DISCOVERY, BrowserHint.NEVER, 1_000_000)]
 
 
 async def test_variable_product_joins_bulk_variations() -> None:

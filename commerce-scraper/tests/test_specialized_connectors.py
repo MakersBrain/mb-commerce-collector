@@ -28,7 +28,11 @@ from mb_commerce_scraper.testing import (
     assert_checkpoint_matches,
     assert_connector_pages,
 )
-from mb_commerce_scraper.transports import BrowserDispatchTransport, BrowserHint
+from mb_commerce_scraper.transports import (
+    BrowserDispatchTransport,
+    BrowserHint,
+    RequestPurpose,
+)
 
 NOW = datetime(2026, 8, 15, tzinfo=UTC)
 JSONLD = """<html><script type="application/ld+json">{
@@ -195,6 +199,23 @@ async def test_sumup_collection_runs_contextual_conformance_harness() -> None:
     )
 
     assert page.items[0].title == "Tasse bleue"
+    assert [
+        (item.url, item.purpose, item.browser, item.estimated_bytes)
+        for item in transport.requests
+    ] == [
+        (
+            "https://shop.test/s.xml",
+            RequestPurpose.DISCOVERY,
+            BrowserHint.NEVER,
+            500_000,
+        ),
+        (
+            "https://shop.test/article/tasse-bleue",
+            RequestPurpose.ENTITY,
+            BrowserHint.NEVER,
+            500_000,
+        ),
+    ]
 
 
 async def test_oversized_product_body_becomes_a_non_retryable_diagnostic() -> None:
@@ -271,6 +292,14 @@ async def test_collection_is_ordered_bounded_and_checkpoint_resumable(
         "index": 1, "url": "https://shop.test/b",
         "snapshot_offset": 0, "sequence": 1,
     }
+    assert [
+        (item.purpose, item.browser, item.estimated_bytes)
+        for item in transport.requests
+    ] == [
+        (RequestPurpose.DISCOVERY, BrowserHint.NEVER, 500_000),
+        (RequestPurpose.ENTITY, BrowserHint.NEVER, 500_000),
+        (RequestPurpose.ENTITY, BrowserHint.NEVER, 500_000),
+    ]
 
     resume_transport = FakeTransport()
     resume_transport.add("https://shop.test/s.xml", body=sitemap)
@@ -326,6 +355,13 @@ async def test_result_limit_is_typed_and_does_not_fetch_next_product() -> None:
     assert [request.url for request in transport.requests] == [
         "https://shop.test/s.xml",
         "https://shop.test/a",
+    ]
+    assert [
+        (item.purpose, item.browser, item.estimated_bytes)
+        for item in transport.requests
+    ] == [
+        (RequestPurpose.DISCOVERY, BrowserHint.NEVER, 500_000),
+        (RequestPurpose.ENTITY, BrowserHint.NEVER, 500_000),
     ]
     checkpoint = connector.checkpoint(
         intent, "lineage-1", pages[0].resume_after

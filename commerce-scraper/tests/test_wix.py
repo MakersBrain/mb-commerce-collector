@@ -138,6 +138,13 @@ async def test_warmup_payload_emits_neutral_price_stock_and_documents() -> None:
     assert [offer.price.amount for offer in first.offers] == [11, 14]
     assert first.stock is not None and first.stock.quantity == 3
     assert second.stock is not None and second.stock.quantity == 0
+    assert [
+        (item.url, item.purpose, item.browser, item.estimated_bytes)
+        for item in transport.requests
+    ] == [
+        (SITEMAP, RequestPurpose.DISCOVERY, BrowserHint.NEVER, 2_000_000),
+        (url, RequestPurpose.ENTITY, BrowserHint.NEVER, 2_000_000),
+    ]
 
 
 async def test_browser_fallback_uses_required_browser_hint_and_checks_cancellation() -> None:
@@ -158,6 +165,14 @@ async def test_browser_fallback_uses_required_browser_hint_and_checks_cancellati
     assert [item.browser for item in transport.requests[-2:]] == [
         BrowserHint.NEVER,
         BrowserHint.REQUIRED,
+    ]
+    assert [
+        (item.purpose, item.browser, item.estimated_bytes)
+        for item in transport.requests
+    ] == [
+        (RequestPurpose.DISCOVERY, BrowserHint.NEVER, 2_000_000),
+        (RequestPurpose.ENTITY, BrowserHint.NEVER, 2_000_000),
+        (RequestPurpose.ENTITY, BrowserHint.REQUIRED, 2_000_000),
     ]
 
     cancelled_transport = FakeTransport()

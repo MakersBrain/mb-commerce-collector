@@ -120,6 +120,13 @@ async def test_sitemap_product_preserves_neutral_snapshot() -> None:
     assert snapshot.variants[0].offers[0].price.amount == 12.50
     assert snapshot.variants[0].stock is not None
     assert snapshot.variants[0].stock.quantity == 4
+    assert [
+        (item.url, item.purpose, item.browser, item.estimated_bytes)
+        for item in transport.requests
+    ] == [
+        (SITEMAP, RequestPurpose.DISCOVERY, BrowserHint.NEVER, 1_000_000),
+        (PRODUCT, RequestPurpose.ENTITY, BrowserHint.NEVER, 1_000_000),
+    ]
 
 
 async def test_variant_combinations_use_prestashop_refresh_endpoint() -> None:
@@ -188,11 +195,33 @@ async def test_sio2_category_projection_and_cancellation() -> None:
         PrestaShopOptions.model_validate({"category_urls": [], "unknown": True})
 
     transport = FakeTransport()
+    category = f"{ORIGIN}/gb/14-glazes"
+    transport.add(
+        category,
+        body=f'<article class="product-card"><a href="{PRODUCT}">Glaze</a></article>',
+    )
+    transport.add(PRODUCT, body=page(details()))
     connector = PrestaShopConnector(
-        transport, options, ConnectorContext(cancelled=lambda: True)
+        transport, options, ConnectorContext(clock=lambda: NOW)
+    )
+
+    pages = await assert_connector_pages(connector.collect(request()))
+
+    assert pages[0].items[0].title == "Stoneware & Glaze"
+    assert [
+        (item.url, item.purpose, item.browser, item.estimated_bytes)
+        for item in transport.requests
+    ] == [
+        (category, RequestPurpose.DISCOVERY, BrowserHint.NEVER, 1_000_000),
+        (PRODUCT, RequestPurpose.ENTITY, BrowserHint.NEVER, 1_000_000),
+    ]
+
+    cancelled_transport = FakeTransport()
+    connector = PrestaShopConnector(
+        cancelled_transport, options, ConnectorContext(cancelled=lambda: True)
     )
     assert [value async for value in connector.collect(request())] == []
-    assert transport.requests == []
+    assert cancelled_transport.requests == []
 
 
 async def test_advertised_sitemap_uses_robots_request_purpose() -> None:
