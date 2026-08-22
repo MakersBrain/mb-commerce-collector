@@ -292,6 +292,13 @@ def _validated_profile(profile: WebshareGatewaySecret) -> WebshareGatewaySecret:
         raise ProxyDenied("Webshare gateway secret record is invalid") from None
 
 
+def validate_webshare_gateway_secret(
+    profile: WebshareGatewaySecret,
+) -> WebshareGatewaySecret:
+    """Strictly revalidate a constructed record without reading or writing a file."""
+    return _validated_profile(profile)
+
+
 def _validated_expected_generation(expected_generation: int) -> int:
     return _strict_integer(
         expected_generation,

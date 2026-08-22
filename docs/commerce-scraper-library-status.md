@@ -112,6 +112,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `2fd0386` — resolve durable Webshare routes.
 - `1d83636` — rotate Webshare gateway secrets with local CAS.
 - `a2043ea` — stage Webshare worker secrets default-off.
+- `31285e3` — fence profile secret rotations and persist recovery intents.
+- `0559a67` — run Podman catalogue workers rootless.
 
 ### Verification at last review
 
@@ -216,6 +218,10 @@ architecture rules in the plan and are not separate scope-expansion goals.
     rendered Compose placement passed 4 focused tests plus Compose
     configuration validation. A combined live PostgreSQL gate passed 18
     durable-fence and schema-migration cases.
+  - The Webshare profile-import orchestration service passed 7 live PostgreSQL
+    create, rotate, drain, crash-recovery, retry, tuple-binding, and unsafe-cycle
+    cases. The control fast suite passed 32 tests with 78 PostgreSQL cases
+    deselected.
 - [x] Source configuration inventory: all 88 configured sources can be
   constructed through the current layered/library mapping.
   - All 21 `pagecrawl` sources now validate through the explicit legacy-to-
@@ -776,8 +782,21 @@ but replay/canary migration remains.
     capabilities and is included in proxy role ownership.
   - Migration ordering, idempotence, identity foreign keys, generation/state
     checks, timestamp rules, and active-intent uniqueness pass focused live
-    PostgreSQL tests. The orchestration/recovery state machine and authenticated
-    endpoint do not exist yet.
+    PostgreSQL tests.
+  - A typed control service now prepares creates or rotations under provider,
+    cycle, profile, allocation, and reservation locks; disables and drains
+    active reservations before creating an intent; performs strict local file
+    CAS outside PostgreSQL transactions; and finalizes only after reacquiring
+    locks and rechecking cycle, allocation, database generation, and installed
+    file generation.
+  - Generation-only recovery finalizes a file-ahead-of-database crash, retains
+    unsafe installed state for retry, or fails a missing/conflicting generation
+    without inspecting credential values. Failed generation-one creates can be
+    resubmitted only by adopting an identical pristine pending profile and
+    allocation, and resumed operation tuples must match exactly.
+  - The authenticated/idempotent HTTP endpoint, audit/event emission, mutation
+    completion/replay integration, and control-exclusive write mount do not
+    exist yet.
 - [x] Add default-off worker-only Webshare secret staging.
   - The authoritative Podman runtime stage copies the optional bounded regular
     Infisical export byte-for-byte to a private mode-`0600` file, or creates an
@@ -1182,15 +1201,14 @@ Exit criterion: **not met**.
    limited browser-capable canary with the tested source-level rollback route.
 6. Run representative PrestaShop and Sio2 sources through recorded replay,
    projected output comparison, and limited canaries with independent rollback.
-7. Implement the authenticated import/rotation orchestration over the new
-   durable file/SQL recovery intent for Webshare-issued gateway credentials.
-   Rotation must disable the profile and
-   move its active reservations to `revocation_requested` before file CAS;
-   profile disablement alone does not stop attempts on existing leases. The
-   worker-only read mounts and HTTP resolver-to-wire integration now pass; a
-   control-exclusive write mount, rootless smoke, and live browser callback
-   integration remain. Keep Webshare out of production composite selection
-   until those controls pass.
+7. Expose the implemented Webshare import/rotation service through the existing
+   recent-admin, idempotency, audit, and event controls, including safe replay
+   of started recovery operations, then add its control-exclusive write mount.
+   Rotation already disables the profile and moves active reservations to
+   `revocation_requested` before file CAS. The worker-only read mounts and HTTP
+   resolver-to-wire integration pass; a real rootless Quadlet smoke and live
+   browser callback integration remain. Keep Webshare out of production
+   composite selection until those controls pass.
 8. Run one Shopify and one page-based source through recorded replay, ceramics
    projection parity, and a production canary with rollback.
 9. Migrate configured production sources incrementally through the existing
