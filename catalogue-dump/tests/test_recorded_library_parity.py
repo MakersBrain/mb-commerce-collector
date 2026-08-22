@@ -57,6 +57,11 @@ RECORDED_KERAMIKBEDARF = _recorded_source_case("keramikbedarf-online")
 
 
 @pytest.mark.golden
+def test_ci_archive_preflight_requires_connector_parity_inputs() -> None:
+    support.require_ci_recordings()
+
+
+@pytest.mark.golden
 @pytest.mark.parametrize("source", CASES, ids=RECORDED_SHOPIFY or None)
 def test_recorded_shopify_responses_have_legacy_library_projection_parity(
     source: str,

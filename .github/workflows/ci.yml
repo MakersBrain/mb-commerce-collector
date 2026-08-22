@@ -122,8 +122,8 @@ jobs:
       # exist, these two steps are skipped and the golden tests skip with an
       # empty cache — which is exactly what this job did before. Setting the
       # INFISICAL_PROJECT_SLUG variable is what turns the gate on, and the
-      # `Confirm` step below is what stops a missing variable from reading as a
-      # passing replay for a second time.
+      # explicit post-pull replay flag is what stops a partial archive from
+      # reading as a passing replay for a second time.
       #
       # The only secrets in this repository are the machine identity itself.
       # Everything the job actually uses is read from Infisical at run time, so
@@ -174,19 +174,11 @@ jobs:
       # nothing else. A build has no reason to be able to publish one.
       - name: Fetch the recorded response cache
         if: vars.INFISICAL_PROJECT_SLUG != ''
-        run: uv --directory catalogue-dump run -- catalogue-cache-archive pull --force
+        run: |
+          uv --directory catalogue-dump run -- catalogue-cache-archive pull --force
+          echo "CATALOGUE_GOLDEN_ARCHIVE_REQUIRED=1" >> "$GITHUB_ENV"
       - name: Replay every cached source
         run: make test-golden
-      # A skipped replay is not a passing replay. Once the cache is provisioned
-      # this fails the job if the suite quietly collected nothing, which is the
-      # failure mode that hid a dormant golden suite for months.
-      - name: Confirm the replay actually replayed something
-        if: vars.INFISICAL_PROJECT_SLUG != ''
-        run: |
-          test -d catalogue-dump/.cache || {
-            echo "::error::the response cache was not fetched; the replay asserted nothing"
-            exit 1
-          }
       - name: Keep the differing output for inspection
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -33,6 +34,18 @@ from mb_ceramics_catalogue.scrapers.record import RecordBuilder
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN = Path(__file__).resolve().parent / "golden"
 CACHE = ROOT / ".cache"
+ARCHIVE_MANIFEST = ROOT / "cache-archive.json"
+
+# These are the production recordings that make the extracted connector parity
+# tests meaningful. Keep the set explicit: deriving it from whatever happens to
+# be present would let a missing golden silently reduce CI coverage.
+REQUIRED_RECORDED_SOURCES = {
+    "ceradel": "shopify",
+    "ceramique-peinture": "shopify",
+    "penguin-pottery": "shopify",
+    "keramikbedarf-online": "shopware",
+}
+CI_ARCHIVE_REQUIRED = "CATALOGUE_GOLDEN_ARCHIVE_REQUIRED"
 
 #: `fetched_at` is the wall clock at the moment the row was built, so it is the
 #: one field that legitimately differs between two identical runs.
@@ -43,19 +56,123 @@ def sources() -> SourcesFile:
     return SourcesFile.load(default_path())
 
 
-def cached_sources() -> list[str]:
+def cached_sources(
+    cache: Path = CACHE,
+    configured: SourcesFile | None = None,
+) -> list[str]:
     """The sources the checked-in cache can actually replay, in a stable order.
 
     A source whose host has no cache directory would replay to zero records and
     assert nothing, so it is left out rather than frozen as an empty golden file
     that would keep passing after the scraper broke.
     """
-    if not CACHE.is_dir():
+    if not cache.is_dir():
         return []
-    hosts = {path.name for path in CACHE.iterdir() if path.is_dir()}
+    hosts = {path.name for path in cache.iterdir() if path.is_dir()}
+    configured = sources() if configured is None else configured
     return sorted(
-        name for name, config in sources().items() if urlparse(config.url).netloc in hosts
+        name
+        for name, config in configured.items()
+        if urlparse(config.url).netloc in hosts
     )
+
+
+class RecordedReplayPreflightError(RuntimeError):
+    """CI declared an archive provisioned but required recordings are absent."""
+
+
+def required_recording_issues(
+    *,
+    cache: Path = CACHE,
+    golden: Path = GOLDEN,
+    manifest: Path = ARCHIVE_MANIFEST,
+    configured: SourcesFile | None = None,
+) -> list[str]:
+    """Return stable, credential-free reasons required parity cases cannot run."""
+    configured = sources() if configured is None else configured
+    issues: list[str] = []
+    manifest_hosts: set[str] = set()
+    manifest_hosts_valid = False
+    try:
+        record = json.loads(manifest.read_text(encoding="utf-8"))
+        if not isinstance(record, dict):
+            issues.append("cache archive manifest is invalid")
+        else:
+            missing_fields = {
+                "key",
+                "sha256",
+                "bytes",
+                "files",
+                "hosts",
+            }.difference(record)
+            if missing_fields:
+                issues.append(
+                    "cache archive manifest is missing: "
+                    + ", ".join(sorted(missing_fields))
+                )
+            elif isinstance(record["hosts"], list):
+                manifest_hosts = {
+                    host for host in record["hosts"] if isinstance(host, str)
+                }
+                if manifest_hosts:
+                    manifest_hosts_valid = True
+                else:
+                    issues.append("cache archive manifest hosts are empty")
+            else:
+                issues.append("cache archive manifest hosts are invalid")
+    except (OSError, json.JSONDecodeError):
+        issues.append("cache archive manifest is absent or invalid")
+
+    for name, expected_scraper in REQUIRED_RECORDED_SOURCES.items():
+        source = configured.get(name)
+        if source is None:
+            issues.append(f"{name}: source configuration is absent")
+            continue
+        if source.scraper != expected_scraper:
+            issues.append(
+                f"{name}: expected {expected_scraper} source, found {source.scraper}"
+            )
+        if not (golden / f"{name}.json").is_file():
+            issues.append(f"{name}: frozen golden is absent")
+        host = urlparse(source.url).netloc
+        if manifest_hosts_valid and host not in manifest_hosts:
+            issues.append(f"{name}: recorded host is absent from the manifest")
+        host_cache = cache / host
+        if not host_cache.is_dir() or not any(
+            path.is_file() for path in host_cache.rglob("*.json.gz")
+        ):
+            issues.append(f"{name}: recorded host cache is absent or empty")
+    return issues
+
+
+def require_ci_recordings(
+    *,
+    env: dict[str, str] | None = None,
+    cache: Path = CACHE,
+    golden: Path = GOLDEN,
+    manifest: Path = ARCHIVE_MANIFEST,
+    configured: SourcesFile | None = None,
+) -> None:
+    """Fail CI's provisioned replay, while leaving archive-free local runs alone."""
+    env = dict(os.environ if env is None else env)
+    required = env.get(CI_ARCHIVE_REQUIRED)
+    if not required:
+        return
+    if required != "1":
+        raise RecordedReplayPreflightError(
+            f"{CI_ARCHIVE_REQUIRED} must be '1' when set"
+        )
+    issues = required_recording_issues(
+        cache=cache,
+        golden=golden,
+        manifest=manifest,
+        configured=configured,
+    )
+    if issues:
+        raise RecordedReplayPreflightError(
+            "CI declared the response archive provisioned, but required replay "
+            "inputs are unavailable:\n- " + "\n- ".join(issues)
+        )
 
 
 def normalise(record: dict[str, Any]) -> dict[str, Any]:
