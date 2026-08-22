@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
-from mb_ceramics_catalogue.connectors.commerce import Evidence
+from mb_commerce_scraper.models import Evidence
 
 
 def observation_id(*components: str) -> str:

@@ -6,9 +6,12 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from enum import StrEnum
 from typing import Generic, Protocol, TypeVar, runtime_checkable
 
+from mb_commerce_scraper.models import (
+    CommerceProductSnapshot,
+    ContractModel,
+    StockQuantityKind,
+)
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
-
-from .commerce import CommerceProductSnapshot, ContractModel, StockQuantityKind
 
 
 class SnapshotField(StrEnum):

@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Literal
 
+from mb_commerce_scraper.models import CommerceProductSnapshot, Evidence
 from pydantic import AwareDatetime, BaseModel, ConfigDict
 
 from mb_ceramics_catalogue.connectors.base import SnapshotField
-from mb_ceramics_catalogue.connectors.commerce import CommerceProductSnapshot, Evidence
 from mb_ceramics_catalogue.datasets.base import ProjectionContext
 
 from ._common import evidence_key, observation_id

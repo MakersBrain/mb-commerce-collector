@@ -10,9 +10,7 @@ from decimal import Decimal
 from typing import Any, Literal
 from urllib.parse import unquote, urljoin, urlparse
 
-from pydantic import ConfigDict
-
-from .commerce import (
+from mb_commerce_scraper.models import (
     Availability,
     CategoryRef,
     CommerceOffer,
@@ -24,6 +22,8 @@ from .commerce import (
     StockQuantityKind,
     StockState,
 )
+from pydantic import ConfigDict
+
 from .page import balanced_object, clean, meta
 from .pagecommerce import (
     PageCommerceConnector,

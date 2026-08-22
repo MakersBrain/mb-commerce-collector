@@ -26,6 +26,7 @@ SUPPORTED_SCRAPER_MODULES = frozenset(
         "mb_commerce_scraper.transports",
     }
 )
+DEPRECATED_COMMERCE_SHIM = "mb_ceramics_catalogue.connectors.commerce"
 FORBIDDEN_PREFIXES = (
     "mb_ceramics_catalogue.scrapers",
     "mb_ceramics_catalogue.datasets",
@@ -145,5 +146,34 @@ def test_catalogue_uses_only_supported_scraper_import_namespaces() -> None:
                         f"{path.relative_to(CATALOGUE_PACKAGE)}:"
                         f"{getattr(node, 'lineno', 0)}: {module}"
                     )
+
+    assert violations == []
+
+
+def test_production_modules_do_not_import_deprecated_commerce_shim() -> None:
+    violations: list[str] = []
+    for path in sorted(CATALOGUE_PACKAGE.rglob("*.py")):
+        relative = path.relative_to(CATALOGUE_PACKAGE)
+        if relative == Path("connectors/commerce.py"):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and (
+                    (node.level == 0 and node.module == DEPRECATED_COMMERCE_SHIM)
+                    or (
+                        relative.parts[0] == "connectors"
+                        and node.level == 1
+                        and node.module == "commerce"
+                    )
+                )
+            ):
+                module = node.module or DEPRECATED_COMMERCE_SHIM
+                violations.append(f"{relative}:{node.lineno}: {module}")
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == DEPRECATED_COMMERCE_SHIM:
+                        violations.append(f"{relative}:{node.lineno}: {alias.name}")
 
     assert violations == []

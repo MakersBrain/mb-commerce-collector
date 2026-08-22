@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
+from mb_commerce_scraper.models import CommerceProductSnapshot
 from pydantic import BaseModel
 
 from mb_ceramics_catalogue.connectors.base import (
@@ -16,7 +17,6 @@ from mb_ceramics_catalogue.connectors.base import (
     DiagnosticCode,
     EntityPage,
 )
-from mb_ceramics_catalogue.connectors.commerce import CommerceProductSnapshot
 from mb_ceramics_catalogue.datasets.base import ProjectionContext
 from mb_ceramics_catalogue.datasets.registry import DatasetRegistry
 from mb_ceramics_catalogue.observability import metrics

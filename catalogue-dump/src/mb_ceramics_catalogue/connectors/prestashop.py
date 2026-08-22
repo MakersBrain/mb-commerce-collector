@@ -13,6 +13,19 @@ from typing import Any, Literal, Protocol, cast
 from urllib.parse import urlencode, urljoin, urlparse, urlunparse
 
 import httpx
+from mb_commerce_scraper.models import (
+    Availability,
+    CategoryRef,
+    CommerceOffer,
+    CommerceProductSnapshot,
+    CommerceVariant,
+    DocumentRef,
+    Evidence,
+    MediaRef,
+    Money,
+    StockQuantityKind,
+    StockState,
+)
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from .base import (
@@ -36,19 +49,6 @@ from .budget import (
     RequestBudgetProtocol,
     RequestPriority,
     budget_diagnostic,
-)
-from .commerce import (
-    Availability,
-    CategoryRef,
-    CommerceOffer,
-    CommerceProductSnapshot,
-    CommerceVariant,
-    DocumentRef,
-    Evidence,
-    MediaRef,
-    Money,
-    StockQuantityKind,
-    StockState,
 )
 from .page import brand as jsonld_brand
 from .page import (

@@ -16,6 +16,7 @@ from mb_commerce_scraper import (
 from mb_commerce_scraper import (
     ConnectorCheckpoint as LibraryConnectorCheckpoint,
 )
+from mb_commerce_scraper.models import CommerceProductSnapshot
 from mb_commerce_scraper.transports import NullTelemetry, TelemetryHooks, safe_telemetry
 from pydantic import JsonValue
 
@@ -24,7 +25,6 @@ from mb_ceramics_catalogue.connectors.base import (
     ConnectorCheckpoint,
     EntityPage,
 )
-from mb_ceramics_catalogue.connectors.commerce import CommerceProductSnapshot
 
 
 class LibraryPipelineConnector:

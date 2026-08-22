@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 
+from mb_commerce_scraper.models import CommerceProductSnapshot
 from pydantic import BaseModel
 
 from mb_ceramics_catalogue.connectors.base import SnapshotField
-from mb_ceramics_catalogue.connectors.commerce import CommerceProductSnapshot
 
 from .base import DatasetDefinition, ProjectionContext
 
