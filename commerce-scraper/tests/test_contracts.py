@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from decimal import Decimal
 
 import pytest
@@ -5,14 +6,20 @@ from pydantic import ValidationError
 
 from mb_commerce_scraper import (
     CollectionRequest,
+    CommerceProductSnapshot,
     ConnectorCapabilities,
     ConnectorCheckpoint,
+    Diagnostic,
+    DiagnosticCode,
+    DiagnosticSeverity,
+    EntityPage,
     Money,
     RefreshMode,
     ShopifyConnector,
     SnapshotField,
     collection_fingerprint,
 )
+from mb_commerce_scraper.testing import assert_connector_pages
 
 
 def request(*, limit: int | None = None) -> CollectionRequest:
@@ -71,3 +78,27 @@ def test_shared_edge_is_typed_and_exposed_as_a_named_capability() -> None:
             refresh_modes=frozenset({RefreshMode.FULL}),
             shared_edge="  ",
         )
+
+
+async def test_result_limit_page_requires_resume_cursor() -> None:
+    async def pages() -> AsyncIterator[EntityPage[CommerceProductSnapshot]]:
+        yield EntityPage(
+            page_id="main:limit",
+            sequence=0,
+            items=(),
+            terminal=True,
+            enumeration_intact=False,
+            discovered=1,
+            diagnostics=(
+                Diagnostic(
+                    code=DiagnosticCode.RESULT_LIMIT_REACHED,
+                    severity=DiagnosticSeverity.INFO,
+                    message="result limit reached",
+                    retryable=False,
+                    affects_completeness=True,
+                ),
+            ),
+        )
+
+    with pytest.raises(AssertionError, match="must carry a resume cursor"):
+        await assert_connector_pages(pages())

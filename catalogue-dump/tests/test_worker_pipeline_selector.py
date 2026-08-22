@@ -659,7 +659,13 @@ async def test_library_policy_denies_robots_before_connector_network_calls():
 def test_limited_connector_outcome_can_never_authorize_retirement():
     from mb_ceramics_catalogue.ops.worker import _connector_load_is_whole
 
-    limited = PipelineResult(pages=1, terminal=True, enumeration_intact=False, datasets={})
+    limited = PipelineResult(
+        pages=1,
+        terminal=True,
+        enumeration_intact=False,
+        limited=True,
+        datasets={},
+    )
     assert not _connector_load_is_whole(limited)
 
 

@@ -261,6 +261,227 @@ class NativeBrowserBackend:
         self.shutdowns += 1
 
 
+async def test_native_shopify_result_limit_publishes_usable_sealed_output(
+    db,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """A deliberate sample is usable output, not an enumeration failure.
+
+    The limit is an operator-owned collection boundary.  It must retain its
+    cursor and incomplete-enumeration signal for auditability while publishing
+    the bounded records adds-only.  Re-entering the same job then recovers the
+    sealed result instead of opening another transport or publishing it twice.
+    """
+    from mb_ceramics_catalogue.ops import commerce_scraper_runtime as runtime_module
+    from mb_ceramics_catalogue.ops import worker as worker_module
+    from mb_ceramics_catalogue.storage import postgres
+
+    sources = SourcesFile.model_validate(
+        {
+            "shop": {
+                "label": "Shop",
+                "url": "https://shop.test/",
+                "scraper": "shopify",
+                "currency": "EUR",
+                "scope": "all",
+            }
+        }
+    )
+    run_id = await runs.create_run(db)
+    assert run_id is not None
+    job_id = (await runs.create_jobs(db, run_id, sources, ["shop"]))["shop"]
+    claimed = ClaimedJob(
+        id=job_id,
+        run_id=run_id,
+        source_id="shop",
+        host="shop.test",
+        attempt=1,
+        max_attempts=3,
+        requires=[],
+        requires_any=[],
+        params={},
+        proxy_snapshot={"policy": "never"},
+        delivery_generation=1,
+        execution_token=uuid4(),
+    )
+    worker = Worker(
+        cast(DictPool, Pool(db)),
+        sources,
+        Settings(
+            dsn=os.environ["CATALOGUE_TEST_DSN"],
+            dumps_dir=tmp_path,
+            cache_dir=tmp_path / "cache",
+        ),
+    )
+    worker._cancels[job_id] = asyncio.Event()
+
+    backend = FakeTransport()
+    backend.add(
+        "https://shop.test/products.json",
+        json_body={
+            "products": [
+                {
+                    "id": 1,
+                    "handle": "first-glaze",
+                    "title": "First glaze",
+                    "variants": [
+                        {
+                            "id": 11,
+                            "title": "500 ml",
+                            "sku": "FIRST-500",
+                            "price": "12.50",
+                            "available": True,
+                        }
+                    ],
+                },
+                {
+                    "id": 2,
+                    "handle": "second-glaze",
+                    "title": "Second glaze",
+                    "variants": [
+                        {
+                            "id": 22,
+                            "title": "500 ml",
+                            "sku": "SECOND-500",
+                            "price": "13.50",
+                            "available": True,
+                        }
+                    ],
+                },
+            ]
+        },
+    )
+    native_runtimes = 0
+    proxy_resolutions = 0
+    original_resolver = worker_module.resolve_native_proxy_runtime
+
+    def native_builder(**kwargs: Any) -> CommerceScraper:
+        nonlocal native_runtimes
+        native_runtimes += 1
+        return CommerceScraper(
+            registry=kwargs["registry"],
+            transport=backend,
+            fetch_policy=kwargs["fetch_policy"],
+            cache=kwargs["cache"],
+            telemetry=kwargs["telemetry"],
+            retries=kwargs["retries"],
+        )
+
+    def resolve_native_proxy(*args: Any, **kwargs: Any) -> Any:
+        nonlocal proxy_resolutions
+        proxy_resolutions += 1
+        return original_resolver(*args, **kwargs)
+
+    async def forbidden_legacy_session(*args: Any, **kwargs: Any):
+        del args, kwargs
+        raise AssertionError("native limited collection must not open a legacy session")
+
+    async def forbidden_legacy_proxy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        raise AssertionError("native limited collection must not acquire a legacy proxy")
+
+    def forbidden_browser(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        raise AssertionError("Shopify limited collection must not resolve a browser")
+
+    loads: list[tuple[str, bool]] = []
+
+    def load_limited_artifact(
+        loaded_job: ClaimedJob,
+        location: str,
+        whole: bool,
+    ) -> postgres.SourceReport:
+        assert loaded_job.id == job_id
+        loads.append((location, whole))
+        return postgres.SourceReport(source="shop", records=1, retired=0)
+
+    finished: list[tuple[str, dict[str, Any]]] = []
+
+    async def finish(
+        finished_job: ClaimedJob,
+        state: str,
+        **kwargs: Any,
+    ) -> None:
+        assert finished_job.id == job_id
+        finished.append((state, kwargs))
+
+    monkeypatch.setattr(runtime_module, "build_http_scraper", native_builder)
+    monkeypatch.setattr(
+        worker_module,
+        "resolve_native_proxy_runtime",
+        resolve_native_proxy,
+    )
+    monkeypatch.setattr(worker_module, "open_session", forbidden_legacy_session)
+    monkeypatch.setattr(worker, "_proxy_lease", forbidden_legacy_proxy)
+    monkeypatch.setattr(worker, "_browser_for_job", forbidden_browser)
+    monkeypatch.setattr(worker, "_load_connector_artifact", load_limited_artifact)
+    monkeypatch.setattr(worker, "_finish", finish)
+
+    params = CrawlParams(
+        pipeline="connector_canary",
+        datasets=("ceramics.catalogue_item.v2",),
+        limit=1,
+    )
+
+    await worker._crawl_connector_canary(claimed, params, sources["shop"])
+    await worker._crawl_connector_canary(claimed, params, sources["shop"])
+
+    assert native_runtimes == 1
+    assert proxy_resolutions == 1
+    assert [request.url for request in backend.requests] == [
+        "https://shop.test/products.json"
+    ]
+    assert [state for state, _ in finished] == ["succeeded", "succeeded"]
+    first_summary = finished[0][1]["summary"]
+    recovered_summary = finished[1][1]["summary"]
+    assert first_summary["records"] == 1
+    assert first_summary["truncated"] is True
+    assert first_summary["retired"] == 0
+    assert first_summary["datasets"] == {
+        "ceramics.catalogue_item.v2": {"state": "published", "records": 1}
+    }
+    assert recovered_summary["records"] == 1
+    assert recovered_summary["truncated"] is True
+    assert recovered_summary["terminal_recovery"] is True
+    assert not any(recovered_summary["transport"].values())
+    assert loads and all(whole is False for _, whole in loads)
+
+    lineage_cursor = await db.execute(
+        "select status, checksum from catalogue.job_checkpoint_lineages "
+        "where job_id = %s",
+        (job_id,),
+    )
+    lineage_rows = await lineage_cursor.fetchall()
+    assert len(lineage_rows) == 1
+    assert lineage_rows[0]["status"] == "limited"
+    assert len(lineage_rows[0]["checksum"]) == 64
+
+    dataset_cursor = await db.execute(
+        "select state, complete, records, rejected from catalogue.job_datasets "
+        "where job_id = %s and dataset = 'ceramics.catalogue_item.v2'",
+        (job_id,),
+    )
+    assert await dataset_cursor.fetchone() == {
+        "state": "succeeded",
+        "complete": True,
+        "records": 1,
+        "rejected": 0,
+    }
+    outcome_cursor = await db.execute(
+        "select coalesce(sum(records), 0) as records "
+        "from catalogue.job_page_dataset_outcomes where job_id = %s",
+        (job_id,),
+    )
+    assert (await outcome_cursor.fetchone())["records"] == 1
+    artifact_cursor = await db.execute(
+        "select count(*) as count, count(distinct location) as locations "
+        "from catalogue.job_artifacts where job_id = %s",
+        (job_id,),
+    )
+    assert await artifact_cursor.fetchone() == {"count": 1, "locations": 1}
+
+
 @pytest.mark.parametrize(
     ("scraper", "source_options", "refresh_mode"),
     [

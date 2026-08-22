@@ -152,12 +152,20 @@ async def test_robots_discovery_does_not_swallow_policy_failure() -> None:
 
 
 async def test_result_limit_cursor_preserves_snapshots_on_same_url_and_sequence() -> None:
-    transport = FakeTransport()
-    transport.add("https://shop.test/sitemap.xml", body=SITEMAP)
-    transport.add("https://shop.test/products/clay", body=TWO_PRODUCTS)
-    connector = GenericPagesConnector(transport, _options())
+    def open_connector() -> GenericPagesConnector:
+        transport = FakeTransport()
+        transport.add("https://shop.test/sitemap.xml", body=SITEMAP)
+        transport.add("https://shop.test/products/clay", body=TWO_PRODUCTS)
+        return GenericPagesConnector(transport, _options())
 
-    [limited] = await assert_connector_pages(connector.collect(_request(limit=1)))
+    connector = open_connector()
+    request = _request(limit=1)
+    [limited] = await assert_connector_pages(
+        connector.collect(request),
+        connector=connector,
+        request=request,
+        reopen=open_connector,
+    )
     assert [item.title for item in limited.items] == ["Clay"]
     assert limited.sequence == 0
     assert limited.resume_after == {
@@ -167,27 +175,6 @@ async def test_result_limit_cursor_preserves_snapshots_on_same_url_and_sequence(
         "sequence": 1,
     }
     assert limited.terminal and not limited.enumeration_intact
-
-    resumed_transport = FakeTransport()
-    resumed_transport.add("https://shop.test/sitemap.xml", body=SITEMAP)
-    resumed_transport.add("https://shop.test/products/clay", body=TWO_PRODUCTS)
-    resumed_connector = GenericPagesConnector(resumed_transport, _options())
-    checkpoint = resumed_connector.checkpoint(
-        _request(limit=1), "lineage", limited.resume_after
-    )
-
-    resume_request = _request(limit=1)
-    resumed = await assert_connector_pages(
-        resumed_connector.collect(resume_request, checkpoint),
-        connector=resumed_connector,
-        request=resume_request,
-        start_sequence=1,
-    )
-    assert len(resumed) == 1
-    assert resumed[0].sequence == 1
-    assert [item.title for item in resumed[0].items] == ["Glaze"]
-    assert resumed[0].terminal and resumed[0].enumeration_intact
-    assert resumed[0].resume_after is None
 
 
 async def test_custom_parser_identity_is_part_of_checkpoint_fingerprint() -> None:

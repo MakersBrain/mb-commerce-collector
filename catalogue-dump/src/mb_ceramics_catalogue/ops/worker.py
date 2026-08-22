@@ -955,7 +955,10 @@ class Worker:
             )
             lineage = resolved.lineage
             library_checkpoint = resolved.checkpoint
-            collection_complete = (
+            collection_limited = (
+                resolved.progress is ops_outputs.LineageProgressState.TERMINAL_LIMITED
+            )
+            collection_complete = collection_limited or (
                 resolved.progress is ops_outputs.LineageProgressState.TERMINAL_INTACT
             )
             restart_reason = (
@@ -972,7 +975,8 @@ class Worker:
                 result = PipelineResult(
                     pages=0,
                     terminal=True,
-                    enumeration_intact=True,
+                    enumeration_intact=not collection_limited,
+                    limited=collection_limited,
                     datasets=initial_states,
                 )
                 traffic_requests = 0
@@ -1086,7 +1090,7 @@ class Worker:
                 summary["interrupted"] = True
                 await self._finish(job, "cancelled", summary=summary)
                 return
-            if not result.enumeration_intact:
+            if not result.enumeration_intact and not result.limited:
                 for key in keys.values():
                     await ops_outputs.finish_dataset(
                         connection,
@@ -1101,17 +1105,25 @@ class Worker:
                 return
 
             checksum = await ops_outputs.lineage_checksum(connection, job.id, lineage)
-            await ops_outputs.complete_lineage(
-                connection,
-                job.id,
-                lineage,
-                expected_partitions=(
-                    await ops_outputs.declared_partitions(connection, job.id, lineage)
-                    if library_dynamic_partitions
-                    else library_request.partitions or ("main",)
-                ),
-                checksum=checksum,
-            )
+            if result.limited:
+                await ops_outputs.complete_limited_lineage(
+                    connection,
+                    job.id,
+                    lineage,
+                    checksum=checksum,
+                )
+            else:
+                await ops_outputs.complete_lineage(
+                    connection,
+                    job.id,
+                    lineage,
+                    expected_partitions=(
+                        await ops_outputs.declared_partitions(connection, job.id, lineage)
+                        if library_dynamic_partitions
+                        else library_request.partitions or ("main",)
+                    ),
+                    checksum=checksum,
+                )
             published_by_dataset: dict[str, Any] = {}
             failed = [name for name, state in result.datasets.items() if state == DatasetPageState.FAILED]
             for name in failed:

@@ -953,7 +953,7 @@ CREATE TABLE catalogue.job_checkpoint_lineages (
     expires_at timestamp with time zone,
     checksum text,
     CONSTRAINT job_checkpoint_lineages_check CHECK (((expires_at IS NULL) OR (expires_at > created_at))),
-    CONSTRAINT job_checkpoint_lineages_check1 CHECK (((status <> 'completed'::text) OR (checksum IS NOT NULL))),
+    CONSTRAINT job_checkpoint_lineages_check1 CHECK (((status <> ALL (ARRAY['completed'::text, 'limited'::text])) OR (checksum IS NOT NULL))),
     CONSTRAINT job_checkpoint_lineages_checksum_check CHECK (((checksum IS NULL) OR (checksum ~ '^[0-9a-f]{64}$'::text))),
     CONSTRAINT job_checkpoint_lineages_connector_check CHECK ((connector <> ''::text)),
     CONSTRAINT job_checkpoint_lineages_connector_config_fingerprint_check CHECK ((connector_config_fingerprint ~ '^[0-9a-f]{64}$'::text)),
@@ -961,7 +961,7 @@ CREATE TABLE catalogue.job_checkpoint_lineages (
     CONSTRAINT job_checkpoint_lineages_dataset_fingerprint_check CHECK ((dataset_fingerprint ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT job_checkpoint_lineages_source_id_check CHECK ((source_id <> ''::text)),
     CONSTRAINT job_checkpoint_lineages_source_url_check CHECK ((source_url <> ''::text)),
-    CONSTRAINT job_checkpoint_lineages_status_check CHECK ((status = ANY (ARRAY['active'::text, 'completed'::text, 'rejected'::text, 'expired'::text])))
+    CONSTRAINT job_checkpoint_lineages_status_check CHECK ((status = ANY (ARRAY['active'::text, 'completed'::text, 'limited'::text, 'rejected'::text, 'expired'::text])))
 );
 
 

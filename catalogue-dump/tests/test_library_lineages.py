@@ -368,6 +368,7 @@ async def test_configuration_a_b_a_cannot_resurrect_stale_active_cursor(
     ("state", "restarts"),
     (
         (outputs.LineageProgressState.TERMINAL_INTACT, False),
+        (outputs.LineageProgressState.TERMINAL_LIMITED, False),
         (outputs.LineageProgressState.TERMINAL_INCOMPLETE, True),
     ),
 )
@@ -443,6 +444,6 @@ async def test_terminal_progress_is_not_mistaken_for_an_empty_lineage(
         assert events == ["transaction.enter", "reject", "create", "prepare:False", "transaction.commit"]
     else:
         assert resolved.lineage == old_lineage
-        assert resolved.progress is outputs.LineageProgressState.TERMINAL_INTACT
+        assert resolved.progress is state
         assert resolved.restart_reason is None
         assert events == ["transaction.enter", "prepare:True", "transaction.commit"]

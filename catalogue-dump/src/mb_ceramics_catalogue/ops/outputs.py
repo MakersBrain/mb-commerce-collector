@@ -29,6 +29,7 @@ class LineageProgressState(StrEnum):
     EMPTY = "empty"
     RESUMABLE = "resumable"
     TERMINAL_INTACT = "terminal_intact"
+    TERMINAL_LIMITED = "terminal_limited"
     TERMINAL_INCOMPLETE = "terminal_incomplete"
 
 
@@ -321,7 +322,7 @@ async def find_recoverable_library_lineage(
         connection,
         """select checkpoint_lineage
              from catalogue.job_checkpoint_lineages
-            where job_id = %s and status in ('active', 'completed')
+            where job_id = %s and status in ('active', 'completed', 'limited')
               and source_url = %s and runtime_format = %s
               and connector = %s and connector_version = %s
               and connector_config_fingerprint = %s and dataset_fingerprint = %s
@@ -741,6 +742,73 @@ async def complete_lineage(
     return True
 
 
+async def complete_limited_lineage(
+    connection: Connection,
+    job_id: UUID,
+    lineage: UUID,
+    *,
+    checksum: str,
+) -> bool:
+    """Seal an intentional result-limit boundary for partial publication.
+
+    A limited lineage is terminal for this bounded collection request but not
+    a complete source enumeration. Its non-null cursor remains in the audit
+    manifest; publication may use the committed prefix, while catalogue load
+    policy must continue to treat it as non-whole and never retire missing
+    records.
+    """
+    async with connection.transaction():
+        current = await _one(
+            connection,
+            """select status, checksum from catalogue.job_checkpoint_lineages
+                where job_id = %s and checkpoint_lineage = %s for update""",
+            (job_id, lineage),
+        )
+        if current is None:
+            raise ValueError("unknown checkpoint lineage")
+        if current["status"] == "limited":
+            if current["checksum"] != checksum:
+                raise ValueError("limited checkpoint checksum changed")
+            return False
+        if current["status"] != "active":
+            raise ValueError(f"checkpoint lineage is {current['status']}")
+
+        pages = await _all(
+            connection,
+            """select partition_key, page_sequence, page_id, resume_after,
+                      terminal, enumeration_intact
+                 from catalogue.job_pages
+                where job_id = %s and checkpoint_lineage = %s""",
+            (job_id, lineage),
+        )
+        if not pages:
+            raise ValueError("limited checkpoint lineage has no committed page")
+        order = await _partition_order(connection, job_id, lineage)
+        latest = max(
+            pages,
+            key=lambda page: (
+                order.get(page["partition_key"], len(order)),
+                int(page["page_sequence"]),
+                page["page_id"],
+            ),
+        )
+        if (
+            latest["resume_after"] is None
+            or not latest["terminal"]
+            or latest["enumeration_intact"]
+        ):
+            raise ValueError(
+                "limited checkpoint lineage must end at a resumable incomplete terminal page"
+            )
+        await connection.execute(
+            """update catalogue.job_checkpoint_lineages
+                  set status = 'limited', checksum = %s, updated_at = now()
+                where job_id = %s and checkpoint_lineage = %s""",
+            (checksum, job_id, lineage),
+        )
+    return True
+
+
 async def lineage_checksum(connection: Connection, job_id: UUID, lineage: UUID) -> str:
     """Hash the ordered committed manifest, including projector outcomes."""
     import hashlib
@@ -831,7 +899,11 @@ async def lineage_progress(
         (job_id, lineage),
     )
     if not pages:
+        if row["status"] == "limited":
+            raise ValueError("limited checkpoint lineage has no committed page")
         return LineageProgress(LineageProgressState.EMPTY)
+    if row["status"] == "limited":
+        return LineageProgress(LineageProgressState.TERMINAL_LIMITED)
     order = {
         partition: index
         for index, partition in enumerate(
@@ -980,8 +1052,8 @@ async def publish_dataset(
             where job_id = %s and checkpoint_lineage = %s""",
         (job_id, lineage),
     )
-    if lineage_row is None or lineage_row["status"] != "completed":
-        raise ValueError("only a completed checkpoint lineage can be published")
+    if lineage_row is None or lineage_row["status"] not in {"completed", "limited"}:
+        raise ValueError("only a completed or limited checkpoint lineage can be published")
     batches = await reconstruct_batches(connection, job_id, lineage, key)
     artifact = store.publish_dataset(str(job_id), key.dataset, key.contract_version, batches)
     await register_artifact(connection, job_id, key, artifact, kind=kind)

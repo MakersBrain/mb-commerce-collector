@@ -98,13 +98,14 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `7adda2b` — extract remaining framework connectors.
 - `d79cbcb` — complete native connector integration and filesystem caching.
 - `02de77b` — unify proxy policy and end-to-end request tracing.
+- `f863a66` — share native catalogue composition across worker and local tools.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 76 source and test files.
-  - 304 library tests passed.
+  - 305 library tests passed.
   - Wheel and source distribution built.
   - 4 dependency-boundary tests passed.
   - The installed-wheel matrix verified all 231 reviewed public exports across
@@ -129,7 +130,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - [x] Full catalogue verification:
   - Ruff passed.
   - Mypy passed for 228 source and test files.
-  - 828 tests passed, 6 skipped, and 158 deselected in the latest fast-suite
+  - 833 tests passed, 6 skipped, and 159 deselected in the latest fast-suite
     run; the wider repository fast gate also passed 32 control-plane tests, 14
     service tests, and 2 explorer tests.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
@@ -147,7 +148,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - [x] Catalogue PostgreSQL suite includes registry-built Shopify and
   WooCommerce workers, completed-lineage recovery, and the source-level canary
   rollback selector.
-- [x] Native worker refresh-mode PostgreSQL gate: 15 cases passed, covering
+- [x] Native worker refresh-mode PostgreSQL gate: 16 cases passed, covering
   Shopify full and scheduled daily-price collection plus WooCommerce full
   collection, BigCommerce direct-denial/browser-GraphQL collection, and
   PrestaShop sitemap/product collection plus Sio2 category/card discovery and
@@ -162,6 +163,10 @@ architecture rules in the plan and are not separate scope-expansion goals.
   browser evaluation, exact pack stock, and two price plus two stock records.
   Every case also proves terminal recovery
   without a second runtime or network request.
+  - The Shopify result-limit case additionally proves that an intentional
+    bounded prefix seals as `limited`, publishes usable adds-only output with
+    `truncated=true`, never retires unseen records, and recovers idempotently
+    without refetching or duplicating its artifact.
 - [x] Direct browser composition gate: 21 focused browser/cache tests plus the
   PostgreSQL worker gate verify exact job-context borrowing, session reuse and
   rotation, collection-only cleanup, pre-I/O origin denial, detached placement
@@ -274,9 +279,11 @@ neutral path; missing replay evidence remains a gate in its owning phases.
     rejects every stale active lineage, decodes durable identity/cursors, and
     only then creates or resumes a lineage and prepares datasets. This prevents
     A → B → A configuration changes from resurrecting an old cursor.
-  - Durable progress distinguishes empty, resumable, terminal-intact, and
-    terminal-incomplete states. A crash after the final page can therefore
-    continue to completion/publication without refetching from page one.
+  - Durable progress distinguishes empty, resumable, terminal-intact,
+    intentional terminal-limited, and failed terminal-incomplete states. A
+    crash after the final or bounded-limit page can therefore continue to
+    sealing/publication without refetching from page one. Result-limit pages
+    must be terminal, incomplete, and carry a non-null resume cursor.
   - The resolver is wired into every approved native `connector_canary` worker
     path. The normal legacy worker retains its existing lineage format for
     rollback during incremental migration.
@@ -431,8 +438,9 @@ direct-path parity and migration-wide application composition are incomplete.
     terminal-complete recovery with no second runtime, proxy resolution,
     legacy session, or network request.
   - The local `catalogue-dump --pipeline connector_canary` compatibility shell
-    now also delegates Shopify to the installed library registry and shared
-    Fetcher composition instead of constructing the catalogue-owned connector.
+    now enters the same application-owned native runtime as the worker and
+    probe. It constructs no legacy Fetcher/session and uses direct-only local
+    policy while preserving the stable source identity and result contract.
 - [~] Run the same recorded responses through legacy and library connectors.
   - The replay-only dual-path gate is implemented and fails closed against the
     production cache, but currently skips because the archive is absent.
@@ -441,6 +449,10 @@ direct-path parity and migration-wide application composition are incomplete.
   gate above.
 - [ ] Validate checkpoint/resume and result-limit behavior against production
   recordings.
+  - Deterministic connector conformance now reopens a fresh connector from the
+    emitted cursor and proves the next page does not repeat the bounded entity.
+    The PostgreSQL worker gate proves sealed limited publication and recovery;
+    production-recording evidence is still absent, so this item remains open.
 - [ ] Canary at least one real Shopify source through the installed library.
 - [x] Add a configuration-only rollback route.
   - Per-source pipeline overrides select the canary without changing the source

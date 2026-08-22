@@ -13,6 +13,7 @@ from mb_ceramics_catalogue.connectors.base import (
     CollectionRequest,
     CommerceConnector,
     ConnectorCheckpoint,
+    DiagnosticCode,
     EntityPage,
 )
 from mb_ceramics_catalogue.connectors.commerce import CommerceProductSnapshot
@@ -42,7 +43,14 @@ class PipelineResult:
     pages: int
     terminal: bool
     enumeration_intact: bool
+    limited: bool
     datasets: Mapping[str, DatasetPageState]
+
+    def __post_init__(self) -> None:
+        if self.limited and (not self.terminal or self.enumeration_intact):
+            raise ValueError(
+                "a result-limited pipeline must terminate with an incomplete enumeration"
+            )
 
 
 class PageCommitter(Protocol):
@@ -98,7 +106,21 @@ class ConnectorPipeline:
         pages = 0
         terminal = False
         intact = True
+        limited = False
         async for page in connector.collect(request, checkpoint):
+            page_limited = any(
+                diagnostic.code == DiagnosticCode.RESULT_LIMIT_REACHED
+                for diagnostic in page.diagnostics
+            )
+            if page_limited:
+                if not page.terminal or page.enumeration_intact:
+                    raise ValueError(
+                        "a result-limit page must be terminal with an incomplete enumeration"
+                    )
+                if page.resume_after is None:
+                    raise ValueError(
+                        "a result-limit page must retain a resumable checkpoint cursor"
+                    )
             metrics.pipeline_entities(connector.name, connector.version, len(page.items))
             batches: list[StoredBatch] = []
             outcomes: list[DatasetPageOutcome] = []
@@ -158,8 +180,15 @@ class ConnectorPipeline:
             pages += 1
             terminal = page.terminal
             intact = intact and page.enumeration_intact
+            limited = limited or page_limited
 
-        return PipelineResult(pages, terminal, intact, dict(states))
+        return PipelineResult(
+            pages=pages,
+            terminal=terminal,
+            enumeration_intact=intact,
+            limited=limited,
+            datasets=dict(states),
+        )
 
     def _records(
         self,
