@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 from uuid import UUID
@@ -118,6 +118,36 @@ async def _intent_for_operation(connection: Any, operation_id: UUID) -> _Intent 
     return None if row is None else _intent(row)
 
 
+async def _complete_despite_cancellation(
+    task: asyncio.Task[Any],
+) -> tuple[Any, BaseException | None, bool]:
+    """Wait until a dispatched side effect truly stops, remembering cancellation."""
+    interrupted = False
+    current = asyncio.current_task()
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            interrupted = True
+            if current is not None:
+                current.uncancel()
+        except BaseException:  # noqa: BLE001 - task outcome is inspected below
+            break
+    try:
+        return task.result(), None, interrupted
+    except BaseException as error:  # noqa: BLE001 - preserve exact task outcome
+        return None, error, interrupted
+
+
+async def _propagate_cancellation() -> None:
+    current = asyncio.current_task()
+    if current is None:  # pragma: no cover - every service call runs in a task
+        raise asyncio.CancelledError
+    current.cancel()
+    await asyncio.sleep(0)
+    raise AssertionError("task cancellation was not delivered")  # pragma: no cover
+
+
 @asynccontextmanager
 async def _operation_lock(connection: Any, operation_id: UUID) -> AsyncIterator[None]:
     """Fence one operation across transactions and the external file CAS."""
@@ -133,12 +163,30 @@ async def _operation_lock(connection: Any, operation_id: UUID) -> AsyncIterator[
     try:
         yield
     finally:
-        await connection.execute(
-            """select pg_advisory_unlock(
-                      hashtextextended(%(operation)s::text, 0)
-                  )""",
-            {"operation": operation_id},
+        async def unlock() -> bool:
+            unlock_cursor = await connection.execute(
+                """select pg_advisory_unlock(
+                          hashtextextended(%(operation)s::text, 0)
+                      ) as unlocked""",
+                {"operation": operation_id},
+            )
+            unlocked = await unlock_cursor.fetchone()
+            return bool(unlocked and unlocked["unlocked"])
+
+        unlock_task = asyncio.create_task(unlock())
+        unlocked, unlock_error, interrupted = await _complete_despite_cancellation(
+            unlock_task
         )
+        if unlock_error is not None or unlocked is not True:
+            # Session advisory locks survive transaction rollback. A connection
+            # whose unlock is uncertain must never return to the pool.
+            close_task = asyncio.create_task(connection.close())
+            _, _, close_interrupted = await _complete_despite_cancellation(close_task)
+            if interrupted or close_interrupted:
+                await _propagate_cancellation()
+            raise WebshareProfileImportError("operation_unlock_failed") from None
+        if interrupted:
+            await _propagate_cancellation()
 
 
 async def _lock_cycle(connection: Any, cycle_start: Any | None = None) -> dict[str, Any]:
@@ -425,14 +473,12 @@ async def _install_secret(
     task = asyncio.create_task(
         asyncio.to_thread(store.install, secret, expected_generation=expected_generation)
     )
-    try:
-        return await asyncio.shield(task)
-    except asyncio.CancelledError:
-        # Cancelling ``to_thread`` cannot stop the underlying file operation.
-        # Wait it out before the surrounding context releases the session lock.
-        with suppress(Exception):
-            await task
-        raise
+    installed, install_error, interrupted = await _complete_despite_cancellation(task)
+    if interrupted:
+        await _propagate_cancellation()
+    if install_error is not None:
+        raise install_error
+    return int(installed)
 
 
 async def _mark_failed(connection: Any, intent: _Intent, code: str) -> WebshareProfileImportResult:

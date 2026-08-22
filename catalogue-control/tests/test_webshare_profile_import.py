@@ -130,6 +130,24 @@ class _ObservedRotationConnection:
         return await self._connection.execute(query, params)
 
 
+class _UnlockFailedCursor:
+    async def fetchone(self) -> dict[str, bool]:
+        return {"unlocked": False}
+
+
+class _UnlockFailedConnection:
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    async def execute(self, query: str, params: Any = None) -> Any:
+        if "pg_advisory_unlock" in query:
+            return _UnlockFailedCursor()
+        return await self._connection.execute(query, params)
+
+    async def close(self) -> None:
+        await self._connection.close()
+
+
 async def _create(db, store: WebshareGatewaySecretStore):
     operation_id = await _operation(db)
     result = await install_webshare_profile(
@@ -687,6 +705,99 @@ async def test_operation_lock_fences_recovery_while_secret_cas_is_in_flight(
     assert load_webshare_gateway_secrets(store.path)[
         ("webshare", "operator-gateway")
     ].generation == 1
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_repeated_cancellation_keeps_operation_locked_until_cas_finishes(
+    db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    await _cycle(db)
+    store = _store(tmp_path)
+    operation_id = await _operation(db)
+    dsn = postgres_dsn()
+    assert dsn
+    install_connection = await psycopg.AsyncConnection.connect(
+        dsn, row_factory=dict_row, autocommit=True
+    )
+    recovery_connection = await psycopg.AsyncConnection.connect(
+        dsn, row_factory=dict_row, autocommit=True
+    )
+    entered_cas = threading.Event()
+    release_cas = threading.Event()
+    original_install = store.install
+
+    def blocked_install(*args: Any, **kwargs: Any) -> int:
+        entered_cas.set()
+        if not release_cas.wait(timeout=5):
+            raise RuntimeError("test CAS release timed out")
+        return original_install(*args, **kwargs)
+
+    monkeypatch.setattr(store, "install", blocked_install)
+    install_task = asyncio.create_task(
+        install_webshare_profile(
+            install_connection,
+            store,
+            operation_id=operation_id,
+            actor_id="operator@example.test",
+            secret=_secret(1),
+            expected_generation=None,
+            display_name="Operator gateway",
+            allocated_bytes=250_000,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(entered_cas.wait, 2)
+        install_task.cancel()
+        await asyncio.sleep(0)
+        install_task.cancel()
+        await asyncio.sleep(0)
+
+        with pytest.raises(WebshareProfileImportError) as busy:
+            await recover_webshare_profile_import(
+                recovery_connection, store, operation_id=operation_id
+            )
+        assert busy.value.code == "operation_busy"
+
+        release_cas.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(install_task, timeout=5)
+        recovered = await recover_webshare_profile_import(
+            recovery_connection, store, operation_id=operation_id
+        )
+    finally:
+        release_cas.set()
+        if not install_task.done():
+            install_task.cancel()
+        await install_connection.close()
+        await recovery_connection.close()
+
+    assert recovered.state == "completed"
+    assert load_webshare_gateway_secrets(store.path)[
+        ("webshare", "operator-gateway")
+    ].generation == 1
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_uncertain_operation_unlock_discards_connection(db, tmp_path: Path):
+    await _cycle(db)
+    store = _store(tmp_path)
+    operation_id, _ = await _create(db, store)
+    dsn = postgres_dsn()
+    assert dsn
+    raw = await psycopg.AsyncConnection.connect(
+        dsn, row_factory=dict_row, autocommit=True
+    )
+    connection = _UnlockFailedConnection(raw)
+
+    with pytest.raises(WebshareProfileImportError) as raised:
+        await recover_webshare_profile_import(
+            connection, store, operation_id=operation_id
+        )
+
+    assert raised.value.code == "operation_unlock_failed"
+    assert raw.closed
 
 
 @pytest.mark.postgres

@@ -381,8 +381,31 @@ async def close_reservation(
             },
         )
         row = await cursor.fetchone()
+        late_settlement = False
+        if row is None:
+            late_cursor = await connection.execute(
+                """
+                update catalogue.proxy_reservations
+                   set estimated_bytes = greatest(estimated_bytes, %(bytes)s),
+                       request_count = greatest(request_count, %(requests)s)
+                 where id = %(id)s and provider = %(provider)s
+                   and cycle_start = %(start)s and state = 'cancelled'
+                   and (estimated_bytes < %(bytes)s or request_count < %(requests)s)
+                returning provider, cycle_start, estimated_bytes
+                """,
+                {
+                    "id": lease.reservation_id,
+                    "provider": identity["provider"],
+                    "start": identity["cycle_start"],
+                    "bytes": lease.used_bytes,
+                    "requests": lease.requests,
+                },
+            )
+            row = await late_cursor.fetchone()
+            late_settlement = row is not None
         if row:
-            metrics.proxy_reservation("closed")
+            if not late_settlement:
+                metrics.proxy_reservation("closed")
             metrics.proxy_bytes("application", row["estimated_bytes"])
             await connection.execute(
                 """
@@ -392,13 +415,13 @@ async def close_reservation(
                      (select coalesce(sum(estimated_bytes), 0)
                         from catalogue.proxy_reservations
                        where provider = %(provider)s and cycle_start = %(start)s
-                         and state = 'closed')
+                         and state in ('closed', 'cancelled'))
                    ),
                    kill_switch = kill_switch or (
                      select coalesce(sum(estimated_bytes), 0) >= operational_bytes
                        from catalogue.proxy_reservations
                       where provider = %(provider)s and cycle_start = %(start)s
-                        and state = 'closed'
+                        and state in ('closed', 'cancelled')
                    )
                  where provider = %(provider)s and cycle_start = %(start)s
                 """,
@@ -408,11 +431,23 @@ async def close_reservation(
                 """
                 insert into catalogue.proxy_reconcile_requests
                        (provider, reason, reservation_id, dedup_key)
-                values (%(provider)s, 'reservation_closed', %(reservation)s,
-                        'reservation:' || %(reservation)s::text)
+                values (%(provider)s, %(reason)s, %(reservation)s, %(dedup)s)
                 on conflict (dedup_key) do nothing
                 """,
-                {"provider": row["provider"], "reservation": lease.reservation_id},
+                {
+                    "provider": row["provider"],
+                    "reservation": lease.reservation_id,
+                    "reason": (
+                        "reservation_late_settled"
+                        if late_settlement
+                        else "reservation_closed"
+                    ),
+                    "dedup": (
+                        f"reservation:{lease.reservation_id}:late-settlement"
+                        if late_settlement
+                        else f"reservation:{lease.reservation_id}"
+                    ),
+                },
             )
 
 

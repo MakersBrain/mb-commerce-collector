@@ -475,3 +475,21 @@ def test_store_refuses_a_symlink_lock_without_touching_its_target(tmp_path):
 
     assert victim.read_text() == "do-not-touch"
     assert not target.exists()
+
+
+def test_store_lock_contention_is_bounded(monkeypatch, tmp_path):
+    target = tmp_path / "webshare.json"
+    clock = iter((10.0, 10.0 + gateway_secrets.SECRET_LOCK_TIMEOUT_SECONDS + 1.0))
+
+    def contended_flock(_descriptor, _operation):
+        raise BlockingIOError
+
+    monkeypatch.setattr(gateway_secrets.fcntl, "flock", contended_flock)
+    monkeypatch.setattr(gateway_secrets.time, "monotonic", lambda: next(clock))
+
+    with pytest.raises(ProxyDenied, match="lock acquisition timed out"):
+        WebshareGatewaySecretStore(target).install(
+            validated_profile(tmp_path), expected_generation=None
+        )
+
+    assert not target.exists()

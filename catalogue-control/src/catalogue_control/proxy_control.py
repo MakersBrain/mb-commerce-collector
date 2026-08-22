@@ -525,13 +525,37 @@ async def close_stale_reservations(connection: Any) -> int:
                              < now() - make_interval(secs => %(probe_timeout)s)
                     )
                   )
-                returning r.id, r.provider, r.probe_id""",
+                returning r.id, r.provider, r.cycle_start, r.probe_id""",
             {
                 "candidate_ids": [row["id"] for row in candidates],
                 "probe_timeout": STALE_PROBE_TIMEOUT_SECONDS,
             },
         )
         rows = await cursor.fetchall()
+        settled_cycles = sorted(
+            {(row["provider"], row["cycle_start"]) for row in rows}
+        )
+        for provider, cycle_start in settled_cycles:
+            await connection.execute(
+                """update catalogue.proxy_budget_cycles
+                      set application_bytes = greatest(
+                            application_bytes,
+                            (select coalesce(sum(estimated_bytes), 0)
+                               from catalogue.proxy_reservations
+                              where provider = %(provider)s
+                                and cycle_start = %(cycle_start)s
+                                and state in ('closed', 'cancelled'))
+                          ),
+                          kill_switch = kill_switch or (
+                            select coalesce(sum(estimated_bytes), 0) >= operational_bytes
+                              from catalogue.proxy_reservations
+                             where provider = %(provider)s
+                               and cycle_start = %(cycle_start)s
+                               and state in ('closed', 'cancelled')
+                          )
+                    where provider = %(provider)s and cycle_start = %(cycle_start)s""",
+                {"provider": provider, "cycle_start": cycle_start},
+            )
         probe_ids = [row["probe_id"] for row in rows if row["probe_id"] is not None]
         if probe_ids:
             await connection.execute(

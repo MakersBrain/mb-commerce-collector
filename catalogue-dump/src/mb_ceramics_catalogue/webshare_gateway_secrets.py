@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import stat
+import time
 import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
@@ -30,6 +31,7 @@ MAX_PROFILES = 256
 MAX_USERNAME_CHARACTERS = 512
 MAX_PASSWORD_CHARACTERS = 1_024
 MAX_GENERATION = 2_147_483_647
+SECRET_LOCK_TIMEOUT_SECONDS = 5.0
 
 _PROVIDER = "webshare"
 _ENDPOINT_ID = "webshare-residential-backbone"
@@ -338,10 +340,22 @@ class WebshareGatewaySecretStore:
             if not stat.S_ISREG(metadata.st_mode):
                 raise ProxyDenied("Webshare gateway secret lock must be a regular file")
             os.fchmod(descriptor, 0o600)
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
-            except OSError:
-                raise ProxyDenied("Webshare gateway secret lock cannot be acquired") from None
+            deadline = time.monotonic() + SECRET_LOCK_TIMEOUT_SECONDS
+            while True:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ProxyDenied(
+                            "Webshare gateway secret lock acquisition timed out"
+                        ) from None
+                    time.sleep(min(0.05, remaining))
+                except OSError:
+                    raise ProxyDenied(
+                        "Webshare gateway secret lock cannot be acquired"
+                    ) from None
             yield
         finally:
             os.close(descriptor)
