@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 from mb_ceramics_catalogue.config.settings import CrawlParams
 from mb_ceramics_catalogue.contracts import Operation, Parameter, Registry
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 VERSION = "0.2.0"
 
@@ -669,6 +669,61 @@ class CreateProxyProfileRequest(BaseModel):
     confirmation: str
 
 
+class WebshareGatewayEndpoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint_id: Literal["webshare-residential-backbone"]
+    protocol: Literal["http"]
+    host: Literal["p.webshare.io"]
+    port: int = Field(ge=1, le=65_535)
+
+
+class WebshareGatewayCredentials(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=1, max_length=512, json_schema_extra={"writeOnly": True})
+    password: str = Field(min_length=1, max_length=1024, json_schema_extra={"writeOnly": True})
+
+
+class WebshareGatewayCapabilities(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    countries: list[str]
+    sticky_session_ttl_seconds: int = Field(ge=60, le=86_400)
+
+
+class WebshareGatewayImportProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["webshare"]
+    logical_name: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
+    generation: int = Field(ge=1, le=2_147_483_647)
+    gateway: WebshareGatewayEndpoint
+    credentials: WebshareGatewayCredentials
+    capabilities: WebshareGatewayCapabilities
+
+
+class WebshareGatewayImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile: WebshareGatewayImportProfile
+    expected_generation: int | None = Field(default=None, ge=1, le=2_147_483_646)
+    display_name: str | None = Field(default=None, min_length=1, max_length=200)
+    allocated_bytes: int | None = Field(default=None, gt=0, le=2_400_000_000)
+    confirmation: str
+
+
+class WebshareGatewayImportResult(BaseModel):
+    operation_id: str
+    profile_id: str | None = None
+    provider: Literal["webshare"]
+    logical_name: str
+    generation: int
+    state: Literal["draining", "installed", "completed", "failed"]
+    remediation: str | None = None
+    error_code: str | None = None
+
+
 class ProxyProfileActionRequest(BaseModel):
     mode: Literal["drain", "blue-green"] | None = None
     allocated_bytes: int | None = Field(default=None, ge=0, le=2_400_000_000)
@@ -1196,6 +1251,38 @@ def registry() -> Registry:
             response=Acknowledgement,
             errors=(400, 401, 409),
             tags=("notifications",),
+        )
+    )
+
+    api.add(
+        Operation(
+            "post",
+            "/v1/proxy/profiles/import",
+            "importWebshareGatewayProfile",
+            "Install or rotate an operator-issued Webshare gateway",
+            description=(
+                "Create returns 201 and rotation returns 200. Draining and an installed "
+                "credential awaiting cycle allocation return 202; retry draining with a new "
+                "Idempotency-Key after leases close, but retry cycle remediation with the same key."
+            ),
+            parameters=(
+                Parameter(
+                    "provider",
+                    required=True,
+                    schema={"type": "string", "const": "webshare"},
+                ),
+                Parameter(
+                    "Idempotency-Key",
+                    location="header",
+                    required=True,
+                    schema={"type": "string", "minLength": 1, "maxLength": 200},
+                ),
+            ),
+            request=WebshareGatewayImportRequest,
+            response=WebshareGatewayImportResult,
+            status=201,
+            errors=(400, 401, 403, 409, 422, 503),
+            tags=("proxy",),
         )
     )
 

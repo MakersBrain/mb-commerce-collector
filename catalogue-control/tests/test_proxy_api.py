@@ -109,6 +109,7 @@ async def proxy_client(db, tmp_path):
     settings = Settings(
         dsn=postgres_dsn() or "", control_token=TOKEN,
         proxy_actor_public_keys_file=public_file, proxy_secret_file=secret_file,
+        proxy_webshare_gateway_secret_file=tmp_path / "webshare-gateway.json",
         proxy_mutations_enabled=True, proxy_enabled=False,
     )
     app = create_app(settings, proxy_provider=fake)
@@ -116,6 +117,7 @@ async def proxy_client(db, tmp_path):
         transport=httpx.ASGITransport(app=app), base_url="http://control",
         headers={"authorization": f"Bearer {TOKEN}"},
     ) as client:
+        client.app = app  # type: ignore[attr-defined]
         app.state.providers["iproyal"] = fake
         app.state.providers["webshare"] = fake
         yield client, private, fake, secret_file
@@ -602,3 +604,340 @@ async def test_profile_finalization_cannot_cross_provider_boundary(proxy_client,
         {"provider": "decodo", "lifecycle": "draining", "pending_action": "disable"},
         {"provider": "webshare", "lifecycle": "disabled", "pending_action": None},
     ]
+
+
+def webshare_import_body(
+    generation: int,
+    *,
+    expected_generation: int | None,
+    password: str,
+) -> dict:
+    creating = expected_generation is None
+    return {
+        "profile": {
+            "provider": "webshare",
+            "logical_name": "operator-gateway",
+            "generation": generation,
+            "gateway": {
+                "endpoint_id": "webshare-residential-backbone",
+                "protocol": "http",
+                "host": "p.webshare.io",
+                "port": 10_000,
+            },
+            "credentials": {"username": "issued-user", "password": password},
+            "capabilities": {
+                "countries": ["FR", "US"],
+                "sticky_session_ttl_seconds": 600,
+            },
+        },
+        "expected_generation": expected_generation,
+        "display_name": "Operator gateway" if creating else None,
+        "allocated_bytes": 250_000 if creating else None,
+        "confirmation": f"IMPORT webshare/operator-gateway GENERATION {generation}",
+    }
+
+
+async def insert_safe_webshare_cycle(db, *, safe: bool = True):
+    now = datetime.now(UTC)
+    cursor = await db.execute(
+        """insert into catalogue.proxy_budget_cycles
+                  (provider, cycle_start, cycle_end, purchased_bytes, operational_bytes,
+                   daily_bytes, pilot_bytes, lifecycle, reconciliation_ok, reconciled_at,
+                   kill_switch)
+           values ('webshare', %(start)s, %(end)s, 1000000, 800000,
+                   100000, 100000, 'active', %(safe)s,
+                   case when %(safe)s then now() else null end, false)
+           returning cycle_start""",
+        {"start": now - timedelta(days=1), "end": now + timedelta(days=29), "safe": safe},
+    )
+    return (await cursor.fetchone())["cycle_start"]
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_webshare_import_requires_admin_idempotency_and_replays_without_credentials(
+    proxy_client, db, tmp_path
+):
+    client, private, fake, _ = proxy_client
+    await insert_safe_webshare_cycle(db)
+    url = "/v1/proxy/profiles/import?provider=webshare"
+    signed_path = "/v1/proxy/profiles/import"
+    body = webshare_import_body(1, expected_generation=None, password="issued-password")
+
+    assert (await client.post(url, json=body)).status_code == 403
+    stale = await client.post(
+        url,
+        json=body,
+        headers=assertion(
+            private, "POST", signed_path, auth_time=int(time.time()) - 601
+        ),
+    )
+    assert stale.status_code == 403
+    viewer = await client.post(
+        url,
+        json=body,
+        headers=assertion(private, "POST", signed_path, role="viewer"),
+    )
+    assert viewer.status_code == 403
+    client.app.state.settings.proxy_mutations_enabled = False
+    gated = await client.post(
+        url,
+        json=body,
+        headers={
+            **assertion(private, "POST", signed_path),
+            "idempotency-key": "mutations-disabled",
+        },
+    )
+    assert gated.status_code == 409
+    client.app.state.settings.proxy_mutations_enabled = True
+    no_key = await client.post(
+        url, json=body, headers=assertion(private, "POST", signed_path)
+    )
+    assert no_key.status_code == 409
+    encoded = json.dumps(body)
+    duplicate = encoded[:-1] + ',"confirmation":"duplicate"}'
+    strict = await client.post(
+        url,
+        content=duplicate,
+        headers={
+            **assertion(private, "POST", signed_path),
+            "content-type": "application/json",
+            "idempotency-key": "duplicate-json",
+        },
+    )
+    assert strict.status_code == 422
+    assert "issued-password" not in strict.text
+
+    headers = {
+        **assertion(private, "POST", signed_path),
+        "idempotency-key": "webshare-create",
+    }
+    created = await client.post(url, json=body, headers=headers)
+    assert created.status_code == 201, created.text
+    data = created.json()
+    assert data["state"] == "completed"
+    assert data["provider"] == "webshare"
+    assert data["generation"] == 1
+    assert "issued-user" not in created.text
+    assert "issued-password" not in created.text
+    assert fake.created == 0
+
+    replay = await client.post(
+        url,
+        json=body,
+        headers={
+            **assertion(private, "POST", signed_path),
+            "idempotency-key": "webshare-create",
+        },
+    )
+    assert replay.status_code == 201
+    assert replay.json() == data
+
+    database = await db.execute(
+        """select concat_ws(' ', m::text, a::text, p::text, i::text) as contents
+             from catalogue.proxy_mutation_requests m
+             join catalogue.proxy_admin_audit a on a.operation_id = m.operation_id
+             join catalogue.proxy_profile_secret_intents i on i.operation_id = m.operation_id
+             join catalogue.proxy_profiles p on p.id = i.profile_id
+            where m.operation_id = %(operation)s limit 1""",
+        {"operation": data["operation_id"]},
+    )
+    contents = (await database.fetchone())["contents"]
+    assert "issued-user" not in contents
+    assert "issued-password" not in contents
+    stored = json.loads((tmp_path / "webshare-gateway.json").read_text())
+    assert stored["profiles"]["webshare/operator-gateway"]["credentials"] == {
+        "username": "issued-user",
+        "password": "issued-password",
+    }
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_webshare_rotation_draining_is_terminal_and_new_key_finishes(
+    proxy_client, db, tmp_path
+):
+    client, private, _, _ = proxy_client
+    cycle_start = await insert_safe_webshare_cycle(db)
+    url = "/v1/proxy/profiles/import?provider=webshare"
+    signed_path = "/v1/proxy/profiles/import"
+    create = await client.post(
+        url,
+        json=webshare_import_body(1, expected_generation=None, password="first-password"),
+        headers={
+            **assertion(private, "POST", signed_path),
+            "idempotency-key": "create-before-drain",
+        },
+    )
+    assert create.status_code == 201, create.text
+    profile_id = create.json()["profile_id"]
+    route = await db.execute(
+        """insert into catalogue.proxy_routes
+                  (provider, label, profile_id, enabled, created_by, updated_by)
+           values ('webshare', 'route', %(profile)s, true, 'test', 'test') returning id""",
+        {"profile": profile_id},
+    )
+    route_id = (await route.fetchone())["id"]
+    probe = await db.execute(
+        """insert into catalogue.proxy_probes
+                  (route_id, profile_id, protocol, actor, request_id)
+           values (%(route)s, %(profile)s, 'http', 'test', %(request)s) returning id""",
+        {"route": route_id, "profile": profile_id, "request": uuid4()},
+    )
+    probe_id = (await probe.fetchone())["id"]
+    reservation = await db.execute(
+        """insert into catalogue.proxy_reservations
+                  (provider, profile, cycle_start, reserved_bytes, probe_id,
+                   profile_id, route_id, purpose, secret_generation)
+           values ('webshare', 'operator-gateway', %(cycle)s, 1000, %(probe)s,
+                   %(profile)s, %(route)s, 'probe', 1) returning id""",
+        {
+            "cycle": cycle_start,
+            "probe": probe_id,
+            "profile": profile_id,
+            "route": route_id,
+        },
+    )
+    reservation_id = (await reservation.fetchone())["id"]
+    rotation = webshare_import_body(
+        2, expected_generation=1, password="rotated-password"
+    )
+    drain_headers = {
+        **assertion(private, "POST", signed_path),
+        "idempotency-key": "rotate-draining",
+    }
+    draining = await client.post(url, json=rotation, headers=drain_headers)
+    assert draining.status_code == 202, draining.text
+    assert draining.json()["state"] == "draining"
+    assert "rotated-password" not in draining.text
+    replay = await client.post(
+        url,
+        json=rotation,
+        headers={
+            **assertion(private, "POST", signed_path),
+            "idempotency-key": "rotate-draining",
+        },
+    )
+    assert replay.json() == draining.json()
+    mutation = await db.execute(
+        """select state from catalogue.proxy_mutation_requests
+            where operation_id = %(operation)s""",
+        {"operation": draining.json()["operation_id"]},
+    )
+    assert (await mutation.fetchone())["state"] == "succeeded"
+
+    await db.execute(
+        """update catalogue.proxy_reservations
+              set state = 'closed', closed_at = now()
+            where id = %(reservation)s""",
+        {"reservation": reservation_id},
+    )
+    completed = await client.post(
+        url,
+        json=rotation,
+        headers={
+            **assertion(private, "POST", signed_path),
+            "idempotency-key": "rotate-after-drain",
+        },
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["state"] == "completed"
+    stored = json.loads((tmp_path / "webshare-gateway.json").read_text())
+    assert stored["profiles"]["webshare/operator-gateway"]["generation"] == 2
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_webshare_import_service_error_is_safe_stable_and_replayed(proxy_client, db):
+    client, private, _, _ = proxy_client
+    await insert_safe_webshare_cycle(db, safe=False)
+    url = "/v1/proxy/profiles/import?provider=webshare"
+    signed_path = "/v1/proxy/profiles/import"
+    body = webshare_import_body(1, expected_generation=None, password="never-return-this")
+    headers = {
+        **assertion(private, "POST", signed_path),
+        "idempotency-key": "unsafe-cycle",
+    }
+    failed = await client.post(url, json=body, headers=headers)
+    assert failed.status_code == 409, failed.text
+    assert failed.json()["error_code"] == "webshare_cycle_unsafe"
+    assert "never-return-this" not in failed.text
+    replay = await client.post(
+        url,
+        json=body,
+        headers={
+            **assertion(private, "POST", signed_path),
+            "idempotency-key": "unsafe-cycle",
+        },
+    )
+    assert replay.status_code == 409
+    assert replay.json() == failed.json()
+
+
+@pytest.mark.postgres
+@requires_postgres
+async def test_webshare_installed_remediation_resumes_with_same_key(
+    proxy_client, db, monkeypatch: pytest.MonkeyPatch
+):
+    from catalogue_control import webshare_profile_import as service
+
+    client, private, _, _ = proxy_client
+    await insert_safe_webshare_cycle(db)
+    url = "/v1/proxy/profiles/import?provider=webshare"
+    signed_path = "/v1/proxy/profiles/import"
+    created = await client.post(
+        url,
+        json=webshare_import_body(1, expected_generation=None, password="first-password"),
+        headers={
+            **assertion(private, "POST", signed_path),
+            "idempotency-key": "create-before-remediation",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    original_finalize = service._finalize
+
+    async def make_cycle_unsafe_after_cas(connection, intent):
+        await connection.execute(
+            """update catalogue.proxy_budget_cycles set kill_switch = true
+                where provider = 'webshare' and lifecycle = 'active'"""
+        )
+        return await original_finalize(connection, intent)
+
+    monkeypatch.setattr(service, "_finalize", make_cycle_unsafe_after_cas)
+    body = webshare_import_body(2, expected_generation=1, password="second-password")
+    first = await client.post(
+        url,
+        json=body,
+        headers={
+            **assertion(private, "POST", signed_path),
+            "idempotency-key": "rotation-remediation",
+        },
+    )
+    assert first.status_code == 202, first.text
+    assert first.json()["state"] == "installed"
+    assert first.json()["remediation"] == "cycle_rebind_required"
+    mutation = await db.execute(
+        """select state from catalogue.proxy_mutation_requests
+            where operation_id = %(operation)s""",
+        {"operation": first.json()["operation_id"]},
+    )
+    assert (await mutation.fetchone())["state"] == "started"
+
+    monkeypatch.undo()
+    await db.execute(
+        """update catalogue.proxy_budget_cycles
+              set kill_switch = false, reconciliation_ok = true, reconciled_at = now()
+            where provider = 'webshare' and lifecycle = 'active'"""
+    )
+    resumed = await client.post(
+        url,
+        json=body,
+        headers={
+            **assertion(private, "POST", signed_path),
+            "idempotency-key": "rotation-remediation",
+        },
+    )
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["state"] == "completed"
+    assert resumed.json()["operation_id"] == first.json()["operation_id"]

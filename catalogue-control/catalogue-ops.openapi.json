@@ -4595,6 +4595,265 @@
         "title": "SourceUpdated",
         "type": "object"
       },
+      "WebshareGatewayCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "countries": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Countries",
+            "type": "array"
+          },
+          "sticky_session_ttl_seconds": {
+            "maximum": 86400,
+            "minimum": 60,
+            "title": "Sticky Session Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "countries",
+          "sticky_session_ttl_seconds"
+        ],
+        "title": "WebshareGatewayCapabilities",
+        "type": "object"
+      },
+      "WebshareGatewayCredentials": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string",
+            "writeOnly": true
+          },
+          "username": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "WebshareGatewayCredentials",
+        "type": "object"
+      },
+      "WebshareGatewayEndpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint_id": {
+            "const": "webshare-residential-backbone",
+            "title": "Endpoint Id",
+            "type": "string"
+          },
+          "host": {
+            "const": "p.webshare.io",
+            "title": "Host",
+            "type": "string"
+          },
+          "port": {
+            "maximum": 65535,
+            "minimum": 1,
+            "title": "Port",
+            "type": "integer"
+          },
+          "protocol": {
+            "const": "http",
+            "title": "Protocol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint_id",
+          "protocol",
+          "host",
+          "port"
+        ],
+        "title": "WebshareGatewayEndpoint",
+        "type": "object"
+      },
+      "WebshareGatewayImportProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/WebshareGatewayCapabilities"
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/WebshareGatewayCredentials"
+          },
+          "gateway": {
+            "$ref": "#/components/schemas/WebshareGatewayEndpoint"
+          },
+          "generation": {
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "logical_name": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "title": "Logical Name",
+            "type": "string"
+          },
+          "provider": {
+            "const": "webshare",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "logical_name",
+          "generation",
+          "gateway",
+          "credentials",
+          "capabilities"
+        ],
+        "title": "WebshareGatewayImportProfile",
+        "type": "object"
+      },
+      "WebshareGatewayImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "allocated_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 2400000000,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Allocated Bytes"
+          },
+          "confirmation": {
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Display Name"
+          },
+          "expected_generation": {
+            "anyOf": [
+              {
+                "maximum": 2147483646,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Generation"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/WebshareGatewayImportProfile"
+          }
+        },
+        "required": [
+          "profile",
+          "confirmation"
+        ],
+        "title": "WebshareGatewayImportRequest",
+        "type": "object"
+      },
+      "WebshareGatewayImportResult": {
+        "properties": {
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Code"
+          },
+          "generation": {
+            "title": "Generation",
+            "type": "integer"
+          },
+          "logical_name": {
+            "title": "Logical Name",
+            "type": "string"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profile Id"
+          },
+          "provider": {
+            "const": "webshare",
+            "title": "Provider",
+            "type": "string"
+          },
+          "remediation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Remediation"
+          },
+          "state": {
+            "enum": [
+              "draining",
+              "installed",
+              "completed",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "provider",
+          "logical_name",
+          "generation",
+          "state"
+        ],
+        "title": "WebshareGatewayImportResult",
+        "type": "object"
+      },
       "Worker": {
         "properties": {
           "capabilities": {
@@ -6643,6 +6902,121 @@
           }
         },
         "summary": "Create a bounded Decodo sub-user",
+        "tags": [
+          "proxy"
+        ]
+      }
+    },
+    "/v1/proxy/profiles/import": {
+      "post": {
+        "description": "Create returns 201 and rotation returns 200. Draining and an installed credential awaiting cycle allocation return 202; retry draining with a new Idempotency-Key after leases close, but retry cycle remediation with the same key.",
+        "operationId": "importWebshareGatewayProfile",
+        "parameters": [
+          {
+            "description": "",
+            "in": "query",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "const": "webshare",
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebshareGatewayImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebshareGatewayImportResult"
+                }
+              }
+            },
+            "description": "Install or rotate an operator-issued Webshare gateway"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Install or rotate an operator-issued Webshare gateway",
         "tags": [
           "proxy"
         ]

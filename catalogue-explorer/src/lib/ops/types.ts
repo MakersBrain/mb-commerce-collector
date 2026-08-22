@@ -739,6 +739,51 @@ export interface SourceUpdated {
 	proxy?: Record<string, unknown> | null;
 }
 
+export interface WebshareGatewayCapabilities {
+	countries: string[];
+	sticky_session_ttl_seconds: number;
+}
+
+export interface WebshareGatewayCredentials {
+	username: string;
+	password: string;
+}
+
+export interface WebshareGatewayEndpoint {
+	endpoint_id: 'webshare-residential-backbone';
+	protocol: 'http';
+	host: 'p.webshare.io';
+	port: number;
+}
+
+export interface WebshareGatewayImportProfile {
+	provider: 'webshare';
+	logical_name: string;
+	generation: number;
+	gateway: WebshareGatewayEndpoint;
+	credentials: WebshareGatewayCredentials;
+	capabilities: WebshareGatewayCapabilities;
+}
+
+export interface WebshareGatewayImportRequest {
+	profile: WebshareGatewayImportProfile;
+	expected_generation?: number | null;
+	display_name?: string | null;
+	allocated_bytes?: number | null;
+	confirmation: string;
+}
+
+export interface WebshareGatewayImportResult {
+	operation_id: string;
+	profile_id?: string | null;
+	provider: 'webshare';
+	logical_name: string;
+	generation: number;
+	state: 'draining' | 'installed' | 'completed' | 'failed';
+	remediation?: string | null;
+	error_code?: string | null;
+}
+
 export interface Worker {
 	worker_id: string;
 	hostname: string;
