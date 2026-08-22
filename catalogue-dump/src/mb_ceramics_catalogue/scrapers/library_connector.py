@@ -197,6 +197,8 @@ class LibraryConnectorScraper(Scraper):
             fetcher=counting,
             cancelled=lambda: self._cancel_requested,
             collection_id=collection_id,
+            ignore_robots=bool(self._source.ignore_robots),
+            obey_robots=bool(self._source.obey_robots),
         )
         context = ProjectionContext(
             collection_id=collection_id,

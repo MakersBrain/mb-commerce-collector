@@ -724,6 +724,8 @@ def build_library_pipeline_connector(
     cancelled: Callable[[], bool],
     clock: Callable[[], datetime] | None = None,
     collection_id: str | None = None,
+    ignore_robots: bool = False,
+    obey_robots: bool = False,
 ) -> LibraryPipelineConnector:
     """Compose a registry connector at the single application boundary."""
     telemetry = LibraryDebugTelemetry()
@@ -738,6 +740,8 @@ def build_library_pipeline_connector(
             fetcher,
             telemetry=telemetry,
             telemetry_context=telemetry_context,
+            ignore_robots=ignore_robots,
+            obey_robots=obey_robots,
         ),
         options=source.connector_options,
         context=LibraryConnectorContext(

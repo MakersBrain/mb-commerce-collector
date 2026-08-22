@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -11,6 +12,7 @@ from mb_commerce_scraper.transports import (
     RequestPriority,
     RequestPurpose,
     ResponseBodyTooLarge,
+    RobotsDenied,
     RotationReason,
     TransportFailure,
     TransportRequest,
@@ -20,12 +22,13 @@ from mb_ceramics_catalogue.ops.commerce_scraper_transport import LegacyFetcherTr
 from mb_ceramics_catalogue.proxy import ProxyDenied
 from mb_ceramics_catalogue.scrapers.base import (
     Blocked,
+    BrowserRenderer,
     BrowserSession,
     HostLimiter,
     NotCached,
 )
 from mb_ceramics_catalogue.scrapers.base import Fetcher as CatalogueFetcher
-from mb_ceramics_catalogue.scrapers.cache import ResponseCache
+from mb_ceramics_catalogue.scrapers.cache import CachedResponse, ResponseCache
 
 
 class RecordingTelemetry:
@@ -46,6 +49,8 @@ class Fetcher:
             join_group=lambda *args: None, set_delay=lambda *args: None
         )
         self.rotations = 0
+        self.policy_calls: list[tuple[str, bool, bool]] = []
+        self.denied_urls: set[str] = set()
 
     async def response(self, url: str, **kwargs: Any) -> httpx.Response:
         self.calls.append((url, kwargs))
@@ -110,8 +115,8 @@ class Fetcher:
     async def may_fetch(
         self, url: str, ignore_robots: bool = False, obey_robots: bool = False
     ) -> bool:
-        del url, ignore_robots, obey_robots
-        return True
+        self.policy_calls.append((url, ignore_robots, obey_robots))
+        return url not in self.denied_urls
 
 
 class EvaluationSession:
@@ -171,6 +176,88 @@ async def test_maps_http_request_response_and_safe_trace_fields() -> None:
         "catalogue.legacy_fetcher.request.completed",
     ]
     assert all("headers" not in fields and "json_body" not in fields for _, fields in telemetry.events)
+
+
+@pytest.mark.asyncio
+async def test_base_allowed_but_denied_request_path_stops_before_fetcher_io() -> None:
+    fetcher = Fetcher()
+    transport = LegacyFetcherTransport(fetcher, obey_robots=True)
+
+    base = await transport.request(request(url="https://shop.test/"))
+    fetcher.denied_urls.add("https://shop.test/private/products?page=2")
+    with pytest.raises(RobotsDenied, match="robots policy denies request"):
+        await transport.request(
+            request(
+                url="https://shop.test/private/products",
+                query={"page": 2},
+            )
+        )
+
+    assert base.status == 201
+    assert [url for url, _ in fetcher.calls] == ["https://shop.test/"]
+    assert fetcher.policy_calls == [
+        ("https://shop.test/", False, True),
+        ("https://shop.test/private/products?page=2", False, True),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("mode", "provenance"),
+    [("auto", "fresh"), ("replay", "replayed")],
+)
+@pytest.mark.asyncio
+async def test_fetcher_cache_hit_projects_cache_route_without_network(
+    mode: str,
+    provenance: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    url = "https://shop.test/products"
+    cache = ResponseCache(tmp_path, mode=mode)
+    cache.write(
+        cache.key("http", url, method="GET", params=None, body=None, agent=False),
+        CachedResponse(
+            status=200,
+            url=url,
+            body='{"cached":true}',
+            headers={"content-type": "application/json"},
+            fetched_at=time.time(),
+        ),
+    )
+
+    def unexpected_network(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("cache hit must not enter network I/O")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(unexpected_network))
+    fetcher = CatalogueFetcher(
+        client,
+        HostLimiter(0, 1),
+        cast(BrowserSession, BrowserRenderer(False)),
+        cache=cache,
+        impersonate_policy="never",
+    )
+
+    async def allowed(
+        _url: str, _ignore_robots: bool = False, _obey_robots: bool = False
+    ) -> bool:
+        return True
+
+    monkeypatch.setattr(fetcher, "may_fetch", allowed)
+    telemetry = RecordingTelemetry()
+    try:
+        response = await LegacyFetcherTransport(fetcher, telemetry=telemetry).request(
+            request()
+        )
+    finally:
+        await client.aclose()
+
+    assert response.route.kind == "cache"
+    assert response.from_cache
+    assert response.json_value() == {"cached": True}
+    completed = telemetry.events[-1]
+    assert completed[0] == "catalogue.legacy_fetcher.request.completed"
+    assert completed[1]["route"] == "cache"
+    assert completed[1]["cache_provenance"] == provenance
 
 
 @pytest.mark.asyncio

@@ -695,6 +695,8 @@ async def test_shopify_canary_composes_registry_without_duplicate_transport_call
         checkpoint=None,
         fetcher=fetcher,
         cancelled=lambda: False,
+        ignore_robots=bool(config.ignore_robots),
+        obey_robots=bool(config.obey_robots),
     )
     await apply_library_fetch_policy(fetcher, config, connector)
     pages = [page async for page in connector.collect(pipeline_request)]
@@ -709,7 +711,11 @@ async def test_shopify_canary_composes_registry_without_duplicate_transport_call
     ]
     assert fetcher.limiter.groups == [(config.url, "edge:shopify")]
     assert fetcher.limiter.delays == [(config.url, 0.25)]
-    assert fetcher.policy_calls == [(config.url, False, True)]
+    assert fetcher.policy_calls == [
+        (config.url, False, True),
+        ("https://shop.test/meta.json", False, True),
+        ("https://shop.test/products.json?limit=250&page=1", False, True),
+    ]
     assert len(pages) == 1
     assert pages[0].terminal
 
@@ -741,6 +747,8 @@ async def test_library_policy_denies_robots_before_connector_network_calls():
         checkpoint=None,
         fetcher=fetcher,
         cancelled=lambda: False,
+        ignore_robots=bool(config.ignore_robots),
+        obey_robots=bool(config.obey_robots),
     )
 
     with pytest.raises(RuntimeError, match=r"robots\.txt disallows"):

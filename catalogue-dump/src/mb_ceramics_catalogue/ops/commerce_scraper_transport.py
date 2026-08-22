@@ -19,6 +19,7 @@ from mb_commerce_scraper.transports import (
     BrowserHint,
     NullTelemetry,
     ResponseBodyTooLarge,
+    RobotsDenied,
     RotationReason,
     RouteMetadata,
     TransportFailure,
@@ -109,6 +110,8 @@ class LegacyFetcherTransport:
         telemetry: TelemetryHooks | None = None,
         telemetry_context: Mapping[str, JsonValue] | None = None,
         maximum_response_bytes: int = DEFAULT_MAXIMUM_RESPONSE_BYTES,
+        ignore_robots: bool = False,
+        obey_robots: bool = False,
     ) -> None:
         if maximum_response_bytes < 1:
             raise ValueError("maximum_response_bytes must be positive")
@@ -116,10 +119,27 @@ class LegacyFetcherTransport:
         self._telemetry = safe_telemetry(telemetry or NullTelemetry())
         self._telemetry_context = dict(telemetry_context or {})
         self._maximum_response_bytes = maximum_response_bytes
+        self._ignore_robots = ignore_robots
+        self._obey_robots = obey_robots
 
     async def request(self, request: TransportRequest) -> TransportResponse:
         if request.body is not None:
             raise ValueError("legacy Fetcher transport cannot send an opaque byte body")
+        requested_url = (
+            str(httpx.URL(request.url, params=request.query))
+            if request.query
+            else request.url
+        )
+        if not await self._fetcher.may_fetch(
+            requested_url,
+            self._ignore_robots,
+            self._obey_robots,
+        ):
+            self._telemetry.emit(
+                "catalogue.legacy_fetcher.robots.denied",
+                self._request_fields(request, url=requested_url),
+            )
+            raise RobotsDenied("robots policy denies request")
         if request.browser == BrowserHint.REQUIRED:
             return await self._render(request)
 
@@ -173,8 +193,13 @@ class LegacyFetcherTransport:
                 received_bytes=received_bytes,
             )
 
-        route: Literal["direct", "proxy"] = (
-            "proxy" if self._proxy_requests() > proxy_before else "direct"
+        cache_provenance = _cache_provenance(response)
+        route: Literal["direct", "proxy", "cache"] = (
+            "cache"
+            if cache_provenance is not None
+            else "proxy"
+            if self._proxy_requests() > proxy_before
+            else "direct"
         )
         elapsed = time.monotonic() - started
         self._telemetry.emit(
@@ -185,6 +210,7 @@ class LegacyFetcherTransport:
                 "duration_seconds": elapsed,
                 "response_bytes": received_bytes,
                 "route": route,
+                "cache_provenance": cache_provenance,
             },
         )
         return TransportResponse(
@@ -193,6 +219,7 @@ class LegacyFetcherTransport:
             content=content,
             final_url=str(response.url),
             route=RouteMetadata(kind=route),
+            from_cache=cache_provenance is not None,
             elapsed_seconds=elapsed,
         )
 
@@ -331,6 +358,16 @@ def _safe_transport_failure(error: BaseException) -> TransportFailure:
         max_length=2_048,
     )
     return TransportFailure(message)
+
+
+def _cache_provenance(response: httpx.Response) -> Literal["fresh", "replayed", "stale"] | None:
+    value = response.extensions.get("catalogue_cache_provenance")
+    provenances: dict[str, Literal["fresh", "replayed", "stale"]] = {
+        "fresh": "fresh",
+        "replayed": "replayed",
+        "stale": "stale",
+    }
+    return provenances.get(value) if isinstance(value, str) else None
 
 
 def _raise_response_body_too_large(

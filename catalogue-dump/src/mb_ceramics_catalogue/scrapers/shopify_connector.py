@@ -153,6 +153,8 @@ class ShopifyConnectorScraper(Scraper):
             fetcher=counting,
             cancelled=lambda: self._cancel_requested,
             collection_id=collection_id,
+            ignore_robots=bool(config.ignore_robots),
+            obey_robots=bool(config.obey_robots),
         )
         projection = {
             **ceramics_projection_configuration(config),

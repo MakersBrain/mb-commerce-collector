@@ -1471,6 +1471,11 @@ class Fetcher:
                 content=stored.body.encode("utf-8"),
                 headers=stored.headers,
                 request=httpx.Request(method, stored.url or url),
+                extensions={
+                    "catalogue_cache_provenance": (
+                        "replayed" if self.cache.mode == "replay" else "fresh"
+                    )
+                },
             )
         if self.cache.mode == "replay":
             raise NotCached(f"{method} {url} is not in the cache")
@@ -1623,6 +1628,7 @@ class Fetcher:
                 content=stale.body.encode("utf-8"),
                 headers=stale.headers,
                 request=httpx.Request(method, stale.url or url),
+                extensions={"catalogue_cache_provenance": "fresh"},
             )
         if (
             stale is not None
@@ -1714,7 +1720,10 @@ class Fetcher:
             content=stale.body.encode("utf-8"),
             headers=stale.headers,
             request=httpx.Request(method, stale.url or url),
-            extensions={"catalogue_stale_on_error": True},
+            extensions={
+                "catalogue_cache_provenance": "stale",
+                "catalogue_stale_on_error": True,
+            },
         )
 
     async def _impersonate(

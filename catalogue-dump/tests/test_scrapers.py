@@ -1426,6 +1426,7 @@ class ConditionalRefreshTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(['"v1"'], seen)
         self.assertEqual(1, fetcher.stats.not_modified)
         self.assertEqual(len(b"previous body"), fetcher.stats.bytes_saved_304)
+        self.assertEqual("fresh", response.extensions["catalogue_cache_provenance"])
 
     async def test_stale_fallback_is_explicit_for_transient_errors(self):
         async def no_wait(_seconds):
@@ -1439,6 +1440,7 @@ class ConditionalRefreshTests(unittest.IsolatedAsyncioTestCase):
                 response = await fetcher.response(self.url)
         self.assertEqual(200, response.status_code)
         self.assertTrue(response.extensions["catalogue_stale_on_error"])
+        self.assertEqual("stale", response.extensions["catalogue_cache_provenance"])
 
     async def test_stale_fallback_is_off_by_default(self):
         async def no_wait(_seconds):
