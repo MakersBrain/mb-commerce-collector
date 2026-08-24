@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 from uuid import uuid4
 
 from mb_commerce_scraper import (
@@ -25,6 +24,8 @@ from mb_commerce_scraper import (
 from mb_commerce_scraper import ConnectorContext as LibraryConnectorContext
 from mb_commerce_scraper.runtime import CommerceScraper, build_http_scraper
 from mb_commerce_scraper.transports import (
+    RequestObservation,
+    RequestObservationPhase,
     RobotsFetchFailurePolicy,
     TelemetryHooks,
     safe_telemetry,
@@ -188,40 +189,39 @@ class LibraryDebugTelemetry:
         }.get(level, LOGGER.debug)
         with suppress(Exception):  # observers never affect collection
             writer(event, **fields)
-        if event == "request.started":
-            with suppress(Exception):
-                self._start_request_span(fields)
         with suppress(Exception):  # optional tracing is best-effort
             tracing.event(event, **self._trace_fields(fields))
-        if event in {"request.completed", "request.failed", "request.retry"}:
+
+    def observe_request(self, observation: RequestObservation) -> None:
+        if observation.phase is RequestObservationPhase.STARTED:
             with suppress(Exception):
-                self._project_request_metrics(event, fields)
-            with suppress(Exception):
-                self._finish_request_span(fields)
-        if event not in {"request.completed", "request.failed", "request.retry"}:
+                self._start_request_span(observation)
             return
-        physical = self._counter(fields.get("physical_requests"))
+        with suppress(Exception):
+            self._project_request_metrics(observation)
+        with suppress(Exception):
+            self._finish_request_span(observation)
+        physical = observation.accounting.physical_requests
         if physical == 0:
             return
-        transmitted = self._counter(fields.get("transmitted_bytes"))
-        received = self._counter(fields.get("received_bytes"))
-        route = fields.get("route")
-        provider = fields.get("provider")
+        transmitted = observation.accounting.transmitted_bytes
+        received = observation.accounting.received_bytes
+        route = observation.route
         self._totals["physical_requests"] += physical
-        outcome = self._transport_outcome(event, fields)
+        outcome = observation.outcome
         self._outcomes[outcome] = self._outcomes.get(outcome, 0) + physical
-        if route == "browser":
+        if route is not None and route.kind == "browser":
             self._totals["browser_requests"] += physical
             self._totals["browser_tx_bytes_estimated"] += transmitted
             self._totals["browser_rx_bytes_estimated"] += received
         else:
             self._totals["http_tx_bytes_estimated"] += transmitted
             self._totals["http_rx_bytes_estimated"] += received
-        if provider is not None:
+        if route is not None and route.provider is not None:
             self._totals["proxy_requests"] += physical
-        elif route == "direct":
+        elif route is not None and route.kind == "direct":
             self._totals["direct_requests"] += physical
-        elif route != "browser":
+        elif route is None or route.kind != "browser":
             # Transport failures deliberately carry no potentially stale route
             # attribution. Retain their usage without guessing direct/proxy.
             self._totals["unclassified_requests"] += physical
@@ -233,44 +233,20 @@ class LibraryDebugTelemetry:
         return dict(self._outcomes)
 
     @staticmethod
-    def _transport_outcome(event: str, fields: dict[str, Any]) -> str:
-        del event
-        status = fields.get("status")
-        if (
-            isinstance(status, int)
-            and not isinstance(status, bool)
-            and 100 <= status <= 599
-        ):
-            if status in {403, 429}:
-                return str(status)
-            return f"{status // 100}xx"
-        return "transport_error"
-
-    @staticmethod
-    def _counter(value: Any) -> int:
-        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
-
-    @staticmethod
     def _trace_fields(fields: dict[str, Any]) -> dict[str, str | bool | int | float]:
         """Keep OpenTelemetry attributes bounded to its scalar value contract."""
         return {name: value for name, value in fields.items() if isinstance(value, (str, bool, int, float))}
 
     @staticmethod
-    def _request_key(fields: dict[str, Any]) -> tuple[str, int] | None:
-        request_id = fields.get("request_id")
-        attempt = fields.get("attempt")
-        if (
-            not isinstance(request_id, str)
-            or not request_id
-            or not isinstance(attempt, int)
-            or isinstance(attempt, bool)
-            or attempt < 1
-        ):
+    def _request_key(
+        observation: RequestObservation,
+    ) -> tuple[str, int] | None:
+        if observation.request_id is None:
             return None
-        return request_id, attempt
+        return observation.request_id, observation.attempt
 
-    def _start_request_span(self, fields: dict[str, Any]) -> None:
-        key = self._request_key(fields)
+    def _start_request_span(self, observation: RequestObservation) -> None:
+        key = self._request_key(observation)
         if key is None:
             return
         previous = self._request_spans.pop(key, None)
@@ -278,13 +254,13 @@ class LibraryDebugTelemetry:
             previous[0].__exit__(None, None, None)
         manager = tracing.span(
             "commerce.request",
-            **self._trace_fields(fields),
+            **observation.trace_fields(),
         )
         active = manager.__enter__()
         self._request_spans[key] = manager, active
 
-    def _finish_request_span(self, fields: dict[str, Any]) -> None:
-        key = self._request_key(fields)
+    def _finish_request_span(self, observation: RequestObservation) -> None:
+        key = self._request_key(observation)
         if key is None:
             return
         retained = self._request_spans.pop(key, None)
@@ -292,43 +268,40 @@ class LibraryDebugTelemetry:
             return
         manager, active = retained
         if active is not None:
-            for name, value in self._trace_fields(fields).items():
+            for name, value in observation.trace_fields().items():
                 active.set_attribute(name, value)
         manager.__exit__(None, None, None)
 
     @staticmethod
-    def _project_request_metrics(event: str, fields: dict[str, Any]) -> None:
-        if event == "request.retry" and LibraryDebugTelemetry._counter(fields.get("physical_requests")) == 0:
+    def _project_request_metrics(observation: RequestObservation) -> None:
+        if (
+            observation.phase is RequestObservationPhase.RETRY
+            and observation.accounting.physical_requests == 0
+        ):
             # A TransportFailure already emitted and counted request.failed;
             # its following classification-only retry is a decision event, not
             # a second physical attempt.
             return
-        raw_url = fields.get("url")
-        if not isinstance(raw_url, str):
-            return
-        host = (urlsplit(raw_url).hostname or "").casefold()
+        host = observation.target_host
         if not host:
             return
-        source = fields.get("source_id")
-        source_id = source if isinstance(source, str) else None
-        status = fields.get("status")
+        status = observation.status
         outcome = (
             "failed"
-            if event == "request.failed"
+            if observation.phase is RequestObservationPhase.FAILED
             else "retry"
-            if event == "request.retry"
+            if observation.phase is RequestObservationPhase.RETRY
             else f"{status // 100}xx"
-            if isinstance(status, int) and not isinstance(status, bool)
+            if status is not None
             else "completed"
         )
-        metrics.request(source_id, host, outcome)
-        elapsed_ms = fields.get("elapsed_ms")
-        if isinstance(elapsed_ms, (int, float)) and not isinstance(elapsed_ms, bool) and elapsed_ms >= 0:
-            metrics.request_duration(host, elapsed_ms / 1_000)
-        if isinstance(status, int) and not isinstance(status, bool) and status >= 400:
+        metrics.request(observation.source_id, host, outcome)
+        if observation.elapsed_seconds is not None:
+            metrics.request_duration(host, observation.elapsed_seconds)
+        if status is not None and status >= 400:
             metrics.http_error(host, status)
-        if fields.get("route") == "browser":
-            metrics.browser_render(source_id)
+        if observation.route is not None and observation.route.kind == "browser":
+            metrics.browser_render(observation.source_id)
 
 
 class CatalogueCommerceRuntime:

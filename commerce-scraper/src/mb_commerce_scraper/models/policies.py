@@ -43,6 +43,10 @@ class ProxyPolicyConfig(BaseModel):
     maximum_requests: int | None = Field(default=None, ge=1)
     maximum_bytes: int | None = Field(default=None, ge=1)
 
+    @classmethod
+    def fallback(cls, *, country: str | None = None) -> ProxyPolicyConfig:
+        return cls(mode=ProxyMode.FALLBACK, country=country)
+
     @field_validator("country")
     @classmethod
     def validate_country(cls, value: str | None) -> str | None:

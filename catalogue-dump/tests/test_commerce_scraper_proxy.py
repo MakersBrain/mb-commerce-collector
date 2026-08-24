@@ -9,15 +9,14 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from mb_commerce_scraper import ProxyMode, ProxyPolicyConfig
 from mb_commerce_scraper.proxy import (
     ProxyKind,
     ProxyLease,
     ProxyOutcome,
     ProxyPool,
     ProxyRequest,
-    ProxyRouting,
     RoutedTransport,
-    RoutingMode,
 )
 from mb_commerce_scraper.testing import FakeTransport
 from mb_commerce_scraper.transports import (
@@ -336,11 +335,14 @@ async def test_middleware_fallback_uses_one_durable_catalogue_proxy_attempt(
         direct,
         pool=pool(),
         proxy_factory=proxy_factory,
-        routing=ProxyRouting.fallback(country="FR"),
+        policy=ProxyPolicyConfig(
+            mode=ProxyMode.FALLBACK,
+            country="FR",
+            maximum_requests=2,
+            maximum_bytes=100,
+        ),
         source_id="shop",
         base_url="https://shop.test/",
-        maximum_requests=2,
-        maximum_bytes=100,
     )
     middleware = MiddlewareTransport(
         routed,
@@ -411,11 +413,14 @@ async def test_cancelled_dispatched_proxy_attempt_reconciles_before_release(
         FakeTransport(),
         pool=pool(),
         proxy_factory=ProxyFactory(proxy),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS, country="FR"),
+        policy=ProxyPolicyConfig(
+            mode=ProxyMode.ALWAYS,
+            country="FR",
+            maximum_requests=2,
+            maximum_bytes=100,
+        ),
         source_id="shop",
         base_url="https://shop.test/",
-        maximum_requests=2,
-        maximum_bytes=100,
     )
     task = asyncio.create_task(
         routed.request(

@@ -15,7 +15,6 @@ from .base import (
 )
 from .health import InMemoryProxyHealth, ProxyFailureReason, ProxyHealthState
 from .httpx import HttpxProxyTransportFactory
-from .routing import ProxyRouting, RoutingMode
 from .static import StaticProxyLease, StaticProxyPool, StaticRoute
 from .transport import (
     BrowserSubrequestAuthorizedTransport,
@@ -46,10 +45,8 @@ __all__ = [
     "ProxyOutcome",
     "ProxyPool",
     "ProxyRequest",
-    "ProxyRouting",
     "ProxyTransportFactory",
     "RoutedTransport",
-    "RoutingMode",
     "StaticProxyLease",
     "StaticProxyPool",
     "StaticRoute",

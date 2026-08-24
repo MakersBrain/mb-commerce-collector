@@ -131,11 +131,11 @@ async def test_delegates_library_identity_and_revalidates_page_envelope() -> Non
 
 
 @pytest.mark.asyncio
-async def test_rejects_legacy_checkpoint_and_mismatched_projection_identity() -> None:
+async def test_rejects_catalogue_checkpoint_and_mismatched_projection_identity() -> None:
     connector = Connector()
     library_request, pipeline_request = requests()
     adapter = LibraryPipelineConnector(connector, library_request, None)
-    legacy_checkpoint = ConnectorCheckpoint(
+    catalogue_checkpoint = ConnectorCheckpoint(
         connector="shopify",
         connector_version="1",
         source_id="shop",
@@ -144,7 +144,7 @@ async def test_rejects_legacy_checkpoint_and_mismatched_projection_identity() ->
     )
 
     with pytest.raises(ValueError, match="cannot enter"):
-        _ = [page async for page in adapter.collect(pipeline_request, legacy_checkpoint)]
+        _ = [page async for page in adapter.collect(pipeline_request, catalogue_checkpoint)]
     with pytest.raises(ValueError, match="source identities"):
         _ = [
             page

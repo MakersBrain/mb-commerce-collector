@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from time import monotonic
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from pydantic import JsonValue
@@ -13,6 +14,8 @@ from .base import (
     CommerceTransport,
     RateLimiter,
     RequestBudget,
+    RequestObservation,
+    RequestObservationPhase,
     ResponseBodyTooLarge,
     ResponseCache,
     RobotsChecker,
@@ -176,6 +179,11 @@ class MiddlewareTransport(CommerceTransport):
                     "request.started",
                     {**common, "level": "debug", "attempt": attempt_number},
                 )
+                self._observe_request(
+                    RequestObservationPhase.STARTED,
+                    attempt_request,
+                    attempt=attempt_number,
+                )
                 dispatched = True
                 response = await self._backend.request(attempt_request)
                 response_bytes = len(response.content)
@@ -207,6 +215,14 @@ class MiddlewareTransport(CommerceTransport):
                         "maximum_bytes": error.maximum_bytes,
                     },
                 )
+                self._observe_request(
+                    RequestObservationPhase.FAILED,
+                    attempt_request,
+                    attempt=attempt_number,
+                    accounting=accounting,
+                    elapsed_seconds=monotonic() - started,
+                    classification="response_body_too_large",
+                )
                 raise
             except TransportFailure as error:
                 if not dispatched:
@@ -229,6 +245,14 @@ class MiddlewareTransport(CommerceTransport):
                         "physical_requests": accounting.physical_requests,
                     },
                 )
+                self._observe_request(
+                    RequestObservationPhase.FAILED,
+                    attempt_request,
+                    attempt=attempt_number,
+                    accounting=accounting,
+                    elapsed_seconds=monotonic() - started,
+                    classification="transport_failure",
+                )
             except asyncio.CancelledError as error:
                 if dispatched:
                     accounting = getattr(error, "accounting", None) or TransportAccounting(
@@ -249,6 +273,14 @@ class MiddlewareTransport(CommerceTransport):
                             "physical_requests": accounting.physical_requests,
                         },
                     )
+                    self._observe_request(
+                        RequestObservationPhase.FAILED,
+                        attempt_request,
+                        attempt=attempt_number,
+                        accounting=accounting,
+                        elapsed_seconds=monotonic() - started,
+                        classification="cancelled",
+                    )
                 raise
             except Exception as error:
                 if dispatched:
@@ -267,6 +299,14 @@ class MiddlewareTransport(CommerceTransport):
                             "received_bytes": accounting.received_bytes,
                             "physical_requests": accounting.physical_requests,
                         },
+                    )
+                    self._observe_request(
+                        RequestObservationPhase.FAILED,
+                        attempt_request,
+                        attempt=attempt_number,
+                        accounting=accounting,
+                        elapsed_seconds=monotonic() - started,
+                        classification="backend_failure",
                     )
                 raise
             finally:
@@ -291,6 +331,7 @@ class MiddlewareTransport(CommerceTransport):
                     if dispatched:
                         self._emit_attempt_failure(
                             common,
+                            request=attempt_request,
                             error=cleanup_error,
                             accounting=accounting,
                             attempt=attempt_number,
@@ -318,6 +359,12 @@ class MiddlewareTransport(CommerceTransport):
                         "classification": "transport_failure",
                         "backoff_ms": round(backoff_seconds * 1_000, 3),
                     },
+                )
+                self._observe_request(
+                    RequestObservationPhase.RETRY,
+                    attempt_request,
+                    attempt=attempt_number,
+                    classification="transport_failure",
                 )
                 if not self._can_use_stale(request, stale):
                     await self._rotate_identity(
@@ -348,6 +395,7 @@ class MiddlewareTransport(CommerceTransport):
                 )
                 self._emit_completed(
                     common,
+                    request=attempt_request,
                     response=response,
                     accounting=accounting,
                     attempt=attempt_number,
@@ -370,6 +418,7 @@ class MiddlewareTransport(CommerceTransport):
                     )
                 self._emit_completed(
                     common,
+                    request=attempt_request,
                     response=response,
                     accounting=accounting,
                     attempt=attempt_number,
@@ -400,6 +449,15 @@ class MiddlewareTransport(CommerceTransport):
                     "physical_requests": accounting.physical_requests,
                     "backoff_ms": round(backoff_seconds * 1_000, 3),
                 },
+            )
+            self._observe_request(
+                RequestObservationPhase.RETRY,
+                attempt_request,
+                attempt=attempt_number,
+                response=response,
+                accounting=accounting,
+                elapsed_seconds=monotonic() - started,
+                classification="transient_status",
             )
             if response.status in {403, 429} and not self._can_use_stale(request, stale, response.status):
                 await self._rotate_identity(
@@ -432,6 +490,7 @@ class MiddlewareTransport(CommerceTransport):
         except BaseException as error:
             self._emit_attempt_failure(
                 common,
+                request=request,
                 error=error,
                 accounting=accounting,
                 attempt=attempt,
@@ -444,6 +503,7 @@ class MiddlewareTransport(CommerceTransport):
         self,
         common: dict[str, JsonValue],
         *,
+        request: TransportRequest,
         error: BaseException,
         accounting: TransportAccounting,
         attempt: int,
@@ -464,6 +524,14 @@ class MiddlewareTransport(CommerceTransport):
                 "received_bytes": accounting.received_bytes,
                 "physical_requests": accounting.physical_requests,
             },
+        )
+        self._observe_request(
+            RequestObservationPhase.FAILED,
+            request,
+            attempt=attempt,
+            accounting=accounting,
+            elapsed_seconds=monotonic() - started,
+            classification=stage,
         )
 
     async def _rotate_identity(
@@ -553,6 +621,7 @@ class MiddlewareTransport(CommerceTransport):
         self,
         common: dict[str, JsonValue],
         *,
+        request: TransportRequest,
         response: TransportResponse,
         accounting: TransportAccounting,
         attempt: int,
@@ -572,4 +641,44 @@ class MiddlewareTransport(CommerceTransport):
                 "received_bytes": accounting.received_bytes,
                 "physical_requests": accounting.physical_requests,
             },
+        )
+        self._observe_request(
+            RequestObservationPhase.COMPLETED,
+            request,
+            attempt=attempt,
+            response=response,
+            accounting=accounting,
+            elapsed_seconds=monotonic() - started,
+        )
+
+    def _observe_request(
+        self,
+        phase: RequestObservationPhase,
+        request: TransportRequest,
+        *,
+        attempt: int,
+        accounting: TransportAccounting | None = None,
+        response: TransportResponse | None = None,
+        elapsed_seconds: float | None = None,
+        classification: str | None = None,
+    ) -> None:
+        if self._telemetry is None:
+            return
+        source = self._telemetry_context.get("source_id")
+        self._telemetry.observe_request(
+            RequestObservation(
+                phase=phase,
+                request_id=request.trace_request_id,
+                attempt=attempt,
+                source_id=source if isinstance(source, str) and source else None,
+                target_host=(urlsplit(request.url).hostname or "").casefold(),
+                method=request.method.upper(),
+                purpose=request.purpose,
+                status=response.status if response is not None else None,
+                elapsed_seconds=elapsed_seconds,
+                route=response.route if response is not None else None,
+                accounting=accounting
+                or TransportAccounting(physical_requests=0),
+                classification=classification,
+            )
         )

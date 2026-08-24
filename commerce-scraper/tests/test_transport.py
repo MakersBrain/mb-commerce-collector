@@ -16,6 +16,8 @@ from mb_commerce_scraper.transports import (
     MemoryResponseCache,
     MiddlewareTransport,
     ProxyBrowserRoutingUnsupported,
+    RequestObservation,
+    RequestObservationPhase,
     RequestPriority,
     RequestPurpose,
     ResponseBodyTooLarge,
@@ -66,15 +68,23 @@ def test_transport_integer_boundaries_reject_booleans(
 class RecordingTelemetry:
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, JsonValue]]] = []
+        self.observations: list[RequestObservation] = []
 
     def emit(self, event: str, fields: dict[str, JsonValue]) -> None:
         self.events.append((event, fields))
+
+    def observe_request(self, observation: RequestObservation) -> None:
+        self.observations.append(observation)
 
 
 class BrokenTelemetry:
     def emit(self, event: str, fields: dict[str, JsonValue]) -> None:
         del event, fields
         raise RuntimeError("observer unavailable")
+
+    def observe_request(self, observation: RequestObservation) -> None:
+        del observation
+        raise RuntimeError("request observer unavailable")
 
 
 class FailingReleaseLimiter:
@@ -1118,6 +1128,18 @@ async def test_retry_telemetry_correlates_attempts_without_leaking_credentials()
     assert fields[2]["received_bytes"] == 0
     assert fields[2]["physical_requests"] == 1
     assert fields[-1]["route"] == "direct"
+    assert [observation.phase for observation in telemetry.observations] == [
+        RequestObservationPhase.STARTED,
+        RequestObservationPhase.RETRY,
+        RequestObservationPhase.STARTED,
+        RequestObservationPhase.COMPLETED,
+    ]
+    retry = telemetry.observations[1]
+    assert retry.target_host == "shop.test"
+    assert retry.status == 503
+    assert retry.route is not None and retry.route.kind == "direct"
+    assert retry.accounting.transmitted_bytes == expected_transmitted
+    assert "secret" not in retry.model_dump_json()
     assert fields[-1]["purpose"] == "entity"
     assert fields[-1]["transmitted_bytes"] == expected_transmitted
     assert fields[-1]["received_bytes"] == 2

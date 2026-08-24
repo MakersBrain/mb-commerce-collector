@@ -5,6 +5,7 @@ import asyncio
 import pytest
 from pydantic import JsonValue
 
+from mb_commerce_scraper import ProxyMode, ProxyPolicyConfig
 from mb_commerce_scraper.proxy import (
     BrowserSubrequestAuthorizer,
     BrowserSubrequestOutcome,
@@ -14,9 +15,7 @@ from mb_commerce_scraper.proxy import (
     ProxyLease,
     ProxyOutcome,
     ProxyRequest,
-    ProxyRouting,
     RoutedTransport,
-    RoutingMode,
 )
 from mb_commerce_scraper.testing import FakeTransport, fake_proxy_pool
 from mb_commerce_scraper.transports import (
@@ -233,11 +232,13 @@ async def test_browser_subrequests_replace_outer_logical_authorization() -> None
         FakeTransport(),
         pool=pool,
         proxy_factory=AuthorizedBrowserFactory(pool),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(
+            mode=ProxyMode.ALWAYS,
+            maximum_requests=2,
+            maximum_bytes=1_000,
+        ),
         source_id="shop",
         base_url="https://shop.test",
-        maximum_requests=2,
-        maximum_bytes=1_000,
     )
 
     response = await routed.request(
@@ -262,7 +263,7 @@ async def test_fallback_stays_direct_after_success() -> None:
         direct,
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting.fallback(country="FR"),
+        policy=ProxyPolicyConfig.fallback(country="FR"),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -282,7 +283,7 @@ async def test_fallback_acquires_sticky_proxy_only_for_typed_block() -> None:
         direct,
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting.fallback(country="FR"),
+        policy=ProxyPolicyConfig.fallback(country="FR"),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -303,7 +304,7 @@ async def test_fallback_does_not_route_programming_errors_through_proxy() -> Non
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": FakeTransport()}),
-        routing=ProxyRouting.fallback(country="FR"),
+        policy=ProxyPolicyConfig.fallback(country="FR"),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -326,7 +327,7 @@ async def test_failover_rotates_provider_after_block() -> None:
         direct,
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": first, "two": second}),
-        routing=ProxyRouting(mode=RoutingMode.FAILOVER, provider_preferences=("one", "two")),
+        policy=ProxyPolicyConfig(mode=ProxyMode.FAILOVER, provider_preferences=("one", "two")),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -352,8 +353,8 @@ async def test_proxy_lifecycle_telemetry_tracks_route_without_credentials() -> N
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": first, "two": second}),
-        routing=ProxyRouting(
-            mode=RoutingMode.FAILOVER,
+        policy=ProxyPolicyConfig(
+            mode=ProxyMode.FAILOVER,
             provider_preferences=("one", "two"),
         ),
         source_id="shop",
@@ -404,7 +405,7 @@ async def test_fallback_transport_failure_defers_proxy_to_next_attempt() -> None
         direct,
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting.fallback(country="FR"),
+        policy=ProxyPolicyConfig.fallback(country="FR"),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -432,8 +433,8 @@ async def test_failover_transport_failure_is_reported_before_next_provider_attem
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": first, "two": second}),
-        routing=ProxyRouting(
-            mode=RoutingMode.FAILOVER,
+        policy=ProxyPolicyConfig(
+            mode=ProxyMode.FAILOVER,
             provider_preferences=("one", "two"),
         ),
         source_id="shop",
@@ -465,7 +466,7 @@ async def test_proxy_oversized_body_reports_received_bytes_without_rotation() ->
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -490,7 +491,7 @@ async def test_middleware_retry_is_the_single_fallback_proxy_attempt() -> None:
         direct,
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting.fallback(country="FR"),
+        policy=ProxyPolicyConfig.fallback(country="FR"),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -521,7 +522,7 @@ async def test_stale_on_error_does_not_acquire_or_taint_fallback_route() -> None
         direct,
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting.fallback(country="FR"),
+        policy=ProxyPolicyConfig.fallback(country="FR"),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -561,7 +562,7 @@ async def test_each_proxy_retry_reports_transmitted_bytes_once() -> None:
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -604,7 +605,7 @@ async def test_proxy_outcome_prefers_backend_physical_accounting() -> None:
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -639,10 +640,9 @@ async def test_proxy_accounting_rejects_backend_values_below_observed_minimums()
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS, maximum_requests=1),
         source_id="shop",
         base_url="https://shop.test",
-        maximum_requests=1,
     )
 
     assert (await routed.request(attempted)).content == b"retained"
@@ -679,7 +679,7 @@ async def test_proxy_oversize_accounting_cannot_underreport_observed_bytes() -> 
         proxy_factory=FakeProxyTransportFactory(
             {"one": UnderreportingOversizeTransport()}
         ),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -716,10 +716,9 @@ async def test_backend_redirect_count_reconciles_against_proxy_request_cap() -> 
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS, maximum_requests=1),
         source_id="shop",
         base_url="https://shop.test",
-        maximum_requests=1,
     )
 
     with pytest.raises(ProxyBudgetExhausted) as caught:
@@ -740,10 +739,9 @@ async def test_proxy_byte_cap_prevents_request_from_starting() -> None:
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS, maximum_bytes=10),
         source_id="shop",
         base_url="https://shop.test",
-        maximum_bytes=10,
     )
     with pytest.raises(ProxyBudgetExhausted):
         await routed.request(request(estimated_bytes=11))
@@ -760,10 +758,9 @@ async def test_proxy_authorization_reserves_expected_receive_and_transmit_bytes(
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS, maximum_bytes=1_000),
         source_id="shop",
         base_url="https://shop.test",
-        maximum_bytes=1_000,
     )
     attempted = request(estimated_bytes=60)
 
@@ -797,11 +794,13 @@ async def test_proxy_browser_aggregate_uses_one_lease_and_one_outcome() -> None:
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy_route}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(
+            mode=ProxyMode.ALWAYS,
+            maximum_requests=10,
+            maximum_bytes=2_000,
+        ),
         source_id="shop",
         base_url="https://shop.test",
-        maximum_requests=10,
-        maximum_bytes=2_000,
     )
     rendered = request().model_copy(update={"browser": BrowserHint.REQUIRED})
 
@@ -825,10 +824,9 @@ async def test_concurrent_proxy_attempts_authorize_the_collection_cap_atomically
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS, maximum_bytes=100),
         source_id="shop",
         base_url="https://shop.test",
-        maximum_bytes=100,
     )
 
     first = asyncio.create_task(routed.request(request(estimated_bytes=60)))
@@ -855,10 +853,9 @@ async def test_proxy_collection_cap_survives_identity_rotation() -> None:
         proxy_factory=FakeProxyTransportFactory(
             {"one": first_proxy, "two": second_proxy}
         ),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS, maximum_bytes=100),
         source_id="shop",
         base_url="https://shop.test",
-        maximum_bytes=100,
     )
 
     assert (await routed.request(request(estimated_bytes=60))).text() == "123456"
@@ -878,11 +875,13 @@ async def test_cancelled_dispatched_proxy_attempt_counts_conservatively() -> Non
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(
+            mode=ProxyMode.ALWAYS,
+            maximum_requests=2,
+            maximum_bytes=200,
+        ),
         source_id="shop",
         base_url="https://shop.test",
-        maximum_requests=2,
-        maximum_bytes=200,
     )
 
     cancelled = asyncio.create_task(routed.request(request(estimated_bytes=60)))
@@ -908,10 +907,9 @@ async def test_cancelled_proxy_acquisition_releases_cap_authorization() -> None:
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS, maximum_bytes=100),
         source_id="shop",
         base_url="https://shop.test",
-        maximum_bytes=100,
     )
 
     cancelled = asyncio.create_task(routed.request(request(estimated_bytes=60)))
@@ -936,7 +934,7 @@ async def test_concurrent_initial_requests_share_one_lease_acquisition() -> None
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -967,7 +965,7 @@ async def test_rotation_waits_for_in_flight_route_without_blocking_state_updates
         proxy_factory=FakeProxyTransportFactory(
             {"one": first_proxy, "two": second_proxy}
         ),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -1007,7 +1005,7 @@ async def test_concurrent_rotation_requests_coalesce_to_one_transition() -> None
         proxy_factory=FakeProxyTransportFactory(
             {"one": first_proxy, "two": second_proxy}
         ),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -1038,7 +1036,7 @@ async def test_close_waits_for_in_flight_request_before_releasing_lease() -> Non
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -1069,7 +1067,7 @@ async def test_cancelled_request_returns_route_checkout_before_close() -> None:
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -1095,7 +1093,7 @@ async def test_failed_rotation_releases_detached_old_lease() -> None:
         FakeTransport(),
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         source_id="shop",
         base_url="https://shop.test",
     )
@@ -1125,7 +1123,7 @@ async def test_stale_direct_block_does_not_rotate_newly_acquired_proxy() -> None
         direct,
         pool=pool,
         proxy_factory=FakeProxyTransportFactory({"one": proxy}),
-        routing=ProxyRouting.fallback(),
+        policy=ProxyPolicyConfig.fallback(),
         source_id="shop",
         base_url="https://shop.test",
     )

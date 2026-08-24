@@ -111,9 +111,8 @@ diagnostics, cache keys, checkpoints, exceptions, or telemetry.
 
 ## Routing and retry ownership
 
-Choose routing explicitly with `ProxyPolicyConfig`. `ProxyRouting` remains the
-low-level transport contract for callers that compose `RoutedTransport`
-directly; high-level runtime composition uses one policy object so route and
+Choose routing explicitly with `ProxyPolicyConfig`. High-level runtime and
+direct `RoutedTransport` composition use the same policy object so route and
 budget fields cannot drift:
 
 - `never`: direct only;
@@ -124,11 +123,6 @@ budget fields cannot drift:
 - `round_robin`: proxy-only selection; the pool may distribute new leases,
   while each collection keeps its acquired lease sticky.
 
-The high-level builder and client retain `routing`,
-`proxy_maximum_requests`, and `proxy_maximum_bytes` as a compatibility path for
-the initial release. Do not mix those arguments with `proxy_policy`; mixed
-configuration is rejected. Cap-only legacy configuration is also rejected
-because a limit without active routing cannot authorize or constrain traffic.
 Pass an explicit `ProxyPolicyConfig(mode=ProxyMode.NEVER)` to disable routing
 for one collection without touching an available proxy backend.
 

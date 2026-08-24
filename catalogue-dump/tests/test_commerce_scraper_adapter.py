@@ -2,62 +2,21 @@ from pathlib import Path
 
 import pytest
 from mb_commerce_scraper import (
-    CollectionRequest,
-    CommerceConnector,
-    CompatibleLegacyCheckpoint,
     ConnectorRegistry,
-    LegacyCheckpointRestartReason,
-    RestartLegacyCheckpoint,
     SourceDefinition,
 )
 from mb_commerce_scraper.connectors import ConnectorContext
 from mb_commerce_scraper.testing import FakeTransport
-from pydantic import JsonValue
 
 from mb_ceramics_catalogue.config.settings import CrawlParams
-from mb_ceramics_catalogue.config.sources import SourceConfig, SourcesFile
-from mb_ceramics_catalogue.connectors.base import (
-    ConnectorCheckpoint as CatalogueConnectorCheckpoint,
-)
+from mb_ceramics_catalogue.config.sources import SourcesFile
 from mb_ceramics_catalogue.ops.commerce_scraper_adapter import (
-    decode_legacy_source_checkpoint,
     layered_source_config,
     source_definition,
 )
 from mb_ceramics_catalogue.ops.commerce_scraper_runtime import (
     application_connector_registry,
 )
-
-
-def _checkpoint_context(
-    scraper: str = "shopify",
-) -> tuple[
-    SourceConfig,
-    CommerceConnector,
-    CollectionRequest,
-    dict[str, JsonValue],
-    dict[str, JsonValue],
-]:
-    sources = SourcesFile.load(Path(__file__).parents[1] / "sources.json")
-    source_id, config = next(
-        (source_id, config) for source_id, config in sources.items() if config.scraper == scraper
-    )
-    definition = source_definition(source_id, config)
-    connector = ConnectorRegistry.with_builtins().build(
-        definition.connector,
-        transport=FakeTransport(),
-        options=definition.connector_options,
-        context=ConnectorContext(),
-    )
-    request = CollectionRequest(source_id=source_id, base_url=config.url)
-    legacy: dict[str, JsonValue] = {
-        "connector": connector.name,
-        "connector_version": connector.version,
-        "source_id": source_id,
-        "lineage": "legacy-lineage",
-        "resume_after": {"partition": "main", "page": 2, "offset": 0},
-    }
-    return config, connector, request, definition.connector_options, legacy
 
 
 def test_flat_shopify_source_projects_to_library_envelope() -> None:
@@ -265,118 +224,3 @@ def test_layered_source_config_keeps_defaults_and_explicit_disable_fail_closed()
     assert disabled.proxy.mode.value == "never"
     with pytest.raises(ValueError, match="at least one dataset"):
         layered_source_config("shop", config, run=CrawlParams(), datasets=())
-
-
-def test_compatible_legacy_checkpoint_decodes_at_catalogue_boundary() -> None:
-    config, connector, request, options, legacy = _checkpoint_context()
-    persisted = CatalogueConnectorCheckpoint.model_validate(legacy)
-
-    decoded = decode_legacy_source_checkpoint(
-        persisted,
-        request=request,
-        connector_version=connector.version,
-        config=config,
-        durable_request=request,
-        durable_options=options,
-    )
-
-    assert isinstance(decoded, CompatibleLegacyCheckpoint)
-    assert decoded.checkpoint.checkpoint_schema_version == 1
-    assert decoded.checkpoint.resume_after == legacy["resume_after"]
-    assert len(decoded.checkpoint.collection_fingerprint) == 64
-
-
-def test_legacy_checkpoint_restarts_when_source_configuration_drifted() -> None:
-    config, connector, request, durable_options, legacy = _checkpoint_context()
-    changed_page_limit = 24 if config.page_limit == 23 else 23
-    current_config = config.model_copy(update={"page_limit": changed_page_limit})
-
-    decoded = decode_legacy_source_checkpoint(
-        legacy,
-        request=request,
-        connector_version=connector.version,
-        config=current_config,
-        durable_request=request,
-        durable_options=durable_options,
-    )
-
-    assert decoded == RestartLegacyCheckpoint(
-        reason=LegacyCheckpointRestartReason.COLLECTION_CONFIGURATION_CHANGED
-    )
-
-
-@pytest.mark.parametrize(
-    ("identity_field", "other_value"),
-    (
-        ("connector", "woocommerce"),
-        ("connector_version", "legacy-version"),
-        ("source_id", "another-source"),
-    ),
-)
-def test_legacy_checkpoint_restarts_on_identity_mismatch(identity_field: str, other_value: str) -> None:
-    config, connector, request, options, legacy = _checkpoint_context()
-    legacy[identity_field] = other_value
-
-    decoded = decode_legacy_source_checkpoint(
-        legacy,
-        request=request,
-        connector_version=connector.version,
-        config=config,
-        durable_request=request,
-        durable_options=options,
-    )
-
-    assert decoded == RestartLegacyCheckpoint(reason=LegacyCheckpointRestartReason.LEGACY_IDENTITY_MISMATCH)
-
-
-def test_legacy_pagecrawl_checkpoint_restarts_after_generic_pages_rename() -> None:
-    config, connector, request, options, legacy = _checkpoint_context("pagecrawl")
-    legacy.update(connector="pagecommerce", connector_version="1")
-
-    decoded = decode_legacy_source_checkpoint(
-        legacy,
-        request=request,
-        connector_version=connector.version,
-        config=config,
-        durable_request=request,
-        durable_options=options,
-    )
-
-    assert connector.name == "generic-pages"
-    assert decoded == RestartLegacyCheckpoint(reason=LegacyCheckpointRestartReason.LEGACY_IDENTITY_MISMATCH)
-
-
-def test_legacy_checkpoint_restarts_on_malformed_cursor() -> None:
-    config, connector, request, options, legacy = _checkpoint_context()
-    legacy["resume_after"] = None
-
-    decoded = decode_legacy_source_checkpoint(
-        legacy,
-        request=request,
-        connector_version=connector.version,
-        config=config,
-        durable_request=request,
-        durable_options=options,
-    )
-
-    assert decoded == RestartLegacyCheckpoint(reason=LegacyCheckpointRestartReason.MALFORMED_CHECKPOINT)
-
-
-@pytest.mark.parametrize("missing", ("request", "options"))
-def test_legacy_checkpoint_restarts_when_durable_configuration_is_missing(
-    missing: str,
-) -> None:
-    config, connector, request, options, legacy = _checkpoint_context()
-
-    decoded = decode_legacy_source_checkpoint(
-        legacy,
-        request=request,
-        connector_version=connector.version,
-        config=config,
-        durable_request=None if missing == "request" else request,
-        durable_options=None if missing == "options" else options,
-    )
-
-    assert decoded == RestartLegacyCheckpoint(
-        reason=LegacyCheckpointRestartReason.DURABLE_CONFIGURATION_UNAVAILABLE
-    )

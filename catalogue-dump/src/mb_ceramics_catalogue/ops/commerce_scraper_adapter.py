@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any, Literal
 
 from mb_commerce_scraper import (
     BrowserPolicy,
-    CollectionRequest,
     FetchPolicy,
-    LegacyCheckpointDecodeResult,
     ProxyMode,
     ProxyPolicyConfig,
     RobotsPolicy,
     SourceDefinition,
-    decode_legacy_checkpoint,
 )
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -48,36 +44,6 @@ def source_definition(
         base_url=config.url,
         connector=plan.connector,
         connector_options=dict(plan.connector_options),
-    )
-
-
-def decode_legacy_source_checkpoint(
-    checkpoint: BaseModel | Mapping[str, JsonValue],
-    *,
-    request: CollectionRequest,
-    connector_version: str,
-    config: SourceConfig,
-    durable_request: CollectionRequest | None,
-    durable_options: dict[str, JsonValue] | None,
-) -> LegacyCheckpointDecodeResult:
-    """Decode a catalogue checkpoint only when its durable identity is known.
-
-    Existing catalogue lineages do not retain enough configuration to provide
-    ``durable_request`` and ``durable_options``. Callers handling those rows
-    must pass ``None`` and begin a new lineage. In particular, current mutable
-    source configuration is not evidence of the configuration that produced a
-    persisted cursor.
-    """
-    definition = source_definition(request.source_id, config)
-    payload = checkpoint.model_dump(mode="json") if isinstance(checkpoint, BaseModel) else checkpoint
-    return decode_legacy_checkpoint(
-        payload,
-        request=request,
-        connector=definition.connector,
-        connector_version=connector_version,
-        options=definition.connector_options,
-        durable_request=durable_request,
-        durable_options=durable_options,
     )
 
 

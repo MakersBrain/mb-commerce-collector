@@ -5,10 +5,13 @@ from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
-from mb_commerce_scraper import CollectionRequest, LegacyCheckpointRestartReason
+from mb_commerce_scraper import CollectionRequest, ConnectorCheckpoint
 
-from mb_ceramics_catalogue.connectors.base import ConnectorCheckpoint as LegacyCheckpoint
+from mb_ceramics_catalogue.connectors.base import (
+    ConnectorCheckpoint as CatalogueCheckpoint,
+)
 from mb_ceramics_catalogue.ops import library_lineages, outputs
+from mb_ceramics_catalogue.ops.library_lineages import CheckpointRestartReason
 
 
 class RecordingTransaction:
@@ -61,6 +64,24 @@ def _spec(request: CollectionRequest) -> library_lineages.LibraryLineageSpec:
     )
 
 
+def test_version_zero_cursor_is_rejected_instead_of_upgraded() -> None:
+    request = CollectionRequest(source_id="shop", base_url="https://shop.test")
+    spec = _spec(request)
+    checkpoint, reason = library_lineages._validated_resume_checkpoint(
+        CatalogueCheckpoint(
+            connector=spec.connector,
+            connector_version=spec.connector_version,
+            source_id=request.source_id,
+            lineage=str(uuid4()),
+            resume_after={"page": 2},
+        ),
+        spec,
+    )
+
+    assert checkpoint is None
+    assert reason is CheckpointRestartReason.MALFORMED_CHECKPOINT
+
+
 @pytest.fixture(autouse=True)
 def _no_preexisting_active_lineages(monkeypatch: pytest.MonkeyPatch) -> None:
     async def active(*args: Any, **kwargs: Any) -> tuple[UUID, ...]:
@@ -70,7 +91,7 @@ def _no_preexisting_active_lineages(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(outputs, "active_lineages_for_runtime", active)
 
 
-async def test_compatible_cursor_is_decoded_before_dataset_preparation(
+async def test_schema_v1_cursor_is_validated_before_dataset_preparation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
@@ -98,11 +119,12 @@ async def test_compatible_cursor_is_decoded_before_dataset_preparation(
         events.append("cursor")
         return outputs.LineageProgress(
             outputs.LineageProgressState.RESUMABLE,
-            LegacyCheckpoint(
+            ConnectorCheckpoint(
                 connector=spec.connector,
                 connector_version=spec.connector_version,
                 source_id=request.source_id,
                 lineage=str(lineage),
+                collection_fingerprint=spec.connector_config_fingerprint,
                 resume_after={"partition": "main", "page": 2},
             ),
         )
@@ -150,19 +172,19 @@ async def test_compatible_cursor_is_decoded_before_dataset_preparation(
     (
         (
             "missing",
-            LegacyCheckpointRestartReason.DURABLE_CONFIGURATION_UNAVAILABLE,
+            CheckpointRestartReason.DURABLE_CONFIGURATION_UNAVAILABLE,
         ),
-        ("invalid", LegacyCheckpointRestartReason.DURABLE_CONFIGURATION_INVALID),
+        ("invalid", CheckpointRestartReason.DURABLE_CONFIGURATION_INVALID),
         (
             "drifted",
-            LegacyCheckpointRestartReason.COLLECTION_CONFIGURATION_CHANGED,
+            CheckpointRestartReason.COLLECTION_CONFIGURATION_CHANGED,
         ),
     ),
 )
 async def test_incompatible_durable_identity_restarts_before_prepare(
     monkeypatch: pytest.MonkeyPatch,
     configuration_case: str,
-    expected_reason: LegacyCheckpointRestartReason,
+    expected_reason: CheckpointRestartReason,
 ) -> None:
     events: list[str] = []
     old_lineage, new_lineage = uuid4(), uuid4()
@@ -203,11 +225,12 @@ async def test_incompatible_durable_identity_restarts_before_prepare(
         events.append("cursor")
         return outputs.LineageProgress(
             outputs.LineageProgressState.RESUMABLE,
-            LegacyCheckpoint(
+            ConnectorCheckpoint(
                 connector=spec.connector,
                 connector_version=spec.connector_version,
                 source_id=request.source_id,
                 lineage=str(old_lineage),
+                collection_fingerprint=spec.connector_config_fingerprint,
                 resume_after={"page": 99},
             ),
         )
@@ -439,7 +462,7 @@ async def test_terminal_progress_is_not_mistaken_for_an_empty_lineage(
         assert resolved.lineage == new_lineage
         assert resolved.progress is outputs.LineageProgressState.EMPTY
         assert resolved.restart_reason is (
-            LegacyCheckpointRestartReason.INCOMPLETE_TERMINAL_CHECKPOINT
+            CheckpointRestartReason.INCOMPLETE_TERMINAL_CHECKPOINT
         )
         assert events == ["transaction.enter", "reject", "create", "prepare:False", "transaction.commit"]
     else:

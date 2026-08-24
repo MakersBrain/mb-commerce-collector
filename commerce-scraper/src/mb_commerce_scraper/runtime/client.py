@@ -38,10 +38,8 @@ from mb_commerce_scraper.proxy import (
     ProxyBrowserTransportFactory,
     ProxyLease,
     ProxyPool,
-    ProxyRouting,
     ProxyTransportFactory,
     RoutedTransport,
-    RoutingMode,
 )
 from mb_commerce_scraper.transports import (
     DEFAULT_MAXIMUM_RESPONSE_BYTES,
@@ -72,29 +70,6 @@ RateLimiterFactory = Callable[[FetchPolicy], RateLimiter]
 
 class _AsyncCloseable(Protocol):
     async def aclose(self) -> None: ...
-
-
-def _routing_from_policy(policy: ProxyPolicyConfig) -> ProxyRouting:
-    return ProxyRouting(
-        mode=RoutingMode(policy.mode.value),
-        country=policy.country,
-        provider_preferences=policy.provider_preferences,
-    )
-
-
-def _legacy_proxy_policy(
-    routing: ProxyRouting | None,
-    maximum_requests: int | None,
-    maximum_bytes: int | None,
-) -> ProxyPolicyConfig:
-    selected = routing or ProxyRouting()
-    return ProxyPolicyConfig(
-        mode=ProxyMode(selected.mode.value),
-        country=selected.country,
-        provider_preferences=selected.provider_preferences,
-        maximum_requests=maximum_requests,
-        maximum_bytes=maximum_bytes,
-    )
 
 
 class _ContextualTelemetry:
@@ -302,12 +277,9 @@ class CommerceScraper:
         transport: CommerceTransport,
         proxy_pool: ProxyPool | None = None,
         proxy_policy: ProxyPolicyConfig | None = None,
-        routing: ProxyRouting | None = None,
         proxy_transport_factory: ProxyTransportFactory | None = None,
         proxy_browser_transport_factory: ProxyBrowserTransportFactory | None = None,
         require_proxy_browser_subrequest_authorization: bool = False,
-        proxy_maximum_requests: int | None = None,
-        proxy_maximum_bytes: int | None = None,
         budget: RequestBudget | None = None,
         telemetry: TelemetryHooks | None = None,
         fetch_policy: FetchPolicy | None = None,
@@ -324,33 +296,11 @@ class CommerceScraper:
     ) -> None:
         self.registry = registry
         self.transport = transport
-        legacy_proxy_configuration = any(
-            value is not None for value in (routing, proxy_maximum_requests, proxy_maximum_bytes)
-        )
-        if proxy_policy is not None and legacy_proxy_configuration:
-            raise ValueError("proxy_policy cannot be combined with routing or legacy proxy caps")
-        if proxy_policy is None and (
-            (routing is None and (proxy_maximum_requests is not None or proxy_maximum_bytes is not None))
-            or (
-                routing is not None
-                and routing.mode is RoutingMode.NEVER
-                and (proxy_maximum_requests is not None or proxy_maximum_bytes is not None)
-            )
-        ):
-            raise ValueError("legacy proxy caps require active proxy routing")
         self.proxy_pool = proxy_pool
-        self._legacy_proxy_configuration = legacy_proxy_configuration
-        self.proxy_policy = proxy_policy or _legacy_proxy_policy(
-            routing,
-            proxy_maximum_requests,
-            proxy_maximum_bytes,
-        )
-        self.routing = _routing_from_policy(self.proxy_policy)
+        self.proxy_policy = proxy_policy or ProxyPolicyConfig()
         self.proxy_transport_factory = proxy_transport_factory
         self.proxy_browser_transport_factory = proxy_browser_transport_factory
         self.require_proxy_browser_subrequest_authorization = require_proxy_browser_subrequest_authorization
-        self.proxy_maximum_requests = self.proxy_policy.maximum_requests
-        self.proxy_maximum_bytes = self.proxy_policy.maximum_bytes
         if self.proxy_policy.mode is not ProxyMode.NEVER and (
             self.proxy_pool is None or self.proxy_transport_factory is None
         ):
@@ -436,10 +386,7 @@ class CommerceScraper:
         created here is released exactly once when the context exits.
         """
         selected_policy = fetch_policy or self.fetch_policy
-        if proxy_policy is not None and self._legacy_proxy_configuration:
-            raise ValueError("per-collection proxy_policy cannot override legacy proxy configuration")
         selected_proxy_policy = proxy_policy or self.proxy_policy
-        selected_routing = _routing_from_policy(selected_proxy_policy)
         selected_budget = budget if budget is not None else self.budget
         selected_browser = browser_transport if browser_transport is not None else self.browser_transport
         telemetry_context: dict[str, JsonValue] = (
@@ -499,7 +446,7 @@ class CommerceScraper:
         if selected_policy is not None:
             if route_uses_proxy:
                 proxy_limiter = self.rate_limiter_factory(selected_policy)
-                if selected_routing.mode is RoutingMode.FALLBACK:
+                if selected_proxy_policy.mode is ProxyMode.FALLBACK:
                     direct_limiter = self.rate_limiter_factory(selected_policy)
                     if direct_limiter is proxy_limiter:
                         raise ValueError(
@@ -528,11 +475,9 @@ class CommerceScraper:
                 attempt_transport,
                 pool=self.proxy_pool,
                 proxy_factory=proxy_factory,
-                routing=selected_routing,
+                policy=selected_proxy_policy,
                 source_id=source.id,
                 base_url=source.base_url,
-                maximum_requests=selected_proxy_policy.maximum_requests,
-                maximum_bytes=selected_proxy_policy.maximum_bytes,
                 telemetry=self.telemetry,
                 telemetry_context=telemetry_context,
             )
@@ -559,7 +504,10 @@ class CommerceScraper:
                 robots,
                 limiter,
             )
-        ) or (routed is not None and selected_routing.mode in {RoutingMode.FALLBACK, RoutingMode.FAILOVER}):
+        ) or (
+            routed is not None
+            and selected_proxy_policy.mode in {ProxyMode.FALLBACK, ProxyMode.FAILOVER}
+        ):
             attempt_transport = MiddlewareTransport(
                 attempt_transport,
                 budget=selected_budget,

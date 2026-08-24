@@ -1,6 +1,6 @@
 # Commerce Scraper Cleanup and Refactoring Plan
 
-Last reviewed: 2026-08-23
+Last reviewed: 2026-08-24
 Branch: `feat/commerce-scraper-library`
 
 ## What this plan is
@@ -77,7 +77,7 @@ installed-wheel verifier compares attribute-by-attribute — so sequence A1 and
 A2 back to back and update the manifest once, rather than letting two branches
 race on the same file.
 
-- [ ] **A1 Delete the legacy proxy-configuration path.**
+- [x] **A1 Delete the legacy proxy-configuration path.**
   `runtime/client.py` accepts `proxy_policy` *and* a parallel
   `routing` / `proxy_maximum_requests` / `proxy_maximum_bytes` triple, guards
   them with three mutual-exclusion checks, threads a
@@ -95,8 +95,13 @@ race on the same file.
   *Touches:* `runtime/client.py`, `runtime/builder.py`, `proxy/routing.py`,
   `proxy/transport.py`, `public-api.toml`, `CHANGELOG.md`,
   `tests/test_runtime.py:109-115`.
+  **Completed.** `ProxyPolicyConfig` now flows unchanged through the runtime
+  and `RoutedTransport`; the parallel constructor arguments, derived runtime
+  attributes, conversion helpers, duplicate enum, and `ProxyRouting` model are
+  removed. Direct transport tests and the external consumer use the canonical
+  policy too.
 
-- [ ] **A2 Move legacy checkpoint decoding into the application.**
+- [x] **A2 Remove legacy checkpoint decoding.**
   `models/checkpoints.py` carries `LegacyConnectorCheckpoint`,
   `LegacyCheckpointRestartReason`, `CompatibleLegacyCheckpoint`,
   `LegacyCheckpointDecodeResult`, `RestartLegacyCheckpoint` and
@@ -111,8 +116,20 @@ race on the same file.
   *Removes:* 6 exports from a permanent contract surface (~120 lines).
   *Touches:* `models/checkpoints.py`, `models/__init__.py`, `public-api.toml`,
   `tests/test_checkpoint_compatibility.py` (moves), both catalogue consumers.
+  **Completed.** The decoder and all six compatibility contracts were removed
+  from both packages. Commerce-scraper lineages now reconstruct the library's
+  schema-v1 `ConnectorCheckpoint` directly from durable row identity; a
+  version-0 or malformed cursor restarts rather than being upgraded. The
+  library retains only the shared schema-v1 checkpoint and
+  `collection_fingerprint` contracts.
+  *Verified together with A1:* `make scraper-check` -> 303 tests, Ruff, mypy
+  over 74 files, schemas, build, 4 boundary tests, installed-wheel/public-API,
+  external-consumer, and release gates passed. After deleting version-0
+  compatibility, catalogue Ruff and mypy over 239 files passed; `pytest -q` ->
+  936 passed, 2 skipped, 187 deselected, 284 subtests; 64 live PostgreSQL
+  lineage/output tests and installed catalogue composition passed.
 
-- [ ] **A3 Decide the telemetry contract before it is frozen.** *(decision, then work)*
+- [x] **A3 Decide the telemetry contract before it is frozen.**
   `TelemetryHooks.emit(event: str, fields: dict[str, JsonValue])` flattens
   typed data — `TransportAccounting`, `RouteMetadata`, `TransportResponse.status`
   — into strings at the boundary, so every consumer reconstructs it.
@@ -127,6 +144,17 @@ race on the same file.
   a deletion.** It is also the only one that gets materially more expensive
   after 1.0. Decide explicitly: adopt a typed hook now, or record accepting the
   reconstruction cost permanently, in `## Accepted plan deviations`.
+  **Completed — typed hook adopted.** `RequestObserver` receives immutable,
+  secret-free `RequestObservation` values alongside the retained general event
+  channel. Middleware supplies typed phase, status, route, accounting, elapsed
+  time, target host, purpose, and attempt identity. Catalogue request totals,
+  outcomes, metrics, and spans consume that contract directly; logging and
+  arbitrary lifecycle tracing continue through `TelemetryHooks.emit`.
+  *Verified:* `make scraper-check` -> 303 tests, Ruff, mypy over 74 files,
+  schemas, build, 4 boundary tests, installed-wheel/public-API,
+  external-consumer, and release gates passed. Catalogue Ruff, mypy over 239
+  files, and `pytest -q` -> 936 passed, 2 skipped, 187 deselected, 284 subtests;
+  installed catalogue composition passed.
 
 ---
 

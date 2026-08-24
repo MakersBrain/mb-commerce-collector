@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 import httpx
@@ -15,6 +15,13 @@ from mb_commerce_scraper import (
 from mb_commerce_scraper import SnapshotField as LibrarySnapshotField
 from mb_commerce_scraper.runtime import CommerceScraper
 from mb_commerce_scraper.testing import FakeTransport
+from mb_commerce_scraper.transports import (
+    RequestObservation,
+    RequestObservationPhase,
+    RequestPurpose,
+    RouteMetadata,
+    TransportAccounting,
+)
 
 from mb_ceramics_catalogue import scrapers
 from mb_ceramics_catalogue.config.settings import Settings
@@ -46,6 +53,38 @@ class Pool:
     @asynccontextmanager
     async def connection(self):
         yield object()
+
+
+def request_observation(
+    phase: RequestObservationPhase,
+    *,
+    status: int | None = None,
+    route: Literal["direct", "proxy", "cache", "browser"] | None = None,
+    provider: str | None = None,
+    physical_requests: int = 0,
+    transmitted_bytes: int = 0,
+    received_bytes: int = 0,
+    elapsed_seconds: float | None = None,
+    classification: str | None = None,
+) -> RequestObservation:
+    return RequestObservation(
+        phase=phase,
+        request_id="request-1",
+        attempt=1,
+        source_id="shop",
+        target_host="shop.test",
+        method="GET",
+        purpose=RequestPurpose.ENTITY,
+        status=status,
+        route=(RouteMetadata(kind=route, provider=provider) if route is not None else None),
+        accounting=TransportAccounting(
+            physical_requests=physical_requests,
+            transmitted_bytes=transmitted_bytes,
+            received_bytes=received_bytes,
+        ),
+        elapsed_seconds=elapsed_seconds,
+        classification=classification,
+    )
 
 
 class ShopifyFetcher:
@@ -335,38 +374,42 @@ def test_transport_summary_aggregates_direct_and_fallback_without_mutation():
 def test_native_telemetry_accumulates_terminal_attempt_accounting_once():
     telemetry = LibraryDebugTelemetry()
 
-    telemetry.emit(
-        "request.retry",
-        {
-            "route": "direct",
-            "status": 503,
-            "physical_requests": 1,
-            "transmitted_bytes": 20,
-            "received_bytes": 30,
-        },
+    telemetry.observe_request(
+        request_observation(
+            RequestObservationPhase.RETRY,
+            route="direct",
+            status=503,
+            physical_requests=1,
+            transmitted_bytes=20,
+            received_bytes=30,
+        )
     )
-    telemetry.emit(
-        "request.completed",
-        {
-            "route": "browser",
-            "provider": "decodo",
-            "status": 200,
-            "physical_requests": 3,
-            "transmitted_bytes": 100,
-            "received_bytes": 200,
-        },
+    telemetry.observe_request(
+        request_observation(
+            RequestObservationPhase.COMPLETED,
+            route="browser",
+            provider="decodo",
+            status=200,
+            physical_requests=3,
+            transmitted_bytes=100,
+            received_bytes=200,
+        )
     )
-    telemetry.emit(
-        "request.failed",
-        {
-            "physical_requests": 1,
-            "transmitted_bytes": 5,
-            "received_bytes": 0,
-        },
+    telemetry.observe_request(
+        request_observation(
+            RequestObservationPhase.FAILED,
+            physical_requests=1,
+            transmitted_bytes=5,
+        )
     )
     # The classification-only retry following a TransportFailure has no
     # accounting and must not count the failed attempt for a second time.
-    telemetry.emit("request.retry", {"classification": "transport_failure"})
+    telemetry.observe_request(
+        request_observation(
+            RequestObservationPhase.RETRY,
+            classification="transport_failure",
+        )
+    )
 
     totals = telemetry.transport_totals()
     assert totals["physical_requests"] == 5
@@ -391,9 +434,13 @@ def test_native_retry_telemetry_preserves_dedicated_http_outcomes(
 ) -> None:
     telemetry = LibraryDebugTelemetry()
 
-    telemetry.emit(
-        "request.retry",
-        {"status": status, "physical_requests": 1, "route": "direct"},
+    telemetry.observe_request(
+        request_observation(
+            RequestObservationPhase.RETRY,
+            status=status,
+            physical_requests=1,
+            route="direct",
+        )
     )
 
     assert telemetry.outcome_counts() == {outcome: 1}
@@ -463,6 +510,17 @@ def test_native_telemetry_adds_scalar_trace_context_without_coupling_accounting(
             "nested": {"not": "an OpenTelemetry scalar"},
         },
     )
+    telemetry.observe_request(
+        request_observation(
+            RequestObservationPhase.COMPLETED,
+            status=200,
+            route="direct",
+            physical_requests=1,
+            transmitted_bytes=20,
+            received_bytes=30,
+            elapsed_seconds=0.0125,
+        )
+    )
 
     assert traced == [
         (
@@ -492,6 +550,14 @@ def test_native_telemetry_adds_scalar_trace_context_without_coupling_accounting(
             "transmitted_bytes": 5,
             "received_bytes": 0,
         },
+    )
+    telemetry.observe_request(
+        request_observation(
+            RequestObservationPhase.FAILED,
+            route="direct",
+            physical_requests=1,
+            transmitted_bytes=5,
+        )
     )
     assert telemetry.transport_totals()["physical_requests"] == 2
 
@@ -534,6 +600,9 @@ def test_native_telemetry_scopes_request_span_and_projects_bounded_metrics(
     }
 
     telemetry.emit("request.started", {**common, "level": "debug"})
+    telemetry.observe_request(
+        request_observation(RequestObservationPhase.STARTED)
+    )
     telemetry.emit(
         "request.completed",
         {
@@ -546,6 +615,17 @@ def test_native_telemetry_scopes_request_span_and_projects_bounded_metrics(
             "transmitted_bytes": 20,
             "received_bytes": 30,
         },
+    )
+    telemetry.observe_request(
+        request_observation(
+            RequestObservationPhase.COMPLETED,
+            status=200,
+            route="browser",
+            physical_requests=1,
+            transmitted_bytes=20,
+            received_bytes=30,
+            elapsed_seconds=0.0125,
+        )
     )
 
     assert lifecycle[0][0:2] == ("enter", "commerce.request")

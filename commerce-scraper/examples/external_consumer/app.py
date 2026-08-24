@@ -14,6 +14,8 @@ from pydantic import JsonValue, SecretStr
 import mb_commerce_scraper
 from mb_commerce_scraper import (
     FetchPolicy,
+    ProxyMode,
+    ProxyPolicyConfig,
     RobotsPolicy,
     SnapshotField,
     SourceDefinition,
@@ -24,8 +26,6 @@ from mb_commerce_scraper.proxy import (
     ProxyEndpoint,
     ProxyKind,
     ProxyLease,
-    ProxyRouting,
-    RoutingMode,
     StaticProxyPool,
     StaticRoute,
 )
@@ -200,7 +200,7 @@ async def main() -> None:
         registry=registry,
         transport=direct,
         proxy_pool=pool,
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        proxy_policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         proxy_transport_factory=proxy_factory,
         fetch_policy=FetchPolicy(robots=RobotsPolicy.IGNORE),
         telemetry=telemetry,

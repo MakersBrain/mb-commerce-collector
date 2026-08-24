@@ -9,7 +9,7 @@ from pydantic import JsonValue
 from mb_commerce_scraper.models.sanitization import sanitize_json_value
 from mb_commerce_scraper.models.sanitization import sanitize_url as _sanitize_url
 
-from .base import TelemetryHooks
+from .base import RequestObservation, RequestObserver, TelemetryHooks
 
 _OMITTED = "[omitted]"
 _EVENT_NAME = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
@@ -86,6 +86,13 @@ class SafeTelemetry:
             self._sink.emit(safe_event, sanitize_fields(fields))
         except Exception:  # noqa: BLE001 -- observer failures are always non-fatal
             # Observability must never become part of collection correctness.
+            return
+
+    def observe_request(self, observation: RequestObservation) -> None:
+        try:
+            if isinstance(self._sink, RequestObserver):
+                self._sink.observe_request(observation)
+        except Exception:  # noqa: BLE001 -- observer failures are always non-fatal
             return
 
 

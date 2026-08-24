@@ -218,6 +218,64 @@ class RouteMetadata(BaseModel):
     lease_id: str | None = None
 
 
+class RequestObservationPhase(StrEnum):
+    STARTED = "started"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    RETRY = "retry"
+
+
+class RequestObservation(BaseModel):
+    """Typed, secret-free observation of one physical request attempt."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    phase: RequestObservationPhase
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
+    attempt: int = Field(ge=1, strict=True)
+    source_id: str | None = Field(default=None, min_length=1, max_length=256)
+    target_host: str = Field(max_length=253)
+    method: str = Field(min_length=1, max_length=16)
+    purpose: RequestPurpose
+    status: int | None = Field(default=None, ge=100, le=599, strict=True)
+    elapsed_seconds: float | None = Field(default=None, ge=0)
+    route: RouteMetadata | None = None
+    accounting: TransportAccounting = TransportAccounting(physical_requests=0)
+    classification: str | None = Field(default=None, max_length=64)
+
+    @property
+    def outcome(self) -> str:
+        if self.status in {403, 429}:
+            return str(self.status)
+        if self.status is not None:
+            return f"{self.status // 100}xx"
+        return "transport_error"
+
+    def trace_fields(self) -> dict[str, str | int | float]:
+        fields: dict[str, str | int | float] = {
+            "attempt": self.attempt,
+            "host": self.target_host,
+            "method": self.method,
+            "phase": self.phase.value,
+            "purpose": self.purpose.value,
+            "physical_requests": self.accounting.physical_requests,
+            "transmitted_bytes": self.accounting.transmitted_bytes,
+            "received_bytes": self.accounting.received_bytes,
+        }
+        for name, value in (
+            ("request_id", self.request_id),
+            ("source_id", self.source_id),
+            ("status", self.status),
+            ("elapsed_seconds", self.elapsed_seconds),
+            ("route", self.route.kind if self.route is not None else None),
+            ("provider", self.route.provider if self.route is not None else None),
+            ("classification", self.classification),
+        ):
+            if value is not None:
+                fields[name] = value
+        return fields
+
+
 class TransportResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     status: int = Field(ge=100, le=599)
@@ -303,9 +361,17 @@ class TelemetryHooks(Protocol):
     def emit(self, event: str, fields: dict[str, JsonValue]) -> None: ...
 
 
+@runtime_checkable
+class RequestObserver(Protocol):
+    def observe_request(self, observation: RequestObservation) -> None: ...
+
+
 class NullTelemetry:
     def emit(self, event: str, fields: dict[str, JsonValue]) -> None:
         del event, fields
+
+    def observe_request(self, observation: RequestObservation) -> None:
+        del observation
 
 
 class MemoryRequestBudget:

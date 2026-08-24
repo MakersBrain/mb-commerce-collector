@@ -30,6 +30,18 @@ based on Keep a Changelog, and releases follow the compatibility policy in
   backoff, and terminal events for cleanup/cache-write failures.
 - Public telemetry-hook and PrestaShop partition-declaration composition
   contracts for applications integrating the library without private imports.
+- Typed `RequestObserver` and `RequestObservation` contracts for request spans,
+  metrics, status, route, and physical-attempt accounting without reconstructing
+  typed values from the general event dictionary.
+
+### Changed
+
+- Consolidated runtime and routed-transport proxy configuration on
+  `ProxyPolicyConfig`; the unreleased parallel routing model and legacy request
+  and byte-cap parameters were removed.
+- Removed version-0 catalogue checkpoint decoding. Commerce-scraper lineages
+  now reconstruct schema-v1 checkpoints directly from durable identity;
+  older or malformed cursor shapes restart instead of being upgraded.
 
 Before tagging the first release, move these notes under
 `## [0.1.0] - YYYY-MM-DD` and retain an empty `## [Unreleased]` section above

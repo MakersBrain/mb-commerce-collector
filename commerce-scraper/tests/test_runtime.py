@@ -38,8 +38,6 @@ from mb_commerce_scraper.proxy import (
     HttpxProxyTransportFactory,
     ProxyLease,
     ProxyRequest,
-    ProxyRouting,
-    RoutingMode,
     StaticProxyLease,
 )
 from mb_commerce_scraper.runtime import CommerceScraper, build_http_scraper
@@ -106,48 +104,6 @@ def test_http_builder_projects_one_response_limit_to_every_runtime_layer() -> No
     assert isinstance(scraper.proxy_transport_factory, HttpxProxyTransportFactory)
     assert scraper.proxy_transport_factory.maximum_response_bytes == 1234
     assert scraper.proxy_policy == proxy_policy
-    assert scraper.routing == ProxyRouting(
-        mode=RoutingMode.ALWAYS,
-        country="FR",
-        provider_preferences=("one",),
-    )
-    assert scraper.proxy_maximum_requests == 7
-    assert scraper.proxy_maximum_bytes == 8_000
-
-
-@pytest.mark.parametrize(
-    "legacy",
-    [
-        {"routing": ProxyRouting(mode=RoutingMode.ALWAYS)},
-        {"proxy_maximum_requests": 1},
-        {"proxy_maximum_bytes": 1},
-    ],
-)
-def test_runtime_rejects_mixed_canonical_and_legacy_proxy_configuration(
-    legacy: dict[str, object],
-) -> None:
-    with pytest.raises(ValueError, match="cannot be combined"):
-        CommerceScraper(
-            registry=ConnectorRegistry.with_builtins(),
-            transport=FakeTransport(),
-            proxy_policy=ProxyPolicyConfig(),
-            **legacy,  # type: ignore[arg-type]
-        )
-
-
-@pytest.mark.parametrize(
-    "legacy",
-    [{"proxy_maximum_requests": 1}, {"proxy_maximum_bytes": 1}],
-)
-def test_runtime_rejects_inert_legacy_proxy_caps(
-    legacy: dict[str, int],
-) -> None:
-    with pytest.raises(ValueError, match="require active proxy routing"):
-        CommerceScraper(
-            registry=ConnectorRegistry.with_builtins(),
-            transport=FakeTransport(),
-            **legacy,  # type: ignore[arg-type]
-        )
 
 
 def test_runtime_rejects_active_policy_without_proxy_backend() -> None:
@@ -257,7 +213,7 @@ def test_http_builder_enables_browser_policy_for_proxy_browser_factory() -> None
     scraper = build_http_scraper(
         allowed_origins=("https://shop.test",),
         proxy_pool=fake_proxy_pool("one"),
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        proxy_policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         proxy_browser_transport_factory=browser_factory,
     )
 
@@ -272,7 +228,7 @@ async def test_runtime_can_require_physical_proxy_browser_authorization() -> Non
         registry=ConnectorRegistry.with_builtins(),
         transport=FakeTransport(),
         proxy_pool=pool,
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        proxy_policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         proxy_transport_factory=Factory(FakeTransport()),
         proxy_browser_transport_factory=LeaseBrowserFactory(FakeTransport()),
         require_proxy_browser_subrequest_authorization=True,
@@ -600,7 +556,7 @@ async def test_open_connector_releases_routed_lease_exactly_once() -> None:
         registry=ConnectorRegistry.with_builtins(),
         transport=FakeTransport(),
         proxy_pool=pool,
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        proxy_policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         proxy_transport_factory=Factory(proxy),
     )
 
@@ -631,7 +587,7 @@ async def test_runtime_releases_proxy_lease_on_success_and_failure() -> None:
         registry=ConnectorRegistry.with_builtins(),
         transport=direct,
         proxy_pool=pool,
-        routing=ProxyRouting.fallback(),
+        proxy_policy=ProxyPolicyConfig.fallback(),
         proxy_transport_factory=Factory(proxy),
     )
     assert [page async for page in scraper.collect(source())][-1].terminal
@@ -643,7 +599,7 @@ async def test_runtime_releases_proxy_lease_on_success_and_failure() -> None:
         registry=ConnectorRegistry.with_builtins(),
         transport=failing_direct,
         proxy_pool=pool,
-        routing=ProxyRouting.fallback(),
+        proxy_policy=ProxyPolicyConfig.fallback(),
         proxy_transport_factory=Factory(FakeTransport()),
     )
     with pytest.raises(RuntimeError, match="no fake response"):
@@ -703,7 +659,7 @@ async def test_runtime_releases_proxy_lease_on_cancellation() -> None:
         registry=ConnectorRegistry.with_builtins(),
         transport=direct,
         proxy_pool=pool,
-        routing=ProxyRouting.fallback(),
+        proxy_policy=ProxyPolicyConfig.fallback(),
         proxy_transport_factory=Factory(blocking),
     )
 
@@ -858,7 +814,7 @@ async def test_fallback_uses_independent_direct_and_proxy_rate_gates() -> None:
         registry=ConnectorRegistry.with_builtins(),
         transport=direct,
         proxy_pool=fake_proxy_pool("one"),
-        routing=ProxyRouting.fallback(),
+        proxy_policy=ProxyPolicyConfig.fallback(),
         proxy_transport_factory=Factory(proxy),
         fetch_policy=FetchPolicy(robots=RobotsPolicy.IGNORE),
         telemetry=telemetry,
@@ -904,7 +860,7 @@ async def test_fallback_rejects_a_shared_direct_proxy_limiter() -> None:
         registry=ConnectorRegistry.with_builtins(),
         transport=FakeTransport(),
         proxy_pool=fake_proxy_pool("one"),
-        routing=ProxyRouting.fallback(),
+        proxy_policy=ProxyPolicyConfig.fallback(),
         proxy_transport_factory=Factory(FakeTransport()),
         fetch_policy=FetchPolicy(robots=RobotsPolicy.IGNORE),
         rate_limiter_factory=lambda _: shared,
@@ -1053,7 +1009,7 @@ async def test_runtime_rejects_browser_bypass_of_active_proxy_routing() -> None:
         transport=http,
         browser_transport=FakeTransport(),
         proxy_pool=pool,
-        routing=ProxyRouting.fallback(),
+        proxy_policy=ProxyPolicyConfig.fallback(),
         proxy_transport_factory=Factory(FakeTransport()),
     )
 
@@ -1077,7 +1033,7 @@ async def test_runtime_binds_browser_and_http_to_the_same_proxy_lease() -> None:
         registry=ConnectorRegistry.with_builtins(),
         transport=FakeTransport(),
         proxy_pool=pool,
-        routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+        proxy_policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
         proxy_transport_factory=Factory(proxy_http),
         proxy_browser_transport_factory=browser_factory,
     )
@@ -1144,7 +1100,7 @@ async def test_runtime_releases_proxy_lease_and_owned_resources_on_deadline() ->
         owns_transport=True,
         owns_browser_transport=True,
         proxy_pool=pool,
-        routing=ProxyRouting.fallback(),
+        proxy_policy=ProxyPolicyConfig.fallback(),
         proxy_transport_factory=Factory(blocking),
         telemetry=telemetry,
         backoff=lambda _: 0,

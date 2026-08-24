@@ -2,7 +2,7 @@
 
 Plan: [commerce-scraper-library-plan.md](commerce-scraper-library-plan.md)
 Branch: `feat/commerce-scraper-library`
-Last reviewed: 2026-08-22
+Last reviewed: 2026-08-24
 Overall status: **in progress — library foundation implemented, production cutover pending**
 
 This document tracks implementation and migration against the refactor plan. It
@@ -140,11 +140,12 @@ architecture rules in the plan and are not separate scope-expansion goals.
 
 - [x] `make scraper-check`
   - Ruff passed.
-  - Mypy passed for 76 source and test files.
-  - 322 library tests passed.
+  - Mypy passed for 74 source and test files.
+  - 303 library tests passed. Version-0 checkpoint compatibility and its
+    library test suite were removed before the first release.
   - Wheel and source distribution built.
   - 4 dependency-boundary tests passed.
-  - The installed-wheel matrix verified all 233 reviewed public exports across
+  - The installed-wheel matrix verified all 222 reviewed public exports across
     nine modules, metadata/source version parity, typed package data, and
     isolated base, HTTP, and development extras; the base install remained
     free of the optional HTTPX dependency.
@@ -176,8 +177,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
     country/provider constraints are checked before secret or database access.
 - [x] Full catalogue verification:
   - Ruff passed.
-  - Mypy passed for 235 source and test files.
-  - 930 tests passed, 2 skipped, 183 deselected, and 284 subtests passed in the
+  - Mypy passed for 239 source and test files.
+  - 936 tests passed, 2 skipped, 187 deselected, and 284 subtests passed in the
     latest fast-suite run; the wider repository fast gate also passed 32
     control-plane tests, 14 service tests, and 2 explorer tests.
   - The lower fast-test count reflects deletion of the obsolete specialized
@@ -237,6 +238,15 @@ architecture rules in the plan and are not separate scope-expansion goals.
   migration/round-trip tests passed against a throwaway database.
 - [x] Current implementation batch passed the verification gates recorded
   below.
+  - The pre-1.0 public-surface cleanup removed the parallel proxy-routing API
+    and all version-0 checkpoint compatibility. Commerce-scraper lineages now
+    reconstruct schema-v1 checkpoints directly from durable row identity.
+  - Typed request observations now carry status, route, accounting, elapsed
+    time, host, purpose, and attempt identity to catalogue metrics and spans;
+    the general sanitized event channel remains intact for logs and lifecycle
+    telemetry.
+    The complete scraper release gate, full catalogue Ruff/mypy/fast suite, and
+    installed two-wheel catalogue composition gate passed.
   - The provider-neutral durable Webshare composition and existing Decodo and
     Webshare adapter suites passed 29 focused tests.
   - The strict Webshare gateway-secret contract passed 47 focused tests.
@@ -986,9 +996,10 @@ but replay/canary migration remains.
   - Retained diagnostics and transport/fixture errors are bounded and redacted;
     recordings reject credential-bearing URLs and headers without retaining
     malformed or oversized input in exceptions.
-  - Current and legacy checkpoints now reject unsafe credential-bearing cursors
-    before persistence. Current validation errors retain no raw credential, and
-    legacy decoding returns a sanitized new-lineage restart outcome.
+  - Schema-v1 library and catalogue rollback checkpoints reject unsafe
+    credential-bearing cursors before persistence. Validation errors retain no
+    raw credential, and invalid persisted identity produces a reason-coded
+    new-lineage restart without decoding a compatibility envelope.
 
 Exit criterion: **met locally**. One scrape fails over across two provider
 adapters; sticky identity crosses HTTP and browser work; request and byte caps
@@ -1240,7 +1251,7 @@ legacy defaults until promotion evidence exists.
     tests, structured tracing and credential boundaries, provider authorization,
     replay/shadow/canary evidence, promotion, and configuration-only rollback.
 - [x] Document supported public imports and semantic-versioning policy.
-  - A reviewed manifest fixes 233 exports across nine supported modules. The
+  - A reviewed manifest fixes 222 exports across nine supported modules. The
     policy separates package SemVer from independently versioned serialized
     contracts and records pre-1.0, deprecation, and Python-support rules.
 - [x] Add changelog and release automation.

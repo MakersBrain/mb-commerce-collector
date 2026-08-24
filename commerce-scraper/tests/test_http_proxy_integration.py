@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from pydantic import SecretStr
 
+from mb_commerce_scraper import ProxyMode, ProxyPolicyConfig
 from mb_commerce_scraper.proxy import (
     HttpxProxyTransportFactory,
     ProxyCredentials,
@@ -14,9 +15,7 @@ from mb_commerce_scraper.proxy import (
     ProxyKind,
     ProxyLease,
     ProxyOutcome,
-    ProxyRouting,
     RoutedTransport,
-    RoutingMode,
     StaticProxyPool,
     StaticRoute,
 )
@@ -200,7 +199,7 @@ async def test_real_http_proxy_preserves_credentials_routing_and_accounting() ->
             FakeTransport(),
             pool=pool,
             proxy_factory=factory,
-            routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+            policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
             source_id="local-proxy-gate",
             base_url="http://93.184.216.34",
         )
@@ -276,7 +275,7 @@ async def test_real_socks5_proxy_preserves_credentials_target_and_cleanup() -> N
                 allowed_origins=("http://93.184.216.34",),
                 timeout=2.0,
             ),
-            routing=ProxyRouting(mode=RoutingMode.ALWAYS),
+            policy=ProxyPolicyConfig(mode=ProxyMode.ALWAYS),
             source_id="local-socks-gate",
             base_url="http://93.184.216.34",
         )
@@ -363,7 +362,7 @@ async def test_real_http_proxies_retry_across_providers_and_reconcile_attempts()
                 allowed_origins=("http://93.184.216.34",),
                 timeout=2.0,
             ),
-            routing=ProxyRouting(mode=RoutingMode.FAILOVER),
+            policy=ProxyPolicyConfig(mode=ProxyMode.FAILOVER),
             source_id="local-multi-provider-gate",
             base_url="http://93.184.216.34",
         )

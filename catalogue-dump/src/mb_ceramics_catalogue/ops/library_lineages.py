@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, cast
 from uuid import UUID
 
 from mb_commerce_scraper import (
     CollectionRequest,
     ConnectorCheckpoint,
-    LegacyCheckpointRestartReason,
     collection_fingerprint,
-    decode_legacy_checkpoint,
 )
 from pydantic import JsonValue, ValidationError
 
 from . import outputs
+
+
+class CheckpointRestartReason(StrEnum):
+    MALFORMED_CHECKPOINT = "malformed_checkpoint"
+    DURABLE_CONFIGURATION_UNAVAILABLE = "durable_configuration_unavailable"
+    DURABLE_CONFIGURATION_INVALID = "durable_configuration_invalid"
+    CHECKPOINT_IDENTITY_MISMATCH = "checkpoint_identity_mismatch"
+    COLLECTION_CONFIGURATION_CHANGED = "collection_configuration_changed"
+    INCOMPLETE_TERMINAL_CHECKPOINT = "incomplete_terminal_checkpoint"
 
 
 @dataclass(frozen=True)
@@ -43,7 +51,7 @@ class ResolvedLibraryLineage:
     lineage: UUID
     checkpoint: ConnectorCheckpoint | None
     resuming: bool
-    restart_reason: LegacyCheckpointRestartReason | None = None
+    restart_reason: CheckpointRestartReason | None = None
     progress: outputs.LineageProgressState = outputs.LineageProgressState.EMPTY
 
 
@@ -57,7 +65,7 @@ async def resolve_library_lineage(
     """Resolve, restart, and prepare one library lineage atomically.
 
     No dataset state is changed until persisted identity and any durable cursor
-    have been decoded. A rejected cursor is never attached to the replacement
+    have been validated. A rejected cursor is never attached to the replacement
     lineage.
     """
     async with connection.transaction():
@@ -78,7 +86,7 @@ async def resolve_library_lineage(
             lock=True,
         )
         checkpoint: ConnectorCheckpoint | None = None
-        restart_reason: LegacyCheckpointRestartReason | None = None
+        restart_reason: CheckpointRestartReason | None = None
         resuming = candidate is not None
         progress_state = outputs.LineageProgressState.EMPTY
 
@@ -100,13 +108,13 @@ async def resolve_library_lineage(
             except ValueError:
                 runtime_configuration = None
                 restart_reason = (
-                    LegacyCheckpointRestartReason.DURABLE_CONFIGURATION_INVALID
+                    CheckpointRestartReason.DURABLE_CONFIGURATION_INVALID
                 )
             try:
                 progress = await outputs.lineage_progress(connection, job_id, candidate)
             except ValueError:
                 progress = outputs.LineageProgress(outputs.LineageProgressState.EMPTY)
-                restart_reason = LegacyCheckpointRestartReason.MALFORMED_CHECKPOINT
+                restart_reason = CheckpointRestartReason.MALFORMED_CHECKPOINT
             progress_state = progress.state
 
             if restart_reason is None and runtime_configuration is not None:
@@ -122,25 +130,12 @@ async def resolve_library_lineage(
                         and progress.state is outputs.LineageProgressState.RESUMABLE
                         and progress.checkpoint is not None
                     ):
-                        decoded = decode_legacy_checkpoint(
-                            cast(
-                                Mapping[str, JsonValue],
-                                progress.checkpoint.model_dump(mode="json"),
-                            ),
-                            request=spec.request,
-                            connector=spec.connector,
-                            connector_version=spec.connector_version,
-                            options=spec.connector_options,
-                            durable_request=durable_request,
-                            durable_options=runtime_configuration.connector_options,
+                        checkpoint, restart_reason = _validated_resume_checkpoint(
+                            progress.checkpoint, spec
                         )
-                        if decoded.outcome == "compatible":
-                            checkpoint = decoded.checkpoint
-                        else:
-                            restart_reason = decoded.reason
                     elif progress.state is outputs.LineageProgressState.TERMINAL_INCOMPLETE:
                         restart_reason = (
-                            LegacyCheckpointRestartReason.INCOMPLETE_TERMINAL_CHECKPOINT
+                            CheckpointRestartReason.INCOMPLETE_TERMINAL_CHECKPOINT
                         )
 
         if candidate is None or restart_reason is not None:
@@ -186,29 +181,45 @@ async def resolve_library_lineage(
         )
 
 
+def _validated_resume_checkpoint(
+    persisted: object,
+    spec: LibraryLineageSpec,
+) -> tuple[ConnectorCheckpoint | None, CheckpointRestartReason | None]:
+    if not isinstance(persisted, ConnectorCheckpoint):
+        return None, CheckpointRestartReason.MALFORMED_CHECKPOINT
+    if (
+        persisted.connector != spec.connector
+        or persisted.connector_version != spec.connector_version
+        or persisted.source_id != spec.request.source_id
+        or persisted.collection_fingerprint != spec.connector_config_fingerprint
+    ):
+        return None, CheckpointRestartReason.CHECKPOINT_IDENTITY_MISMATCH
+    return persisted, None
+
+
 def _durable_request(
     configuration: outputs.LineageRuntimeConfiguration,
-) -> tuple[CollectionRequest | None, LegacyCheckpointRestartReason | None]:
+) -> tuple[CollectionRequest | None, CheckpointRestartReason | None]:
     if configuration.runtime_format is not outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1:
-        return None, LegacyCheckpointRestartReason.DURABLE_CONFIGURATION_UNAVAILABLE
+        return None, CheckpointRestartReason.DURABLE_CONFIGURATION_UNAVAILABLE
     if configuration.collection_request is None or configuration.connector_options is None:
-        return None, LegacyCheckpointRestartReason.DURABLE_CONFIGURATION_UNAVAILABLE
+        return None, CheckpointRestartReason.DURABLE_CONFIGURATION_UNAVAILABLE
     try:
         return CollectionRequest.model_validate(configuration.collection_request), None
     except ValidationError:
-        return None, LegacyCheckpointRestartReason.DURABLE_CONFIGURATION_INVALID
+        return None, CheckpointRestartReason.DURABLE_CONFIGURATION_INVALID
 
 
 def _configuration_restart_reason(
     durable_request: CollectionRequest,
     configuration: outputs.LineageRuntimeConfiguration,
     spec: LibraryLineageSpec,
-) -> LegacyCheckpointRestartReason | None:
+) -> CheckpointRestartReason | None:
     durable_options = configuration.connector_options
     if durable_options is None:
-        return LegacyCheckpointRestartReason.DURABLE_CONFIGURATION_UNAVAILABLE
+        return CheckpointRestartReason.DURABLE_CONFIGURATION_UNAVAILABLE
     if durable_request.source_id != spec.request.source_id:
-        return LegacyCheckpointRestartReason.LEGACY_IDENTITY_MISMATCH
+        return CheckpointRestartReason.CHECKPOINT_IDENTITY_MISMATCH
     try:
         durable_fingerprint = collection_fingerprint(
             durable_request,
@@ -216,7 +227,7 @@ def _configuration_restart_reason(
             cast(dict[str, JsonValue], durable_options),
         )
     except (TypeError, ValueError):
-        return LegacyCheckpointRestartReason.DURABLE_CONFIGURATION_INVALID
+        return CheckpointRestartReason.DURABLE_CONFIGURATION_INVALID
     if durable_fingerprint != spec.connector_config_fingerprint:
-        return LegacyCheckpointRestartReason.COLLECTION_CONFIGURATION_CHANGED
+        return CheckpointRestartReason.COLLECTION_CONFIGURATION_CHANGED
     return None

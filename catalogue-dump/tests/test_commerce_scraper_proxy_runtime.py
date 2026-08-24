@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import pytest
 from mb_commerce_scraper import ProxyMode, ProxyPolicyConfig, SourceDefinition
-from mb_commerce_scraper.proxy import RoutingMode
 from pydantic import SecretStr
 
 from mb_ceramics_catalogue.ops import commerce_scraper_proxy_runtime as runtime
@@ -150,10 +149,10 @@ def test_disabled_routes_do_not_read_secrets(
 
 @pytest.mark.parametrize(
     ("policy", "mode"),
-    [("fallback", RoutingMode.FALLBACK), ("always", RoutingMode.ALWAYS)],
+    [("fallback", ProxyMode.FALLBACK), ("always", ProxyMode.ALWAYS)],
 )
 def test_active_policy_constructs_a_lazy_frozen_runtime(
-    monkeypatch: pytest.MonkeyPatch, policy: str, mode: RoutingMode
+    monkeypatch: pytest.MonkeyPatch, policy: str, mode: ProxyMode
 ) -> None:
     profile = ProxyProfile("primary", "gate.test", 7000, "named-user", "secret")
     registered: list[set[str]] = []

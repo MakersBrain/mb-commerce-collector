@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 from pydantic import JsonValue
 
+from mb_commerce_scraper.models import ProxyMode, ProxyPolicyConfig
 from mb_commerce_scraper.transports import (
     CommerceTransport,
     ResponseBodyTooLarge,
@@ -34,7 +35,6 @@ from .base import (
     ProxyPool,
     ProxyRequest,
 )
-from .routing import ProxyRouting, RoutingMode
 
 
 class ProxyTransportFactory(Protocol):
@@ -110,11 +110,9 @@ class RoutedTransport(CommerceTransport):
         *,
         pool: ProxyPool,
         proxy_factory: ProxyTransportFactory,
-        routing: ProxyRouting,
+        policy: ProxyPolicyConfig,
         source_id: str,
         base_url: str,
-        maximum_requests: int | None = None,
-        maximum_bytes: int | None = None,
         telemetry: TelemetryHooks | None = None,
         telemetry_context: dict[str, JsonValue] | None = None,
     ) -> None:
@@ -124,14 +122,14 @@ class RoutedTransport(CommerceTransport):
         self._direct = direct
         self._pool = pool
         self._proxy_factory = proxy_factory
-        self._routing = routing
+        self._policy = policy
         self._proxy_request = ProxyRequest(
             source_id=source_id,
             target_host=host,
-            country=routing.country,
-            maximum_requests=maximum_requests,
-            maximum_bytes=maximum_bytes,
-            preferred_providers=routing.provider_preferences,
+            country=policy.country,
+            maximum_requests=policy.maximum_requests,
+            maximum_bytes=policy.maximum_bytes,
+            preferred_providers=policy.provider_preferences,
         )
         self._telemetry = safe_telemetry(telemetry) if telemetry is not None else None
         self._telemetry_context = dict(telemetry_context or {})
@@ -145,7 +143,7 @@ class RoutedTransport(CommerceTransport):
         self._closed = False
 
     async def request(self, request: TransportRequest) -> TransportResponse:
-        if self._routing.mode == RoutingMode.NEVER:
+        if self._policy.mode == ProxyMode.NEVER:
             await self._ensure_open()
             return await self._direct.request(request)
         direct_generation = await self._direct_route_generation()
@@ -293,7 +291,7 @@ class RoutedTransport(CommerceTransport):
                     classification="transport_failure",
                 )
                 await self._report(route, outcome, request=request)
-                if self._routing.mode == RoutingMode.FAILOVER:
+                if self._policy.mode == ProxyMode.FAILOVER:
                     await self._schedule_rotation(
                         RotationReason.TRANSPORT_FAILURE,
                         generation=route.generation,
@@ -322,7 +320,7 @@ class RoutedTransport(CommerceTransport):
                 classification=classification,
             )
             await self._report(route, outcome, request=request)
-            if self._routing.mode == RoutingMode.FAILOVER:
+            if self._policy.mode == ProxyMode.FAILOVER:
                 await self._remember_blocked_route(response, generation=route.generation)
             return response.model_copy(
                 update={
@@ -378,7 +376,7 @@ class RoutedTransport(CommerceTransport):
             if self._closed:
                 raise RuntimeError("routed transport is closed")
             if (
-                self._routing.mode == RoutingMode.FALLBACK
+                self._policy.mode == ProxyMode.FALLBACK
                 and self._lease is None
                 and self._pending_rotation is None
                 and not self._transitioning

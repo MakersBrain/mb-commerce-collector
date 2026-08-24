@@ -9,9 +9,15 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import psycopg
+from mb_commerce_scraper import ConnectorCheckpoint as LibraryConnectorCheckpoint
 from psycopg.types.json import Jsonb
 
-from mb_ceramics_catalogue.connectors.base import ConnectorCheckpoint, EntityPage
+from mb_ceramics_catalogue.connectors.base import (
+    ConnectorCheckpoint as CatalogueConnectorCheckpoint,
+)
+from mb_ceramics_catalogue.connectors.base import (
+    EntityPage,
+)
 from mb_ceramics_catalogue.pipeline.outputs import ArtifactStore, BatchIdentity, StoredBatch, StoredObject
 
 if TYPE_CHECKING:
@@ -43,7 +49,7 @@ class LineageRuntimeConfiguration:
 @dataclass(frozen=True)
 class LineageProgress:
     state: LineageProgressState
-    checkpoint: ConnectorCheckpoint | None = None
+    checkpoint: CatalogueConnectorCheckpoint | LibraryConnectorCheckpoint | None = None
 
 
 @dataclass(frozen=True)
@@ -861,7 +867,7 @@ async def lineage_checksum(connection: Connection, job_id: UUID, lineage: UUID) 
 
 async def resume_checkpoint(
     connection: Connection, job_id: UUID, lineage: UUID
-) -> ConnectorCheckpoint | None:
+) -> CatalogueConnectorCheckpoint | LibraryConnectorCheckpoint | None:
     """Return the cursor after the latest durable page, never process memory."""
     progress = await lineage_progress(connection, job_id, lineage)
     if progress.state is LineageProgressState.TERMINAL_INCOMPLETE:
@@ -881,7 +887,8 @@ async def lineage_progress(
     row = await _one(
         connection,
         """select connector, connector_version, source_id, status,
-                  connector_configuration
+                  connector_configuration, connector_config_fingerprint,
+                  runtime_format
              from catalogue.job_checkpoint_lineages
             where job_id = %s and checkpoint_lineage = %s""",
         (job_id, lineage),
@@ -919,13 +926,26 @@ async def lineage_progress(
         ),
     )
     if latest["resume_after"] is not None:
+        checkpoint_type = (
+            LibraryConnectorCheckpoint
+            if LineageRuntimeFormat(row["runtime_format"])
+            is LineageRuntimeFormat.COMMERCE_SCRAPER_V1
+            else CatalogueConnectorCheckpoint
+        )
+        checkpoint_fields = {
+            "connector": row["connector"],
+            "connector_version": row["connector_version"],
+            "source_id": row["source_id"],
+            "lineage": str(lineage),
+            "resume_after": latest["resume_after"],
+        }
+        if checkpoint_type is LibraryConnectorCheckpoint:
+            checkpoint_fields["collection_fingerprint"] = row[
+                "connector_config_fingerprint"
+            ]
         return LineageProgress(
             LineageProgressState.RESUMABLE,
-            ConnectorCheckpoint(
-                connector=row["connector"], connector_version=row["connector_version"],
-                source_id=row["source_id"], lineage=str(lineage),
-                resume_after=latest["resume_after"],
-            ),
+            checkpoint_type.model_validate(checkpoint_fields),
         )
     if latest["terminal"]:
         if not latest["enumeration_intact"]:

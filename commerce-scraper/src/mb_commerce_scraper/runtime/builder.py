@@ -6,7 +6,6 @@ from mb_commerce_scraper.proxy import (
     HttpxProxyTransportFactory,
     ProxyBrowserTransportFactory,
     ProxyPool,
-    ProxyRouting,
 )
 from mb_commerce_scraper.transports import (
     DEFAULT_MAXIMUM_RESPONSE_BYTES,
@@ -43,11 +42,8 @@ def build_http_scraper(
     robots_cache_origins: int = 1_000,
     proxy_pool: ProxyPool | None = None,
     proxy_policy: ProxyPolicyConfig | None = None,
-    routing: ProxyRouting | None = None,
     proxy_browser_transport_factory: ProxyBrowserTransportFactory | None = None,
     require_proxy_browser_subrequest_authorization: bool = False,
-    proxy_maximum_requests: int | None = None,
-    proxy_maximum_bytes: int | None = None,
     browser_transport: BrowserTransport | None = None,
     owns_browser_transport: bool = False,
     maximum_response_bytes: int = DEFAULT_MAXIMUM_RESPONSE_BYTES,
@@ -82,7 +78,6 @@ def build_http_scraper(
         transport=transport,
         proxy_pool=proxy_pool,
         proxy_policy=proxy_policy,
-        routing=routing,
         proxy_transport_factory=(
             HttpxProxyTransportFactory(
                 allowed_origins=allowed_origins,
@@ -94,8 +89,6 @@ def build_http_scraper(
         ),
         proxy_browser_transport_factory=proxy_browser_transport_factory,
         require_proxy_browser_subrequest_authorization=(require_proxy_browser_subrequest_authorization),
-        proxy_maximum_requests=proxy_maximum_requests,
-        proxy_maximum_bytes=proxy_maximum_bytes,
         budget=budget,
         telemetry=telemetry,
         fetch_policy=selected_policy,

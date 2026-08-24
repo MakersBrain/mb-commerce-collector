@@ -7,11 +7,13 @@ and is verified from the installed wheel. Use package imports such as:
 ```python
 from mb_commerce_scraper import ProxyPolicyConfig, SourceDefinition
 from mb_commerce_scraper.connectors import ConnectorFactory, ConnectorRegistry
-from mb_commerce_scraper.proxy import ProxyPool, ProxyRouting
+from mb_commerce_scraper.proxy import ProxyPool, RoutedTransport
 from mb_commerce_scraper.runtime import CommerceScraper, build_http_scraper
 from mb_commerce_scraper.transports import (
     CommerceTransport,
     FileResponseCache,
+    RequestObservation,
+    RequestObserver,
     ResponseCache,
     TelemetryHooks,
     TransportRequest,
@@ -37,6 +39,12 @@ public helpers such as `prestashop_partition_keys` when it must construct a
 partitioned collection request without depending on connector implementation
 modules.
 
+Telemetry sinks may additionally implement `RequestObserver` to receive typed,
+secret-free `RequestObservation` values for physical-attempt accounting,
+metrics, and spans. The general string event channel remains available for
+collection, connector, cache, proxy, and lifecycle events. Observer failures on
+either channel are isolated from collection correctness.
+
 `ResponseCache` is the supported extension protocol for application-owned
 caches. `FileResponseCache` is the standard-library, directory-backed
 implementation. Its operations are asynchronous so filesystem work does not
@@ -56,9 +64,9 @@ not one of the frozen JSON contracts, and callers should interact through the
 cache protocol rather than reading its files directly.
 
 `ProxyPolicyConfig` is the high-level runtime contract for proxy mode,
-geography, provider preference, and collection caps. `ProxyRouting` remains a
-supported low-level transport type for direct `RoutedTransport` composition.
-The two configuration styles cannot be mixed in one high-level client.
+geography, provider preference, and collection caps. The same policy is passed
+to direct `RoutedTransport` composition, so low- and high-level routing use one
+validated configuration shape.
 
 Every supported namespace remains importable from the base installation. The
 HTTP-facing factory symbols are still importable there, but constructing an
