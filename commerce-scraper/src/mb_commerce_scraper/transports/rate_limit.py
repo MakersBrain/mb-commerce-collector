@@ -60,10 +60,9 @@ class PerOriginRateLimiter:
         self._clock = clock
         self._sleeper = sleeper
         self._states: dict[tuple[str, str, int], _OriginState] = {}
-        self._states_lock = asyncio.Lock()
 
     async def wait(self, request: TransportRequest) -> None:
-        state = await self._state_for(request)
+        state = self._state_for(request)
         await state.concurrency.acquire()
         try:
             async with state.pacing:
@@ -76,7 +75,7 @@ class PerOriginRateLimiter:
             raise
 
     async def release(self, request: TransportRequest) -> None:
-        state = await self._state_for(request)
+        state = self._state_for(request)
         try:
             state.concurrency.release()
         except ValueError as error:
@@ -84,14 +83,18 @@ class PerOriginRateLimiter:
                 f"rate limiter permit released without a matching wait for {_origin(request.url)!r}"
             ) from error
 
-    async def _state_for(self, request: TransportRequest) -> _OriginState:
+    def _state_for(self, request: TransportRequest) -> _OriginState:
+        """Get or create per-origin state.
+
+        No lock is needed: the get-or-create has no await between the lookup
+        and the store, so it is atomic on a single event loop.
+        """
         origin = _origin(request.url)
-        async with self._states_lock:
-            state = self._states.get(origin)
-            if state is None:
-                state = _OriginState(asyncio.BoundedSemaphore(self.concurrency))
-                self._states[origin] = state
-            return state
+        state = self._states.get(origin)
+        if state is None:
+            state = _OriginState(asyncio.BoundedSemaphore(self.concurrency))
+            self._states[origin] = state
+        return state
 
 
 class RateLimitedTransport(CommerceTransport):

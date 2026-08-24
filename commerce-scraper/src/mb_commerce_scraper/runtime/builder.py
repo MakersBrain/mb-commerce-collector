@@ -60,7 +60,7 @@ def build_http_scraper(
             else BrowserPolicy.NEVER
         ),
     )
-    request_timeout = selected_policy.timeout_seconds if fetch_policy is not None else timeout
+    request_timeout = selected_policy.timeout_seconds
     transport = HttpxTransport(
         allowed_origins=allowed_origins,
         timeout=request_timeout,

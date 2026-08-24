@@ -103,7 +103,11 @@ packages = ["src/mb_ceramics_catalogue"]
 package = true
 
 [tool.uv.sources]
-mb-commerce-scraper = { path = "../commerce-scraper" }
+# Editable: without it uv installs a *copy*, so library edits are invisible to
+# this suite and cross-package changes get validated against a stale snapshot.
+# The installed-wheel gates deliberately test the built artifact instead and
+# are unaffected by this.
+mb-commerce-scraper = { path = "../commerce-scraper", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

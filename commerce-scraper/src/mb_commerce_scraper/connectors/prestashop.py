@@ -1000,12 +1000,18 @@ class PrestaShopConnector(CommerceConnector):
         )
 
 
+_PRODUCT_DETAILS_TAG = re.compile(r'<[^>]*\bid=["\']product-details["\'][^>]*>', re.I)
+_DATA_PRODUCT = (
+    re.compile(r'\bdata-product="([^"]+)"', re.I),
+    re.compile(r"\bdata-product='([^']+)'", re.I),
+)
+
+
 def data_product(document: str) -> dict[str, Any] | None:
-    for tag in re.findall(r"<[^>]+>", document, re.S):
-        if not re.search(r'\bid=["\']product-details["\']', tag, re.I):
-            continue
-        for pattern in (r'\bdata-product="([^"]+)"', r"\bdata-product='([^']+)'"):
-            match = re.search(pattern, tag, re.I | re.S)
+    for tag_match in _PRODUCT_DETAILS_TAG.finditer(document):
+        tag = tag_match.group(0)
+        for pattern in _DATA_PRODUCT:
+            match = pattern.search(tag)
             if not match:
                 continue
             try:

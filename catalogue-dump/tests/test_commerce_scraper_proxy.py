@@ -31,6 +31,10 @@ from mb_commerce_scraper.transports import (
 from mb_commerce_scraper.transports.base import CommerceTransport
 
 from mb_ceramics_catalogue.ops import commerce_scraper_proxy as adapter
+from mb_ceramics_catalogue.ops.commerce_scraper_decodo import (
+    DecodoDataPlaneConfig,
+    DecodoDataPlanePool,
+)
 from mb_ceramics_catalogue.proxy import ProxyDenied, ProxyProfile, ProxyReservationUsage
 
 
@@ -79,15 +83,33 @@ def request(**changes: Any) -> ProxyRequest:
     )
 
 
-def pool() -> adapter.PostgresDecodoProxyPool:
-    return adapter.PostgresDecodoProxyPool(
+def pool() -> adapter.PostgresReservedProxyPool:
+    """Decodo composed exactly as the runtime composes it.
+
+    The provider adapter owns credentials and identity rotation; the durable
+    decorator owns every PostgreSQL accounting decision.
+    """
+
+    route_id = uuid4()
+    profile = ProxyProfile("decodo", "gate.test", 7000, "named-user", "secret")
+    return adapter.PostgresReservedProxyPool(
         FakeDatabase(),
+        DecodoDataPlanePool(
+            DecodoDataPlaneConfig(
+                profile=profile,
+                endpoint_id=str(route_id),
+                country="FR",
+            )
+        ),
         job_id=uuid4(),
-        profile=ProxyProfile("decodo", "gate.test", 7000, "named-user", "secret"),
-        profile_id=uuid4(),
-        route_id=uuid4(),
+        identity=adapter.DurableProxyIdentity(
+            provider="decodo",
+            profile="decodo",
+            profile_id=uuid4(),
+            route_id=route_id,
+            secret_generation=profile.generation,
+        ),
         maximum_bytes=200,
-        route_country="FR",
     )
 
 
@@ -148,8 +170,8 @@ async def test_attempt_tokens_authorize_reconcile_release_and_close(
 
     dispatched = await proxy_pool.authorize(lease, 60)
     undispatched = await proxy_pool.authorize(lease, 20)
-    assert isinstance(dispatched, adapter._PostgresAttemptAuthorization)
-    assert isinstance(undispatched, adapter._PostgresAttemptAuthorization)
+    assert isinstance(dispatched, adapter._ReservedAttemptAuthorization)
+    assert isinstance(undispatched, adapter._ReservedAttemptAuthorization)
     assert authorized == [(60, 2), (20, 2)]
     with pytest.raises(ProxyDenied, match="unreconciled"):
         await proxy_pool.release(lease)
@@ -223,7 +245,7 @@ async def test_reconciliation_overshoot_is_retained_then_fails_closed(
                 classification="success",
             )
         )
-    assert lease._state.legacy.used_bytes == 120
+    assert lease._state.used_bytes == 120
     assert not lease.can_start()
 
 

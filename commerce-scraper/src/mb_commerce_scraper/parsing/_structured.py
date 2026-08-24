@@ -147,10 +147,12 @@ def probable_javascript_shell(document: str) -> bool:
             "ng-version=",
         )
     )
+    if not explicit or "<script" not in lower:
+        return False
     visible = re.sub(
         r"<script\b[\s\S]*?</script>|<style\b[\s\S]*?</style>|<[^>]+>", " ", lower
     )
-    return explicit and "<script" in lower and len(clean(visible)) < 1000
+    return len(clean(visible)) < 1000
 
 
 def specification_table(document: str) -> dict[str, str]:

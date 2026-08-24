@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
@@ -26,10 +26,10 @@ from mb_ceramics_catalogue.webshare_gateway_secrets import (
     secret_values as webshare_secret_values,
 )
 
+from .commerce_scraper_decodo import DecodoDataPlaneConfig, DecodoDataPlanePool
 from .commerce_scraper_proxy import (
     ConnectionPool,
     DurableProxyIdentity,
-    PostgresDecodoProxyPool,
     PostgresReservedProxyPool,
 )
 from .commerce_scraper_webshare import WebshareGatewayConfig, WebshareGatewayPool
@@ -37,7 +37,6 @@ from .commerce_scraper_webshare import WebshareGatewayConfig, WebshareGatewayPoo
 _COUNTRY = re.compile(r"^[A-Z]{2}$")
 _DECODO = "decodo"
 _WEBSHARE = "webshare"
-_SUPPORTED_PROVIDERS = frozenset({_DECODO, _WEBSHARE})
 
 
 class ProxyRuntimeSettings(Protocol):
@@ -45,6 +44,24 @@ class ProxyRuntimeSettings(Protocol):
     proxy_secret_file: Path | None
     proxy_webshare_data_plane_enabled: bool
     proxy_webshare_gateway_secret_file: Path | None
+
+
+@dataclass(frozen=True, slots=True)
+class _DataPlaneProvider:
+    """One provider's data-plane entry: is it permitted, and how is it built.
+
+    Provider knowledge lives here rather than in the resolver so that adding a
+    third provider is a new registry entry, not another branch threaded through
+    policy validation, capability gating, and secret plumbing.  The control
+    plane keeps the same shape in ``providers/registry.py``.
+    """
+
+    #: Operator gate beyond ``proxy_enabled``. A provider whose data plane is
+    #: still being qualified stays off even when a job snapshot names it.
+    enabled: Callable[[ProxyRuntimeSettings], bool]
+    denied_message: str
+    build: Callable[..., PostgresReservedProxyPool]
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,10 +102,11 @@ def resolve_native_proxy_runtime(
         raise ProxyDenied(f"source {source.id!r} is not checked-in as proxy eligible")
     _validate_source(source.id, source.base_url)
     provider = proxy_snapshot.get("provider")
-    if not isinstance(provider, str) or provider not in _SUPPORTED_PROVIDERS:
+    if not isinstance(provider, str) or provider not in _PROVIDERS:
         raise ProxyDenied("native proxy runtime does not support the snapshotted provider")
-    if provider == _WEBSHARE and not settings.proxy_webshare_data_plane_enabled:
-        raise ProxyDenied("native Webshare data-plane routing is not enabled")
+    selected_provider = _PROVIDERS[provider]
+    if not selected_provider.enabled(settings):
+        raise ProxyDenied(selected_provider.denied_message)
     if proxy_snapshot.get("state") is not None or proxy_snapshot.get("city") is not None:
         raise ProxyDenied("native proxy routing does not support state or city selection")
     if proxy_snapshot.get("session_mode") != "sticky":
@@ -125,37 +143,20 @@ def resolve_native_proxy_runtime(
         maximum=2_147_483_647,
     )
 
-    pool: ProxyPool
-    if provider == _DECODO:
-        pool = _decodo_pool(
-            database,
-            settings=settings,
-            job_id=job_id,
-            logical_name=logical_name,
-            profile_id=profile_id,
-            route_id=route_id,
-            secret_generation=snapshotted_generation,
-            maximum_bytes=configured_maximum,
-            country=country,
-            protocol=protocol,
-            session_minutes=session_minutes,
-            pilot=pilot,
-        )
-    else:
-        pool = _webshare_pool(
-            database,
-            settings=settings,
-            job_id=job_id,
-            logical_name=logical_name,
-            profile_id=profile_id,
-            route_id=route_id,
-            secret_generation=snapshotted_generation,
-            maximum_bytes=configured_maximum,
-            country=country,
-            protocol=protocol,
-            session_minutes=session_minutes,
-            pilot=pilot,
-        )
+    pool: ProxyPool = selected_provider.build(
+        database,
+        settings=settings,
+        job_id=job_id,
+        logical_name=logical_name,
+        profile_id=profile_id,
+        route_id=route_id,
+        secret_generation=snapshotted_generation,
+        maximum_bytes=configured_maximum,
+        country=country,
+        protocol=protocol,
+        session_minutes=session_minutes,
+        pilot=pilot,
+    )
 
     effective_policy = ProxyPolicyConfig(
         mode=ProxyMode(policy),
@@ -186,7 +187,7 @@ def _decodo_pool(
     protocol: Literal["http", "https", "socks5"],
     session_minutes: int,
     pilot: bool,
-) -> PostgresDecodoProxyPool:
+) -> PostgresReservedProxyPool:
     secret_file = settings.proxy_secret_file
     if secret_file is None:
         raise ProxyDenied("proxy is enabled but its secret file is absent")
@@ -197,16 +198,28 @@ def _decodo_pool(
         raise ProxyDenied(f"unknown logical proxy profile {logical_name!r}")
     if profile.generation != secret_generation:
         raise ProxyDenied("proxy secret generation does not match the immutable job snapshot")
-    return PostgresDecodoProxyPool(
+
+    data_plane = DecodoDataPlanePool(
+        DecodoDataPlaneConfig(
+            profile=profile,
+            endpoint_id=str(route_id),
+            country=country,
+            protocol=protocol,
+            session_minutes=session_minutes,
+        )
+    )
+    return PostgresReservedProxyPool(
         database,
+        data_plane,
         job_id=job_id,
-        profile=profile,
-        profile_id=profile_id,
-        route_id=route_id,
+        identity=DurableProxyIdentity(
+            provider=_DECODO,
+            profile=logical_name,
+            profile_id=profile_id,
+            route_id=route_id,
+            secret_generation=profile.generation,
+        ),
         maximum_bytes=maximum_bytes,
-        route_country=country,
-        protocol=protocol,
-        session_minutes=session_minutes,
         pilot=pilot,
     )
 
@@ -270,6 +283,25 @@ def _webshare_pool(
         maximum_bytes=maximum_bytes,
         pilot=pilot,
     )
+
+
+
+def _data_plane_providers() -> dict[str, _DataPlaneProvider]:
+    return {
+        _DECODO: _DataPlaneProvider(
+            enabled=lambda settings: True,
+            denied_message="native Decodo data-plane routing is not enabled",
+            build=_decodo_pool,
+        ),
+        _WEBSHARE: _DataPlaneProvider(
+            enabled=lambda settings: settings.proxy_webshare_data_plane_enabled,
+            denied_message="native Webshare data-plane routing is not enabled",
+            build=_webshare_pool,
+        ),
+    }
+
+
+_PROVIDERS = _data_plane_providers()
 
 
 def _validate_source(source_id: str, base_url: str) -> None:

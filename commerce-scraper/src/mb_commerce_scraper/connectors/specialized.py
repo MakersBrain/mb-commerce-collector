@@ -46,8 +46,10 @@ from mb_commerce_scraper.models import (
 from mb_commerce_scraper.parsing import JsonLdProductParser
 from mb_commerce_scraper.parsing._structured import (
     VerifiedDomRules,
+    clean,
     dom_product,
     jsonld_products,
+    meta,
     microdata_products,
     opengraph_product,
     pdf_links,
@@ -260,8 +262,9 @@ class SpecializedPageConnector(CommerceConnector):
                     metadata={"stage": "browser" if initial_browser else "http"},
                 )
                 return
-            snapshots = self.parse(response.text(), url, request.source_id)
-            shell = probable_javascript_shell(response.text())
+            document = response.text()
+            snapshots = self.parse(document, url, request.source_id)
+            shell = not snapshots and probable_javascript_shell(document)
             browser_attempted = initial_browser
             if (
                 not snapshots
@@ -489,13 +492,7 @@ class SpecializedPageConnector(CommerceConnector):
     ) -> tuple[CommerceProductSnapshot, ...]:
         if not raw_items:
             return ()
-        document = "".join(
-            '<script type="application/ld+json">'
-            + json.dumps(raw, separators=(",", ":"))
-            + "</script>"
-            for raw in raw_items
-        )
-        snapshots = self._jsonld.parse(document, url=url, source_id=source_id)
+        snapshots = self._jsonld.parse_products(raw_items, url=url, source_id=source_id)
         output: list[CommerceProductSnapshot] = []
         for index, snapshot in enumerate(snapshots):
             raw = raw_items[index] if index < len(raw_items) else {}
@@ -814,7 +811,7 @@ class ShopwareConnector(SpecializedPageConnector):
                 variants.append(
                     variant.model_copy(
                         update={
-                            "sku": variant.sku or (_clean(number.group(1)) if number else None),
+                            "sku": variant.sku or (clean(number.group(1)) if number else None),
                             "published_attributes": published,
                             "stock": stock,
                         }
@@ -850,14 +847,14 @@ class StarwebConnector(SpecializedPageConnector):
             )
         )
         attributes = {
-            _clean(match.group(1)).rstrip(":"): _clean(match.group(2))
+            clean(match.group(1)).rstrip(":"): clean(match.group(2))
             for match in re.finditer(
                 r'<(?:label|span)[^>]*class=["\'][^"\']*(?:variant|attribute)-name[^"\']*["\'][^>]*>(.*?)</(?:label|span)>\s*'
                 r'<(?:span|div)[^>]*class=["\'][^"\']*(?:variant|attribute)-value[^"\']*["\'][^>]*>(.*?)</(?:span|div)>',
                 document,
                 re.IGNORECASE | re.DOTALL,
             )
-            if _clean(match.group(1)) and _clean(match.group(2))
+            if clean(match.group(1)) and clean(match.group(2))
         }
         output: list[CommerceProductSnapshot] = []
         for snapshot in snapshots:
@@ -907,14 +904,14 @@ class NitroSellConnector(SpecializedPageConnector):
         categories: tuple[CategoryRef, ...] = ()
         if breadcrumb:
             crumbs = tuple(
-                _clean(value)
+                clean(value)
                 for value in re.findall(
                     r"<li[^>]*>(.*?)</li>", breadcrumb.group(1), re.IGNORECASE | re.DOTALL
                 )
-                if _clean(value)
+                if clean(value)
             )
             categories = tuple(CategoryRef(name=value) for value in crumbs[1:-1])
-        image_values = [_meta(document, "og:image")]
+        image_values = [meta(document, "og:image")]
         image_values.extend(
             re.findall(
                 r'https://cdn\.powered-by-nitrosell\.com/product_images/[^"\'\s<>]+',
@@ -983,7 +980,7 @@ class SumUpConnector(SpecializedPageConnector):
         product = self._product(payload, url) if payload else None
         if product is None:
             return super().parse(document, url, source_id)
-        title = _clean(product.get("name")) or _meta(document, "og:title")
+        title = clean(product.get("name")) or meta(document, "og:title")
         currency_match = _CURRENCY.search(payload)
         currency = currency_match.group(1) if currency_match else self.options.currency
         if not title or not currency:
@@ -1073,8 +1070,8 @@ class SumUpConnector(SpecializedPageConnector):
                 CommerceVariant(
                     external_id=str(candidate.get("uuid") or product.get("id")),
                     canonical_url=url,
-                    title=_clean(candidate.get("name")) or None,
-                    sku=_clean(candidate.get("sku") or product.get("sku")) or None,
+                    title=clean(candidate.get("name")) or None,
+                    sku=clean(candidate.get("sku") or product.get("sku")) or None,
                     offers=tuple(offers),
                     stock=stock,
                     platform_extensions={"legacy_raw_variant": candidate},
@@ -1085,13 +1082,13 @@ class SumUpConnector(SpecializedPageConnector):
         images = tuple(
             MediaRef(url=value)
             for value in dict.fromkeys(
-                _clean(value)
+                clean(value)
                 for value in (product.get("allImages") or [product.get("image")])
-                if _clean(value)
+                if clean(value)
             )
         )
         category_raw = product.get("category")
-        category = _clean(category_raw.get("name")) if isinstance(category_raw, dict) else ""
+        category = clean(category_raw.get("name")) if isinstance(category_raw, dict) else ""
         return (
             CommerceProductSnapshot(
                 connector=self.name,
@@ -1102,7 +1099,7 @@ class SumUpConnector(SpecializedPageConnector):
                 canonical_url=url,
                 title=title,
                 observed_at=observed_at,
-                description=_clean(product.get("description")) or None,
+                description=clean(product.get("description")) or None,
                 vendor=self.options.brand,
                 categories=(CategoryRef(name=category),) if category else (),
                 images=images,
@@ -1202,43 +1199,25 @@ class SumUpFactory(_SpecializedFactory):
     connector_type = SumUpConnector
 
 
-def _clean(value: Any) -> str:
-    if value is None:
-        return ""
-    return re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", " ", str(value)))).strip()
-
-
-def _meta(document: str, key: str) -> str:
-    escaped = re.escape(key)
-    for pattern in (
-        rf'<meta[^>]*(?:property|name)=["\']{escaped}["\'][^>]*content=["\']([^"\']*)',
-        rf'<meta[^>]*content=["\']([^"\']*)["\'][^>]*(?:property|name)=["\']{escaped}["\']',
-    ):
-        match = re.search(pattern, document, re.IGNORECASE)
-        if match:
-            return _clean(match.group(1))
-    return ""
-
-
 def _class_content(document: str, class_name: str) -> str:
     match = re.search(
         rf'<[^>]+class=["\'][^"\']*\b{re.escape(class_name)}\b[^"\']*["\'][^>]*>(.*?)</[^>]+>',
         document,
         re.IGNORECASE | re.DOTALL,
     )
-    return _clean(match.group(1)) if match else ""
+    return clean(match.group(1)) if match else ""
 
 
 def _definition_attributes(document: str) -> dict[str, JsonValue]:
     return {
-        _clean(match.group(1)).rstrip(":"): _clean(match.group(2))
+        clean(match.group(1)).rstrip(":"): clean(match.group(2))
         for match in re.finditer(
             r'<dt[^>]*class=["\'][^"\']*properties-label[^"\']*["\'][^>]*>(.*?)</dt>\s*'
             r'<dd[^>]*class=["\'][^"\']*properties-value[^"\']*["\'][^>]*>(.*?)</dd>',
             document,
             re.IGNORECASE | re.DOTALL,
         )
-        if _clean(match.group(1)) and _clean(match.group(2))
+        if clean(match.group(1)) and clean(match.group(2))
     }
 
 

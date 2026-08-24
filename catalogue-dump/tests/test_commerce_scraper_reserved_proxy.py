@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -444,3 +445,84 @@ async def test_browser_subrequests_each_receive_a_durable_authorization(
     assert authorized == [40, 60]
     assert reconciled == [(30, 1), (50, 1)]
     await pool.release(lease)
+
+
+async def test_concurrent_subrequests_authorize_without_serializing_on_the_pool() -> None:
+    """A page load's subrequests must not queue behind each other's round trip.
+
+    Playwright dispatches route handlers concurrently, so each subrequest calls
+    ``authorize`` on the same lease. The pool lock is therefore released across
+    the database round trip; this proves two attempts really do overlap rather
+    than running one after the other.
+    """
+
+    started = asyncio.Event()
+    release_first = asyncio.Event()
+    overlapped = False
+
+    async def fake_reserve(_connection: Any, **_kwargs: Any) -> UUID:
+        return uuid4()
+
+    async def fake_authorize(_connection: Any, **_kwargs: Any) -> UUID:
+        nonlocal overlapped
+        if not started.is_set():
+            started.set()
+            await release_first.wait()
+        else:
+            # Reached while the first attempt is still inside its round trip.
+            overlapped = True
+        return uuid4()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(adapter, "reserve", fake_reserve)
+        patch.setattr(adapter, "authorize_reservation_attempt", fake_authorize)
+        pool, _inner, _identity = durable_pool()
+        lease = await pool.acquire(request(maximum_requests=None))
+
+        first = asyncio.create_task(pool.authorize(lease, 10))
+        await started.wait()
+        second = asyncio.create_task(pool.authorize(lease, 20))
+        await asyncio.sleep(0)
+        release_first.set()
+        assert await first is not None
+        assert await second is not None
+
+    assert overlapped, "the second authorization waited for the first round trip"
+
+
+async def test_rotation_and_release_refuse_an_in_flight_authorization() -> None:
+    """The narrowed lock must keep the ordering the wider one guaranteed.
+
+    An attempt that has passed validation but is still being recorded is not
+    yet in ``pending_authorizations``. Rotation or release running underneath
+    it would strand a durable authorization against a retired identity.
+    """
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_reserve(_connection: Any, **_kwargs: Any) -> UUID:
+        return uuid4()
+
+    async def fake_authorize(_connection: Any, **_kwargs: Any) -> UUID:
+        started.set()
+        await release.wait()
+        return uuid4()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(adapter, "reserve", fake_reserve)
+        patch.setattr(adapter, "authorize_reservation_attempt", fake_authorize)
+        pool, _inner, _identity = durable_pool()
+        lease = await pool.acquire(request())
+
+        attempt = asyncio.create_task(pool.authorize(lease, 10))
+        await started.wait()
+
+        with pytest.raises(ProxyDenied, match="cannot rotate"):
+            await pool.rotate(lease, RotationReason.EXPLICIT)
+        with pytest.raises(ProxyDenied, match="unreconciled authorized requests"):
+            await pool.release(lease)
+
+        release.set()
+        authorization = await attempt
+        assert authorization is not None

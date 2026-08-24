@@ -159,7 +159,7 @@ class WebshareGatewayPool:
 
     async def acquire(self, request: ProxyRequest) -> WebshareGatewayLease:
         self._validate_request(request)
-        inner = await self._inner.acquire(request)
+        inner = await self._inner.acquire(self._discharged(request))
         try:
             lease = self._project(inner)
         except BaseException:
@@ -213,6 +213,26 @@ class WebshareGatewayPool:
             raise ProxyDenied("Webshare proxy lease is not active")
         self._leases.pop(lease.lease_id)
         await self._inner.release(current._inner)
+
+    @staticmethod
+    def _discharged(request: ProxyRequest) -> ProxyRequest:
+        """Drop constraints this adapter has already proven.
+
+        The composed pool owns accounting, health, and ownership; it routes to
+        one static gateway endpoint and therefore refuses any constraint a
+        static route cannot prove.  Session duration is proven here instead:
+        ``_validate_request`` checks it against the configured gateway
+        capability and ``_project`` honors it by deriving the sticky identity's
+        ``expires_at``.  Forwarding it unchanged would ask the inner pool to
+        re-prove a capability it does not have and cannot see.
+
+        Region and city are not discharged: ``_validate_request`` rejects them
+        outright, so they never reach the inner pool.
+        """
+
+        if request.session_ttl_seconds is None:
+            return request
+        return request.model_copy(update={"session_ttl_seconds": None})
 
     def _project(self, inner: StaticProxyLease) -> WebshareGatewayLease:
         request = inner.request

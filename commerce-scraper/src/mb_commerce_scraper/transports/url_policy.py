@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from collections.abc import Awaitable, Callable
@@ -9,7 +10,8 @@ Resolver = Callable[[str], Awaitable[tuple[str, ...]]]
 
 
 async def system_resolver(host: str) -> tuple[str, ...]:
-    loopback_safe = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    loop = asyncio.get_running_loop()
+    loopback_safe = await loop.getaddrinfo(host, None, type=socket.SOCK_STREAM)
     return tuple(dict.fromkeys(str(item[4][0]) for item in loopback_safe))
 
 
