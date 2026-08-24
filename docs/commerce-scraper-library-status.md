@@ -2,7 +2,7 @@
 
 Plan: [commerce-scraper-library-plan.md](commerce-scraper-library-plan.md)
 Branch: `feat/commerce-scraper-library`
-Last reviewed: 2026-08-24
+Last reviewed: 2026-08-25
 Overall status: **in progress — library foundation implemented, production cutover pending**
 
 This document tracks implementation and migration against the refactor plan. It
@@ -135,13 +135,14 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `864e87d` — review framework connector traffic profiles.
 - `0998578` — bypass the retained commerce-model compatibility shim internally.
 - `aabf825` — move structured parsing helpers below the connector layer.
+- `63c745b` — finalize the pre-1.0 public surface and typed telemetry contract.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
-  - Mypy passed for 74 source and test files.
-  - 303 library tests passed. Version-0 checkpoint compatibility and its
+  - Mypy passed for 75 source and test files.
+  - 307 library tests passed. Version-0 checkpoint compatibility and its
     library test suite were removed before the first release.
   - Wheel and source distribution built.
   - 4 dependency-boundary tests passed.
@@ -247,6 +248,15 @@ architecture rules in the plan and are not separate scope-expansion goals.
     telemetry.
     The complete scraper release gate, full catalogue Ruff/mypy/fast suite, and
     installed two-wheel catalogue composition gate passed.
+  - Parsing helpers now have one implementation below the connector layer.
+    PrestaShop and Wix consume the shared structured-data helpers; decimal,
+    origin, and deterministic page-ID construction are shared across the
+    framework connectors. The complete scraper release gate passed with 307
+    tests, Ruff, mypy over 75 files, schema generation, package builds,
+    boundary checks, installed-wheel verification, external-consumer checks,
+    and release verification. Catalogue Ruff, mypy over 239 files, and the
+    fast suite (936 passed, 2 skipped, 187 deselected, 284 subtests) passed.
+    Installed two-wheel catalogue composition passed.
   - The provider-neutral durable Webshare composition and existing Decodo and
     Webshare adapter suites passed 29 focused tests.
   - The strict Webshare gateway-secret contract passed 47 focused tests.
@@ -1385,6 +1395,14 @@ After each implementation batch:
 5. Update `Last reviewed` and add the implementing commit to the baseline.
 
 ## Accepted plan deviations
+
+- B1 resolves the previously documented parsing drift in favor of the shared
+  helper behavior: specification names may contain up to 99 characters, the
+  broader JavaScript-shell marker set is canonical, missing metadata returns
+  `""`, booleans are never decimal amounts, and only BigCommerce and
+  WooCommerce request strict absolute-HTTP(S) origin validation. These choices
+  retain the intended common contract while preserving connector validation
+  semantics.
 
 - The plan names a separate provider-adapter protocol. The implemented neutral
   `ProxyPool` lifecycle plus application-owned transport/browser factories is

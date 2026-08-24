@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import re
 from collections.abc import AsyncIterator
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, cast
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -38,6 +36,7 @@ from mb_commerce_scraper.models import (
     result_limit_diagnostic,
     validate_checkpoint,
 )
+from mb_commerce_scraper.parsing._structured import decimal_amount, hashed_page_id, origin_of
 from mb_commerce_scraper.transports import (
     BrowserHint,
     CommerceTransport,
@@ -130,7 +129,11 @@ class BigCommerceConnector(CommerceConnector):
         self._validate_request(request, checkpoint)
         if self.context.cancelled():
             return
-        origin = self._origin(request.base_url)
+        origin = origin_of(
+            request.base_url,
+            require_http=True,
+            error_message="BigCommerce base_url must be absolute HTTP(S)",
+        )
         after, sequence = self._resume(checkpoint)
         token_page = self.options.token_page or request.base_url
         token, rendered = await self._discover_token(origin, token_page)
@@ -255,7 +258,7 @@ class BigCommerceConnector(CommerceConnector):
                 else ()
             )
             yield EntityPage(
-                page_id=_page_id(sequence, after),
+                page_id=hashed_page_id(f"graphql:{sequence}", after or "first"),
                 sequence=sequence,
                 items=snapshots,
                 resume_after=resume_after,
@@ -509,13 +512,6 @@ class BigCommerceConnector(CommerceConnector):
         return after, sequence
 
     @staticmethod
-    def _origin(url: str) -> str:
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("BigCommerce base_url must be absolute HTTP(S)")
-        return f"{parsed.scheme}://{parsed.netloc}"
-
-    @staticmethod
     def _failed_page(
         sequence: int,
         after: str | None,
@@ -527,7 +523,7 @@ class BigCommerceConnector(CommerceConnector):
     ) -> EntityPage[CommerceProductSnapshot]:
         resume: JsonValue = {"after": after, "sequence": sequence}
         return EntityPage(
-            page_id=_page_id(sequence, after),
+            page_id=hashed_page_id(f"graphql:{sequence}", after or "first"),
             sequence=sequence,
             items=(),
             resume_after=resume,
@@ -575,11 +571,11 @@ def _offers(
     availability: Availability,
     vat_status: Literal["inclusive", "exclusive", "unknown"] | None,
 ) -> tuple[CommerceOffer, ...]:
-    amount = _decimal(price.get("value"))
+    amount = decimal_amount(price.get("value"))
     currency = _text(price.get("currencyCode")).upper()
     if amount is None or not re.fullmatch(r"[A-Z]{3}", currency):
         return ()
-    retail_amount = _decimal(retail.get("value"))
+    retail_amount = decimal_amount(retail.get("value"))
     sale = retail_amount is not None and retail_amount > amount
     current = CommerceOffer(
         price=Money(amount=amount, currency=currency),
@@ -606,14 +602,6 @@ def _offers(
     )
 
 
-def _decimal(value: Any) -> Decimal | None:
-    try:
-        amount = Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return None
-    return amount if amount.is_finite() and amount >= 0 else None
-
-
 def _token_allows_origin(token: str, origin: str) -> bool:
     parts = token.split(".")
     if len(parts) < 2:
@@ -629,11 +617,6 @@ def _token_allows_origin(token: str, origin: str) -> bool:
     if not allowed:
         return True
     return isinstance(allowed, list) and any(_text(item).rstrip("/") == origin for item in allowed)
-
-
-def _page_id(sequence: int, after: str | None) -> str:
-    digest = hashlib.sha256((after or "first").encode()).hexdigest()[:12]
-    return f"graphql:{sequence}:{digest}"
 
 
 class BigCommerceFactory:

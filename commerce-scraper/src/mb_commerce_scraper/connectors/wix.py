@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import html
 import json
 import re
 from collections.abc import AsyncIterator
 from contextlib import suppress
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Literal, cast
-from urllib.parse import unquote, urljoin, urlparse, urlunparse
+from urllib.parse import unquote, urlparse, urlunparse
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -37,6 +35,31 @@ from mb_commerce_scraper.models import (
     collection_fingerprint,
     result_limit_diagnostic,
     validate_checkpoint,
+)
+from mb_commerce_scraper.parsing._structured import (
+    breadcrumbs as _breadcrumbs,
+)
+from mb_commerce_scraper.parsing._structured import (
+    clean as _clean,
+)
+from mb_commerce_scraper.parsing._structured import (
+    decimal_amount as _decimal,
+)
+from mb_commerce_scraper.parsing._structured import (
+    hashed_page_id,
+    origin_of,
+)
+from mb_commerce_scraper.parsing._structured import (
+    jsonld_images as _jsonld_images,
+)
+from mb_commerce_scraper.parsing._structured import (
+    jsonld_product_blocks as _jsonld_products,
+)
+from mb_commerce_scraper.parsing._structured import (
+    meta as _meta,
+)
+from mb_commerce_scraper.parsing._structured import (
+    pdf_links as _pdf_links,
 )
 from mb_commerce_scraper.transports import (
     BrowserHint,
@@ -71,7 +94,7 @@ class _WixTransport:
         self.transport = transport
 
     async def advertised_sitemaps(self, base_url: str) -> tuple[str, ...]:
-        robots_url = f"{_origin(base_url)}/robots.txt"
+        robots_url = f"{origin_of(base_url)}/robots.txt"
         response = await self.transport.request(
             TransportRequest(
                 url=robots_url,
@@ -207,7 +230,12 @@ class WixConnector(CommerceConnector):
             stop = min(stop, result_stop)
         if start == stop:
             yield EntityPage(
-                page_id=_page_id(sequence, start),
+                page_id=hashed_page_id(
+                    f"wix-{sequence}",
+                    f"wix:{sequence}:{start}",
+                    digest_length=16,
+                    separator="-",
+                ),
                 sequence=sequence,
                 items=(),
                 terminal=True,
@@ -251,7 +279,12 @@ class WixConnector(CommerceConnector):
             limited = result_stop is not None and result_stop < len(urls) and next_index >= result_stop
             terminal = next_index == len(urls) or limited
             yield EntityPage(
-                page_id=_page_id(sequence, index),
+                page_id=hashed_page_id(
+                    f"wix-{sequence}",
+                    f"wix:{sequence}:{index}",
+                    digest_length=16,
+                    separator="-",
+                ),
                 sequence=sequence,
                 items=(snapshot,),
                 resume_after=(
@@ -289,7 +322,7 @@ class WixConnector(CommerceConnector):
         if not configured and self.options.use_advertised_sitemaps:
             with suppress(ResponseBodyTooLarge, TransportFailure):
                 configured.extend(await self.transport.advertised_sitemaps(base_url))
-        fallback = f"{_origin(base_url)}/store-products-sitemap.xml"
+        fallback = f"{origin_of(base_url)}/store-products-sitemap.xml"
         first_error: tuple[str, str] | None = None
         for initial in (configured, [fallback]):
             if not initial:
@@ -532,7 +565,12 @@ class WixConnector(CommerceConnector):
         sequence: int, index: int, diagnostic: Diagnostic
     ) -> EntityPage[CommerceProductSnapshot]:
         return EntityPage(
-            page_id=_page_id(sequence, index),
+            page_id=hashed_page_id(
+                f"wix-{sequence}",
+                f"wix:{sequence}:{index}",
+                digest_length=16,
+                separator="-",
+            ),
             sequence=sequence,
             items=(),
             resume_after={"index": index, "sequence": sequence},
@@ -609,75 +647,6 @@ def _balanced_object(document: str, start: int) -> dict[str, Any] | None:
     return None
 
 
-def _jsonld_blocks(document: str) -> list[dict[str, Any]]:
-    found: list[dict[str, Any]] = []
-
-    def flatten(value: Any) -> None:
-        if isinstance(value, list):
-            for child in value:
-                flatten(child)
-        elif isinstance(value, dict):
-            if "@graph" in value:
-                flatten(value["@graph"])
-            else:
-                found.append(value)
-
-    for raw in re.findall(
-        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-        document,
-        re.IGNORECASE | re.DOTALL,
-    ):
-        try:
-            flatten(json.loads(html.unescape(raw.strip())))
-        except (json.JSONDecodeError, TypeError):
-            continue
-    return found
-
-
-def _jsonld_products(document: str) -> list[dict[str, Any]]:
-    return [
-        item
-        for item in _jsonld_blocks(document)
-        if any(
-            str(value).casefold() == "product"
-            for value in (
-                item.get("@type", []) if isinstance(item.get("@type", []), list) else [item.get("@type")]
-            )
-        )
-    ]
-
-
-def _breadcrumbs(document: str) -> list[str]:
-    for item in _jsonld_blocks(document):
-        types = item.get("@type", [])
-        types = types if isinstance(types, list) else [types]
-        if not any(str(value).casefold() == "breadcrumblist" for value in types):
-            continue
-        names: list[str] = []
-        for element in item.get("itemListElement") or []:
-            if not isinstance(element, dict):
-                continue
-            entry = element.get("item")
-            name = entry.get("name") if isinstance(entry, dict) else element.get("name")
-            if cleaned := _clean(name):
-                names.append(cleaned)
-        if names:
-            return names
-    return []
-
-
-def _jsonld_images(item: dict[str, Any], page_url: str) -> list[str]:
-    value = item.get("image")
-    values = value if isinstance(value, list) else [value]
-    found: list[str] = []
-    for entry in values:
-        if isinstance(entry, dict):
-            entry = entry.get("url") or entry.get("contentUrl")
-        if cleaned := _clean(entry):
-            found.append(urljoin(page_url, cleaned))
-    return list(dict.fromkeys(found))
-
-
 def _media_images(product: dict[str, Any]) -> list[str]:
     found = [
         _clean(item.get("fullUrl"))
@@ -685,17 +654,6 @@ def _media_images(product: dict[str, Any]) -> list[str]:
         if isinstance(item, dict) and item.get("fullUrl")
     ]
     return list(dict.fromkeys(value for value in found if value))
-
-
-def _pdf_links(document: str, page_url: str) -> list[tuple[str, str]]:
-    return [
-        (urljoin(page_url, html.unescape(match.group(1))), _clean(match.group(2)))
-        for match in re.finditer(
-            r'<a[^>]+href=["\']([^"\']+\.pdf[^"\']*)["\'][^>]*>(.*?)</a>',
-            document,
-            re.IGNORECASE | re.DOTALL,
-        )
-    ]
 
 
 def _variants(product: dict[str, Any]) -> list[dict[str, Any]]:
@@ -761,36 +719,9 @@ def _compare_price(variant: dict[str, Any]) -> Decimal | None:
     return value if value is not None and value != 0 and value != price else None
 
 
-def _decimal(value: Any) -> Decimal | None:
-    if isinstance(value, bool) or value is None:
-        return None
-    try:
-        result = Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return None
-    return result if result.is_finite() and result >= 0 else None
-
-
 def _currency(document: str) -> str | None:
     match = re.search(r'"currency":"([A-Z]{3})"', document)
     return match.group(1) if match else None
-
-
-def _meta(document: str, key: str) -> str | None:
-    escaped = re.escape(key)
-    for pattern in (
-        rf'<meta[^>]+(?:property|name)=["\']{escaped}["\'][^>]+content=["\']([^"\']*)',
-        rf'<meta[^>]+content=["\']([^"\']*)["\'][^>]+(?:property|name)=["\']{escaped}["\']',
-    ):
-        if match := re.search(pattern, document, re.IGNORECASE):
-            return html.unescape(match.group(1)).strip()
-    return None
-
-
-def _clean(value: Any) -> str:
-    if value is None:
-        return ""
-    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", str(value))).split())
 
 
 def _canonical(url: str) -> str:
@@ -801,13 +732,3 @@ def _canonical(url: str) -> str:
         else parsed.query
     )
     return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, ""))
-
-
-def _origin(url: str) -> str:
-    parsed = urlparse(url)
-    return f"{parsed.scheme}://{parsed.netloc}"
-
-
-def _page_id(sequence: int, index: int) -> str:
-    digest = hashlib.sha256(f"wix:{sequence}:{index}".encode()).hexdigest()[:16]
-    return f"wix-{sequence}-{digest}"

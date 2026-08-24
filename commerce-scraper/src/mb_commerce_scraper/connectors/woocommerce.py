@@ -9,7 +9,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from html import unescape
 from typing import Any, Literal, cast
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -37,6 +37,7 @@ from mb_commerce_scraper.models import (
     result_limit_diagnostic,
     validate_checkpoint,
 )
+from mb_commerce_scraper.parsing._structured import origin_of
 from mb_commerce_scraper.transports import (
     CommerceTransport,
     RequestPriority,
@@ -138,7 +139,11 @@ class WooCommerceConnector(CommerceConnector):
         checkpoint: ConnectorCheckpoint | None = None,
     ) -> AsyncIterator[EntityPage[CommerceProductSnapshot]]:
         self._validate_request(request, checkpoint)
-        origin = self._origin(request.base_url)
+        origin = origin_of(
+            request.base_url,
+            require_http=True,
+            error_message="WooCommerce base_url must be an absolute HTTP(S) URL",
+        )
         resume = self._resume(checkpoint)
         wanted_categories = request.partitions or self.options.store_categories
         partitions, notices, category_failure = await self._partitions(origin, wanted_categories)
@@ -782,13 +787,6 @@ class WooCommerceConnector(CommerceConnector):
             request=request,
             options=cast(dict[str, JsonValue], self.options.model_dump(mode="json")),
         )
-
-    @staticmethod
-    def _origin(url: str) -> str:
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("WooCommerce base_url must be an absolute HTTP(S) URL")
-        return urljoin(url, "/").rstrip("/")
 
     @staticmethod
     def _store_api(origin: str, path: str = "products") -> str:

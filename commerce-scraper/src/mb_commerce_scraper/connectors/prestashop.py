@@ -38,6 +38,24 @@ from mb_commerce_scraper.models import (
     result_limit_diagnostic,
     validate_checkpoint,
 )
+from mb_commerce_scraper.parsing._structured import (
+    breadcrumbs,
+    hashed_page_id,
+    jsonld_brand,
+    jsonld_gtin,
+    jsonld_images,
+    meta,
+    pdf_links,
+    probable_javascript_shell,
+    specification_table,
+    stable_digest,
+)
+from mb_commerce_scraper.parsing._structured import (
+    clean as compatibility_clean,
+)
+from mb_commerce_scraper.parsing._structured import (
+    jsonld_product_blocks as jsonld_products,
+)
 from mb_commerce_scraper.transports import (
     BrowserHint,
     CommerceTransport,
@@ -91,137 +109,11 @@ class _DiscoveryFailure(RuntimeError):
     pass
 
 
-def compatibility_clean(value: Any) -> str:
-    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", str(value or ""))).split())
-
-
-def probable_javascript_shell(document: str) -> bool:
-    lower = document.casefold()
-    if "<html" not in lower and "<!doctype" not in lower:
-        return False
-    explicit = any(
-        marker in lower
-        for marker in (
-            "enable javascript",
-            "javascript is required",
-            'id="__next"',
-            'id="root"',
-            'id="app"',
-        )
-    )
-    visible = re.sub(
-        r"<script\b[\s\S]*?</script>|<style\b[\s\S]*?</style>|<[^>]+>",
-        " ",
-        lower,
-    )
-    return explicit and "<script" in lower and len(compatibility_clean(visible)) < 1000
-
-
-def _jsonld_blocks(document: str) -> list[dict[str, Any]]:
-    found: list[dict[str, Any]] = []
-
-    def flatten(value: Any) -> None:
-        if isinstance(value, list):
-            for child in value:
-                flatten(child)
-        elif isinstance(value, dict):
-            if "@graph" in value:
-                flatten(value["@graph"])
-            else:
-                found.append(value)
-
-    for raw in re.findall(
-        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-        document,
-        re.I | re.S,
-    ):
-        try:
-            flatten(json.loads(html.unescape(raw.strip())))
-        except (json.JSONDecodeError, TypeError):
-            continue
-    return found
-
-
-def _has_type(item: dict[str, Any], wanted: str) -> bool:
-    value = item.get("@type")
-    values = value if isinstance(value, list) else [value]
-    return any(str(candidate).casefold() == wanted for candidate in values)
-
-
-def jsonld_products(document: str) -> list[dict[str, Any]]:
-    return [item for item in _jsonld_blocks(document) if _has_type(item, "product")]
-
-
-def breadcrumbs(document: str) -> list[str]:
-    for item in _jsonld_blocks(document):
-        if not _has_type(item, "breadcrumblist"):
-            continue
-        names: list[str] = []
-        for element in item.get("itemListElement") or []:
-            if not isinstance(element, dict):
-                continue
-            entry = element.get("item")
-            name = entry.get("name") if isinstance(entry, dict) else element.get("name")
-            if cleaned := compatibility_clean(name):
-                names.append(cleaned)
-        if names:
-            return names
-    return []
-
-
-def meta(document: str, key: str) -> str | None:
-    escaped = re.escape(key)
-    for pattern in (
-        rf'<meta[^>]+(?:property|name)=["\']{escaped}["\'][^>]+content=["\']([^"\']*)',
-        rf'<meta[^>]+content=["\']([^"\']*)["\'][^>]+(?:property|name)=["\']{escaped}["\']',
-    ):
-        if match := re.search(pattern, document, re.I):
-            return html.unescape(match.group(1)).strip()
-    return None
-
-
 def jsonld_offer(item: dict[str, Any]) -> dict[str, Any]:
     offers = item.get("offers")
     if isinstance(offers, list):
         offers = next((value for value in offers if isinstance(value, dict)), {})
     return offers if isinstance(offers, dict) else {}
-
-
-def jsonld_images(item: dict[str, Any], page_url: str) -> list[str]:
-    value = item.get("image")
-    values = value if isinstance(value, list) else [value]
-    found: list[str] = []
-    for entry in values:
-        if isinstance(entry, dict):
-            entry = entry.get("url") or entry.get("contentUrl")
-        if cleaned := compatibility_clean(entry):
-            found.append(urljoin(page_url, cleaned))
-    return list(dict.fromkeys(found))
-
-
-def jsonld_brand(item: dict[str, Any]) -> str | None:
-    value = item.get("brand")
-    if isinstance(value, dict):
-        value = value.get("name")
-    return compatibility_clean(value) or None
-
-
-def jsonld_gtin(item: dict[str, Any]) -> str | None:
-    for key in ("gtin13", "gtin14", "gtin12", "gtin8", "gtin", "ean"):
-        if value := compatibility_clean(item.get(key)):
-            return value
-    return None
-
-
-def pdf_links(document: str, page_url: str) -> list[tuple[str, str]]:
-    return [
-        (urljoin(page_url, html.unescape(match.group(1))), compatibility_clean(match.group(2)))
-        for match in re.finditer(
-            r'<a[^>]+href=["\']([^"\']+\.pdf[^"\']*)["\'][^>]*>(.*?)</a>',
-            document,
-            re.I | re.S,
-        )
-    ]
 
 
 def documents(links: Iterable[tuple[str, str]], page_url: str = "") -> list[dict[str, Any]]:
@@ -232,20 +124,6 @@ def documents(links: Iterable[tuple[str, str]], page_url: str = "") -> list[dict
         if url and url not in {str(value["url"]) for value in found}:
             found.append({"name": label or None, "url": url})
     return found
-
-
-def specification_table(document: str) -> dict[str, str]:
-    attributes: dict[str, str] = {}
-    for pattern in (
-        r"<tr[^>]*>\s*<t[hd][^>]*>(.*?)</t[hd]>\s*<t[hd][^>]*>(.*?)</t[hd]>\s*</tr>",
-        r"<dt[^>]*>(.*?)</dt>\s*<dd[^>]*>(.*?)</dd>",
-    ):
-        for match in re.finditer(pattern, document, re.I | re.S):
-            name = compatibility_clean(match.group(1)).rstrip(":")
-            value = compatibility_clean(match.group(2))
-            if name and value and len(name) < 60:
-                attributes.setdefault(name, value)
-    return attributes
 
 
 class PrestaShopConnector(CommerceConnector):
@@ -429,7 +307,10 @@ class PrestaShopConnector(CommerceConnector):
                         )
                     )
             yield EntityPage(
-                page_id=_page_id(partition, offset, url),
+                page_id=hashed_page_id(
+                    f"{stable_digest(partition, 8)}:{offset}",
+                    url,
+                ),
                 partition_key=partition,
                 sequence=sequence,
                 items=snapshots,
@@ -1171,11 +1052,6 @@ def _deduplicate_partitions(
 def _safe_url(url: str) -> str:
     parsed = urlparse(url)
     return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
-
-
-def _page_id(partition: str, offset: int, url: str) -> str:
-    digest = hashlib.sha256(url.encode()).hexdigest()[:12]
-    return f"{hashlib.sha256(partition.encode()).hexdigest()[:8]}:{offset}:{digest}"
 
 
 def _partition_key(kind: str, index: int, url: str) -> str:

@@ -162,7 +162,7 @@ race on the same file.
 
 Independent of Tracks A, C and D. Safe to parallelize across B1-B5.
 
-- [ ] **B1 One home for the parsing helpers.**
+- [x] **B1 One home for the parsing helpers.**
   The structured-data helper family exists in **four** places:
   `parsing/_structured.py` (the intended home), `connectors/prestashop.py:94-249`,
   `connectors/wix.py:612-812`, and — already fixed — `connectors/specialized.py`.
@@ -184,6 +184,20 @@ Independent of Tracks A, C and D. Safe to parallelize across B1-B5.
   *Guarded by:* `test_shopify.py`, `test_wix.py`, `test_woocommerce.py`,
   `test_prestashop.py`, `test_bigcommerce.py`, `test_recordings.py`.
   *Removes:* ~250 duplicated lines on the parsing hot path.
+  **Completed.** PrestaShop and Wix now consume the shared structured-data,
+  cleaning, metadata, document-link, and JSON-LD helpers. Shopify,
+  BigCommerce, and Wix share one defensive decimal parser; Shopify, Wix,
+  BigCommerce, and WooCommerce share one origin parser while retaining the
+  two connectors' absolute-HTTP(S) validation. The three connector page-ID
+  variants now share deterministic digest construction without changing their
+  serialized values. The canonical drift resolutions are the 100-character
+  specification-name boundary, the broader JavaScript-shell markers, `""` for
+  absent metadata, and rejection of booleans as decimal amounts.
+  *Verified:* `make scraper-check` -> 307 tests, Ruff, mypy over 75 files,
+  schemas, build, 4 boundary tests, installed-wheel/public-API,
+  external-consumer, and release gates passed. Catalogue Ruff and mypy over
+  239 files passed; `pytest -q` -> 936 passed, 2 skipped, 187 deselected, and
+  284 subtests; installed two-wheel catalogue composition passed.
 
 - [ ] **B2 Collapse the connector plumbing.**
   `checkpoint()` is copy-pasted verbatim into seven connectors; four

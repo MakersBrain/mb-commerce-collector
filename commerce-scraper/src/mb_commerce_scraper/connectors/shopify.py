@@ -3,9 +3,8 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, cast
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -33,6 +32,7 @@ from mb_commerce_scraper.models import (
     result_limit_diagnostic,
     validate_checkpoint,
 )
+from mb_commerce_scraper.parsing._structured import decimal_amount, origin_of
 from mb_commerce_scraper.transports import (
     BudgetExhausted,
     CommerceTransport,
@@ -93,7 +93,7 @@ class ShopifyConnector(CommerceConnector):
             request=request,
             options=options,
         )
-        origin = self._origin(request.base_url)
+        origin = origin_of(request.base_url)
         currency = self.options.currency or await self._currency(origin)
         partitions = request.partitions or ("main",)
         resume = self._resume(checkpoint)
@@ -563,11 +563,6 @@ class ShopifyConnector(CommerceConnector):
         )
 
     @staticmethod
-    def _origin(url: str) -> str:
-        parsed = urlsplit(url)
-        return f"{parsed.scheme}://{parsed.netloc}"
-
-    @staticmethod
     def _resume(checkpoint: ConnectorCheckpoint | None) -> tuple[str, int, int] | None:
         if checkpoint is None:
             return None
@@ -648,11 +643,11 @@ class ShopifyConnector(CommerceConnector):
         identifier = str(raw.get("id") or "").strip()
         if not identifier:
             return None
-        amount = self._decimal(raw.get("price"))
+        amount = decimal_amount(raw.get("price"))
         availability = Availability.IN_STOCK if raw.get("available") is True else Availability.OUT_OF_STOCK if raw.get("available") is False else Availability.UNKNOWN
         offers: tuple[CommerceOffer, ...] = ()
         if amount is not None and currency is not None:
-            compare_at = self._decimal(raw.get("compare_at_price"))
+            compare_at = decimal_amount(raw.get("compare_at_price"))
             current = CommerceOffer(
                 price=Money(amount=amount, currency=currency), observed_at=observed,
                 evidence=(evidence,),
@@ -702,15 +697,6 @@ class ShopifyConnector(CommerceConnector):
             published_attributes=attributes,
             platform_extensions={"legacy_raw_variant": raw},
         )
-
-    @staticmethod
-    def _decimal(value: Any) -> Decimal | None:
-        try:
-            amount = Decimal(str(value))
-        except (InvalidOperation, ValueError):
-            return None
-        return amount if amount.is_finite() and amount >= 0 else None
-
 
 class ShopifyFactory:
     name = "shopify"

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -128,6 +130,124 @@ def jsonld_products(document: str) -> list[dict[str, Any]]:
     return found
 
 
+def jsonld_blocks(document: str) -> list[dict[str, Any]]:
+    """Return top-level JSON-LD objects, flattening lists and ``@graph`` values."""
+    found: list[dict[str, Any]] = []
+
+    def flatten(value: Any) -> None:
+        if isinstance(value, list):
+            for child in value:
+                flatten(child)
+        elif isinstance(value, dict):
+            if "@graph" in value:
+                flatten(value["@graph"])
+            else:
+                found.append(value)
+
+    for body in re.findall(
+        r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        document,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        try:
+            flatten(json.loads(html.unescape(body.strip())))
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return found
+
+
+def jsonld_has_type(item: dict[str, Any], wanted: str) -> bool:
+    value = item.get("@type")
+    values = value if isinstance(value, list) else [value]
+    return any(str(candidate).casefold() == wanted.casefold() for candidate in values)
+
+
+def jsonld_product_blocks(document: str) -> list[dict[str, Any]]:
+    """Return product objects from the top-level JSON-LD graph."""
+    return [item for item in jsonld_blocks(document) if jsonld_has_type(item, "Product")]
+
+
+def breadcrumbs(document: str) -> list[str]:
+    for item in jsonld_blocks(document):
+        if not jsonld_has_type(item, "BreadcrumbList"):
+            continue
+        names: list[str] = []
+        for element in item.get("itemListElement") or []:
+            if not isinstance(element, dict):
+                continue
+            entry = element.get("item")
+            name = entry.get("name") if isinstance(entry, dict) else element.get("name")
+            if cleaned := clean(name):
+                names.append(cleaned)
+        if names:
+            return names
+    return []
+
+
+def jsonld_images(item: dict[str, Any], page_url: str) -> list[str]:
+    value = item.get("image")
+    values = value if isinstance(value, list) else [value]
+    found: list[str] = []
+    for entry in values:
+        if isinstance(entry, dict):
+            entry = entry.get("url") or entry.get("contentUrl")
+        if cleaned := clean(entry):
+            found.append(urljoin(page_url, cleaned))
+    return list(dict.fromkeys(found))
+
+
+def jsonld_brand(item: dict[str, Any]) -> str | None:
+    value = item.get("brand")
+    if isinstance(value, dict):
+        value = value.get("name")
+    return clean(value) or None
+
+
+def jsonld_gtin(item: dict[str, Any]) -> str | None:
+    for key in ("gtin13", "gtin14", "gtin12", "gtin8", "gtin", "ean"):
+        if value := clean(item.get(key)):
+            return value
+    return None
+
+
+def decimal_amount(value: Any) -> Decimal | None:
+    """Parse a finite, non-negative decimal without treating booleans as numbers."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return amount if amount.is_finite() and amount >= 0 else None
+
+
+def origin_of(
+    url: str,
+    *,
+    require_http: bool = False,
+    error_message: str = "URL must be an absolute HTTP(S) URL",
+) -> str:
+    parsed = urlsplit(url)
+    if require_http and (parsed.scheme not in {"http", "https"} or not parsed.netloc):
+        raise ValueError(error_message)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def stable_digest(value: str, length: int = 12) -> str:
+    """Return the bounded digest used by deterministic connector page IDs."""
+    return hashlib.sha256(value.encode()).hexdigest()[:length]
+
+
+def hashed_page_id(
+    prefix: str,
+    identity: str,
+    *,
+    digest_length: int = 12,
+    separator: str = ":",
+) -> str:
+    return f"{prefix}{separator}{stable_digest(identity, digest_length)}"
+
+
 def probable_javascript_shell(document: str) -> bool:
     lower = document.casefold()
     if "<html" not in lower and "<!doctype" not in lower:
@@ -159,7 +279,7 @@ def specification_table(document: str) -> dict[str, str]:
     attributes: dict[str, str] = {}
     pairs = (
         r"<dt[^>]*>(.*?)</dt>\s*<dd[^>]*>(.*?)</dd>",
-        r"<tr[^>]*>\s*<(?:th|td)[^>]*>(.*?)</(?:th|td)>\s*<td[^>]*>(.*?)</td>\s*</tr>",
+        r"<tr[^>]*>\s*<t[hd][^>]*>(.*?)</t[hd]>\s*<t[hd][^>]*>(.*?)</t[hd]>\s*</tr>",
     )
     for pattern in pairs:
         for match in re.finditer(pattern, document, re.IGNORECASE | re.DOTALL):
