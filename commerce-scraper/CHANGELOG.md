@@ -48,6 +48,8 @@ based on Keep a Changelog, and releases follow the compatibility policy in
   browser profile and stable 50-item query identity used by recorded caches.
 - Aligned direct PrestaShop page requests with the legacy browser profile and
   excluded consent/tracking tables from published technical specifications.
+- Preserved the established PrestaShop radio-option boundary and exposed
+  per-variant image lists for compatibility projection.
 - Consolidated runtime and routed-transport proxy configuration on
   `ProxyPolicyConfig`; the unreleased parallel routing model and legacy request
   and byte-cap parameters were removed.

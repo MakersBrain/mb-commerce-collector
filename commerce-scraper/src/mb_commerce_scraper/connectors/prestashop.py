@@ -665,6 +665,7 @@ class PrestaShopConnector(CommerceConnector):
         attributes: dict[str, JsonValue] = {
             "price_text": compatibility_clean(details.get("price")) or None,
             "legacy_source_updated_at": compatibility_clean(details.get("date_upd")) or None,
+            "legacy_all_image_urls": cast(list[JsonValue], _images(details)),
         }
         image_values = _images(details)
         return CommerceVariant(
@@ -934,7 +935,12 @@ def _add_group(
 ) -> None:
     options: list[str] = []
     selected: str | None = None
-    for tag in re.finditer(rf"<{tag_name}[^>]*>", body, re.I):
+    tag_pattern = (
+        r"<input[^>]*\binput-radio\b[^>]*>"
+        if tag_name == "input"
+        else rf"<{tag_name}[^>]*>"
+    )
+    for tag in re.finditer(tag_pattern, body, re.I):
         value = re.search(r'\bvalue=["\'](\d+)["\']', tag.group(0))
         if not value:
             continue

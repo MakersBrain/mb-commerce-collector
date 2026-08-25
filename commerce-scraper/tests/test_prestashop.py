@@ -82,8 +82,8 @@ def details(*, attribute: int = 0, price: str = "12,50 EUR") -> dict[str, Any]:
 
 def page(value: dict[str, Any], *, combinations: bool = False) -> str:
     groups = (
-        '<ul id="group_1"><li><input value="1" checked></li>'
-        '<li><input value="2"></li></ul>'
+        '<ul id="group_1"><li><input class="input-radio" value="1" checked></li>'
+        '<li><input class="input-radio" value="2"></li></ul>'
         if combinations
         else ""
     )

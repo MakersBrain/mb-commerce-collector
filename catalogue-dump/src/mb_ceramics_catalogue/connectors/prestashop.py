@@ -606,6 +606,7 @@ class PrestaShopConnector(CommerceConnector):
         attributes: dict[str, JsonValue] = {
             "price_text": compatibility_clean(details.get("price")) or None,
             "legacy_source_updated_at": compatibility_clean(details.get("date_upd")) or None,
+            "legacy_all_image_urls": cast(list[JsonValue], _images(details)),
         }
         image_values = _images(details)
         return CommerceVariant(

@@ -209,20 +209,20 @@ architecture rules in the plan and are not separate scope-expansion goals.
   - The library gate passed Ruff, mypy over 77 source files, 360 tests, and the
     frozen-schema check.
   - The catalogue gate passed Ruff, mypy over 240 source files, and 945 tests
-    with 2 expected skips, 276 deselections, and 284 subtests.
+    with 2 expected skips, 277 deselections, and 284 subtests.
   - `pytest -q -m golden tests/test_recorded_library_parity.py -rs` replayed
     independent legacy/library paths from 51,579 recovered production-response
-    entries: all 8 preflight, Shopify, Shopware, BigCommerce, and Sio2 cases
-    passed.
+    entries: all 9 preflight, Shopify, Shopware, BigCommerce, PrestaShop, and
+    Sio2 cases passed.
   - The recovered volume is newer and broader than the checked-in golden set.
     An archive-wide characterization produced 14 unrelated stale-baseline
     failures, 10 passes, and 67 sources without reviewed goldens; those 67
     provisional outputs were not added. Publishing a versioned archive and
     manifest remains an operational CI task.
   - Cache publication now accepts repeated `push --host` selectors. A local
-    deterministic build of the seven reviewed hosts contains 1,019 files and
-    33,843,200 bytes with SHA-256
-    `b1faa6736251a39e134e21290188893195b8b6f9541e4570acd417f26fb45238`;
+    deterministic build of the eight reviewed hosts contains 3,245 files and
+    174,213,120 bytes with SHA-256
+    `5ad3fbd034febf867b5fe55f952ab9901874a281c80ee8a68bb849aabd91cd78`;
     it has not been uploaded or written into the checked-in manifest.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
   throwaway PostgreSQL 17 instance, covering concurrent authorization,
@@ -704,6 +704,9 @@ remains a Phase 7 cutover gate rather than a Phase 1 contract-extraction gap.
     identity, 807 discoveries, 849 direct requests, zero renders, and exact
     completion/error semantics. The library keeps category partitions explicit,
     so ordering is intentionally not treated as catalogue identity.
+  - `1240-design` stable/library PrestaShop replay matches all 1,279 normalized
+    rows by stable identity, 1,421 discoveries, 1,975 direct requests, zero
+    renders, and exact completion/error semantics.
   - CI sets `CATALOGUE_GOLDEN_ARCHIVE_REQUIRED=1` only after the configured
     archive pull succeeds. In that mode, missing manifests, source hosts,
     recordings, or frozen outputs fail before the parity cases can silently
@@ -1165,7 +1168,7 @@ they do not reopen the Phase 5 library deliverables.
 | Connector | Library implementation | Factory | Synthetic tests/parity | Replay | Canary | Stable source switch |
 |---|---:|---:|---:|---:|---:|---:|
 | WooCommerce | Yes | Yes | Yes | No | No | No |
-| PrestaShop/Sio2 | Yes | Yes | Yes | No | No | No |
+| PrestaShop/Sio2 | Yes | Yes | Yes | Yes | No | No |
 | BigCommerce | Yes | Yes | Yes | Yes | No | No |
 | Wix | Yes | Yes | Yes | No | No | No |
 | Shopware | Yes | Yes | Yes | No | No | No |
@@ -1235,6 +1238,10 @@ Cross-cutting work:
     requests. Complete normalized rows match by stable identity; the library's
     explicit category partitions produce a different deterministic row order
     than the legacy crawler's flattened category list.
+  - The `1240-design` PrestaShop recording passes with all 1,279 rows, 1,421
+    discoveries, and 1,975 requests. Compatibility fixes retain the legacy
+    radio-option boundary, per-variant images, maker-code inputs, and consent
+    table exclusion while preserving bounded raw extensions.
 - [~] Review request counts and byte estimates.
   - Focused traffic profiles now pin exact logical request order, purpose,
     browser hint, and byte estimate for WooCommerce, PrestaShop/Sio2,
@@ -1517,9 +1524,8 @@ Exit criterion: **not met**.
 5. Run a limited browser-capable BigCommerce canary with the tested
    source-level rollback route; recorded replay and projected-output parity now
    pass for Amaco and Speedball.
-6. Complete representative PrestaShop recorded parity, then run limited
-   PrestaShop and Sio2 canaries with independent rollback. Sio2 recorded replay
-   and projected-output parity now pass.
+6. Run limited PrestaShop and Sio2 canaries with independent rollback; recorded
+   replay and projected-output parity now pass for `1240-design` and Sio2.
 7. Run a real rootless Podman/Quadlet activation/readability smoke, then a
    default-off native worker integration and explicitly approved Webshare
    canary. The recent-admin import/rotation endpoint, durable replay,

@@ -196,6 +196,7 @@ class _CeramicsProjector:
                     "claims",
                     "legacy_raw_variant",
                     "legacy_source_updated_at",
+                    "legacy_all_image_urls",
                 }
             }
         )
@@ -206,6 +207,9 @@ class _CeramicsProjector:
         legacy_record_name = _string(entity.platform_extensions.get("legacy_record_name"))
         name = legacy_record_name or f"{entity.title} {variant_title or ''}".strip()
         images = [item.url for item in entity.images]
+        legacy_variant_images = attributes.get("legacy_all_image_urls")
+        if entity.connector == "prestashop" and isinstance(legacy_variant_images, list):
+            images = [str(value) for value in legacy_variant_images if value]
         variant_image = variant.image.url if variant is not None and variant.image is not None else None
         documents = domain.documents(
             ((item.url, item.title or item.url) for item in entity.documents), entity.canonical_url
@@ -228,11 +232,16 @@ class _CeramicsProjector:
             raw = {"product": raw_product, "variant": raw_variant}
         manufacturer_sku = _string(attributes.get("manufacturer_sku"))
         if manufacturer_sku is None and variant is not None:
+            manufacturer_name = (
+                entity.title
+                if entity.connector == "prestashop"
+                else variant_title or ""
+            )
             manufacturer_sku = domain.manufacturer_code(
                 entity.vendor or options.brand,
-                variant_title or "",
+                manufacturer_name,
                 variant.sku or "",
-                entity.title,
+                None if entity.connector == "prestashop" else entity.title,
             )
 
         # The legacy BigCommerce scraper substitutes its configured source

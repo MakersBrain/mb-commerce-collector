@@ -118,6 +118,7 @@ RECORDED_BIGCOMMERCE = [
     for source in _recorded_source_case(name)
 ]
 RECORDED_SIO2 = _recorded_source_case("sio-2")
+RECORDED_PRESTASHOP = _recorded_source_case("1240-design")
 
 
 @pytest.mark.golden
@@ -259,14 +260,12 @@ def test_recorded_bigcommerce_responses_have_legacy_library_projection_parity(
     assert not library["summary"].get("interrupted", False)
 
 
-@pytest.mark.golden
-@pytest.mark.parametrize("source", RECORDED_SIO2)
-def test_recorded_sio2_responses_have_legacy_library_projection_parity(
-    source: str,
+def _assert_recorded_prestashop_projection_parity(
+    source: str, library_scraper: str
 ) -> None:
     legacy = asyncio.run(support.collect(source))
     library = asyncio.run(
-        support.collect(source, scraper="library_sio2_connector")
+        support.collect(source, scraper=library_scraper)
     )
 
     legacy_frozen = support.freeze(source, legacy)
@@ -311,3 +310,23 @@ def test_recorded_sio2_responses_have_legacy_library_projection_parity(
     }
     assert not legacy["summary"].get("interrupted", False)
     assert not library["summary"].get("interrupted", False)
+
+
+@pytest.mark.golden
+@pytest.mark.parametrize("source", RECORDED_SIO2)
+def test_recorded_sio2_responses_have_legacy_library_projection_parity(
+    source: str,
+) -> None:
+    _assert_recorded_prestashop_projection_parity(
+        source, "library_sio2_connector"
+    )
+
+
+@pytest.mark.golden
+@pytest.mark.parametrize("source", RECORDED_PRESTASHOP)
+def test_recorded_prestashop_responses_have_legacy_library_projection_parity(
+    source: str,
+) -> None:
+    _assert_recorded_prestashop_projection_parity(
+        source, "library_prestashop_connector"
+    )
