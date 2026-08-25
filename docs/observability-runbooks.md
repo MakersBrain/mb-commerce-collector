@@ -1,10 +1,21 @@
 # Catalogue observability runbooks
 
 The optional stack starts with `docker compose --profile observability up -d`.
-Grafana is on `http://127.0.0.1:3001` and Prometheus on
-`http://127.0.0.1:9090` by default. The dashboard links back to the catalogue
-operator pages; request, job, run, and trace IDs remain log search keys and are
-never Prometheus labels.
+vmagent is on `http://127.0.0.1:8429` by default and is the only observability
+service that runs here. It scrapes and remote-writes to the shared plane in
+mazenet-infra; nothing is stored, evaluated or displayed on this host.
+
+The rules these runbooks describe live in
+`mazenet-infra/ansible/files/monitoring/prometheus/rules/catalogue-alerts.yml`
+and are evaluated by the plane's vmalert, which delivers to its Alertmanager.
+Dashboards are the plane's Grafana at `https://grafana.int.mazenet.org`. A
+metric that is absent locally is normal -- there is nowhere local for it to be.
+Each alert still links back to the catalogue operator pages; request, job, run,
+and trace IDs remain log search keys and are never metric labels.
+
+Changing a rule is a `mazenet-infra` converge, not a commit here. That is the
+cost of the 2026-08-25 decision to evaluate centrally, taken so that no
+query-API read path into the shared plane had to be created.
 
 ## SourceNeverSucceeded
 
@@ -51,7 +62,11 @@ partial catalogue data even when some records were loaded.
 
 ## MetricsTargetDown
 
-Open Prometheus **Status → Targets** and identify the exact job and instance.
+Open vmagent **Targets** (`http://127.0.0.1:8429/targets`) and identify the
+exact job and instance. If the targets are healthy but the series are absent on
+the plane, the fault is delivery rather than collection: check vmagent's
+remote-write queue on `http://127.0.0.1:8429/metrics`
+(`vmagent_remotewrite_pending_data_bytes`) before chasing the exporter.
 For control/service, check the container health and `/metrics`; for workers,
 confirm Docker DNS returns every replica and port 9109 is listening. A missing
 worker target also makes worker-local rates incomplete, so restore collection

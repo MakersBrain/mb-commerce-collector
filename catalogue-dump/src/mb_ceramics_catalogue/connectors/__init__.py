@@ -4,6 +4,20 @@ The package is intentionally dependency-only at this stage: importing it does
 not register a scraper, open a transport, or alter the legacy crawl path.
 """
 
+from mb_commerce_scraper.models import (
+    Availability,
+    CategoryRef,
+    CommerceOffer,
+    CommerceProductSnapshot,
+    CommerceVariant,
+    DocumentRef,
+    Evidence,
+    MediaRef,
+    Money,
+    StockQuantityKind,
+    StockState,
+)
+
 from .base import (
     BrowserBackendName,
     BrowserRequirement,
@@ -27,19 +41,6 @@ from .bespoke_pages import (
     KeramikKraftOptions,
 )
 from .bigcommerce import BigCommerceConnector, BigCommerceOptions
-from .commerce import (
-    Availability,
-    CategoryRef,
-    CommerceOffer,
-    CommerceProductSnapshot,
-    CommerceVariant,
-    DocumentRef,
-    Evidence,
-    MediaRef,
-    Money,
-    StockQuantityKind,
-    StockState,
-)
 from .page import DomFieldSelector, VerifiedDomRules
 from .pagecommerce import (
     PageCommerceConnector,

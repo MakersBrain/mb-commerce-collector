@@ -14,6 +14,8 @@ from uuid import UUID, uuid4
 from mb_ceramics_catalogue.observability import metrics
 from mb_ceramics_catalogue.ops import events
 from mb_ceramics_catalogue.providers.base import ProviderError, ProxyProvider, UsageReport
+from mb_ceramics_catalogue.providers.registry import ProviderSpec
+from mb_ceramics_catalogue.providers.registry import spec as provider_spec
 from mb_ceramics_catalogue.proxy import reconcile
 from mb_ceramics_catalogue.proxy_secrets import ProfileSecretStore, generate_password
 from psycopg.types.json import Jsonb
@@ -22,6 +24,11 @@ from catalogue_control.auth import Actor
 from catalogue_control.telemetry import get_logger
 
 LOGGER = get_logger("catalogue.control.proxy")
+
+# Paid probes have a 30-second HTTP timeout. Five minutes leaves ample room for
+# scheduling and database latency while placing a hard upper bound on an
+# abandoned envelope blocking profile draining.
+STALE_PROBE_TIMEOUT_SECONDS = 5 * 60
 
 
 def _jsonb(value: Any) -> Jsonb:
@@ -145,55 +152,90 @@ def _bucket_bounds(key: str, group_by: str) -> tuple[datetime, datetime]:
     try:
         start = datetime.fromisoformat(key.replace("Z", "+00:00"))
     except ValueError as error:
-        raise ProviderError("provider_invalid_bucket", "Decodo returned an invalid traffic bucket") from error
+        raise ProviderError("provider_invalid_bucket", "provider returned an invalid traffic bucket") from error
     if start.tzinfo is None:
         start = start.replace(tzinfo=UTC)
     delta = timedelta(hours=1) if group_by == "hour" else timedelta(days=1)
     return start.astimezone(UTC), (start + delta).astimezone(UTC)
 
 
-async def reconcile_now(connection: Any, provider: ProxyProvider, *, reason: str) -> UsageReport:
-    locked = await connection.execute("select pg_try_advisory_lock(hashtext('proxy:decodo')) as locked")
+async def reconcile_now(
+    connection: Any,
+    provider: ProxyProvider,
+    *,
+    reason: str,
+    spec: ProviderSpec | None = None,
+) -> UsageReport:
+    selected = spec or provider_spec("decodo")
+    if not selected.reconciliation_groupings:
+        raise ProviderError(
+            "provider_reconciliation_unsupported",
+            f"{selected.label} cannot report usage for a billing window",
+        )
+    locked = await connection.execute(
+        "select pg_try_advisory_lock(hashtext(%(lock)s)) as locked",
+        {"lock": selected.lock_key},
+    )
     lock_row = await locked.fetchone()
     if not lock_row or not lock_row["locked"]:
-        raise RuntimeError("a Decodo reconciliation is already running")
+        raise RuntimeError(f"a {selected.label} reconciliation is already running")
     try:
         active = await connection.execute(
             """select * from catalogue.proxy_budget_cycles
-                where provider = 'decodo' and lifecycle = 'active'"""
+                where provider = %(provider)s and lifecycle = 'active'""",
+            {"provider": selected.name},
         )
         cycle = await active.fetchone()
         if cycle is None:
-            raise RuntimeError("there is no active Decodo billing cycle")
+            raise RuntimeError(f"there is no active {selected.label} billing cycle")
         try:
-            day_report, target_report = await asyncio.gather(
-                provider.usage(cycle["cycle_start"], cycle["cycle_end"], group_by="day"),
-                provider.usage(cycle["cycle_start"], cycle["cycle_end"], group_by="target"),
+            reports = await asyncio.gather(
+                *(
+                    provider.usage(
+                        cycle["cycle_start"],
+                        cycle["cycle_end"],
+                        group_by=grouping,
+                    )
+                    for grouping in selected.reconciliation_groupings
+                )
             )
+            grouped_reports = tuple(zip(selected.reconciliation_groupings, reports, strict=True))
+            for grouping, report in grouped_reports:
+                if grouping == "total" and len(report.buckets) != 1:
+                    raise ProviderError(
+                        "provider_usage_unreadable",
+                        f"{selected.label} did not return exactly one aggregate usage bucket",
+                    )
         except Exception:
             metrics.proxy_reconciliation(False)
             await reconcile(
                 connection, cycle_start=cycle["cycle_start"], provider_reported_bytes=0,
-                successful=False,
+                successful=False, provider=selected.name,
             )
             await connection.execute(
                 """update catalogue.proxy_reconcile_requests
                       set attempts = attempts + 1, error_code = 'provider_failure', claimed_at = now()
-                    where provider = 'decodo' and completed_at is null"""
+                    where provider = %(provider)s and completed_at is null""",
+                {"provider": selected.name},
             )
             await events.notify(
-                connection, "proxy.reconciliation_failed", "Decodo reconciliation failed",
-                severity=events.Severity.CRITICAL, dedup_key="proxy:decodo:reconciliation",
+                connection, "proxy.reconciliation_failed",
+                f"{selected.label} reconciliation failed",
+                severity=events.Severity.CRITICAL,
+                dedup_key=f"proxy:{selected.name}:reconciliation",
                 body="Paid traffic remains fail-closed until provider usage can be reconciled.",
             )
             raise
 
         async with connection.transaction():
-            for dimension, grouped_report in (("day", day_report), ("target", target_report)):
+            for dimension, grouped_report in grouped_reports:
                 for bucket in grouped_report.buckets:
                     if dimension == "day":
                         start, end = _bucket_bounds(bucket.key, "day")
                         grouping_key = bucket.key
+                    elif dimension == "total":
+                        start, end = cycle["cycle_start"], cycle["cycle_end"]
+                        grouping_key = "total"
                     else:
                         start, end = cycle["cycle_start"], cycle["cycle_end"]
                         grouping_key = bucket.key[:500]
@@ -203,7 +245,7 @@ async def reconcile_now(connection: Any, provider: ProxyProvider, *, reason: str
                            (provider, cycle_start, source_endpoint, grouping_dimension,
                             grouping_key, bucket_start, bucket_end, transmitted_bytes,
                             received_bytes, total_bytes, request_count)
-                    values ('decodo', %(cycle)s, 'traffic', %(dimension)s, %(key)s, %(start)s,
+                    values (%(provider)s, %(cycle)s, 'traffic', %(dimension)s, %(key)s, %(start)s,
                             %(end)s, %(tx)s, %(rx)s, %(total)s, %(requests)s)
                     on conflict (provider, cycle_start, source_endpoint, grouping_dimension,
                                  grouping_key, bucket_start, bucket_end) do update
@@ -220,6 +262,7 @@ async def reconcile_now(connection: Any, provider: ProxyProvider, *, reason: str
                           last_observed_at = now()
                         """,
                         {
+                            "provider": selected.name,
                             "cycle": cycle["cycle_start"], "dimension": dimension,
                             "key": grouping_key,
                             "start": start, "end": end,
@@ -229,45 +272,61 @@ async def reconcile_now(connection: Any, provider: ProxyProvider, *, reason: str
                     )
             await reconcile(
                 connection, cycle_start=cycle["cycle_start"],
-                provider_reported_bytes=day_report.total_bytes, successful=True,
+                provider_reported_bytes=reports[0].total_bytes, successful=True,
+                provider=selected.name,
             )
             await connection.execute(
                 """update catalogue.proxy_reconcile_requests
                       set completed_at = now(), claimed_at = coalesce(claimed_at, now()),
                           attempts = attempts + 1, error_code = null
-                    where provider = 'decodo' and completed_at is null"""
+                    where provider = %(provider)s and completed_at is null""",
+                {"provider": selected.name},
             )
             await events.emit(
                 connection, events.Topic.PROXY, "proxy.usage_updated",
-                payload={"provider": "decodo", "bytes": day_report.total_bytes, "reason": reason},
+                payload={
+                    "provider": selected.name,
+                    "bytes": reports[0].total_bytes,
+                    "reason": reason,
+                },
             )
             metrics.proxy_reconciliation(True)
-            metrics.proxy_bytes("provider", day_report.total_bytes)
+            metrics.proxy_bytes("provider", reports[0].total_bytes)
             metrics.proxy_bytes(
                 "operational_headroom",
-                max(0, cycle["operational_bytes"] - day_report.total_bytes),
+                max(0, cycle["operational_bytes"] - reports[0].total_bytes),
             )
-            await events.resolve(connection, "proxy:decodo:reconciliation")
-            if day_report.total_bytes >= cycle["operational_bytes"]:
+            await events.resolve(connection, f"proxy:{selected.name}:reconciliation")
+            if reports[0].total_bytes >= cycle["operational_bytes"]:
                 await events.notify(
-                    connection, "proxy.budget_exhausted", "Decodo operational budget exhausted",
-                    severity=events.Severity.CRITICAL, dedup_key="proxy:decodo:budget",
+                    connection, "proxy.budget_exhausted",
+                    f"{selected.label} operational budget exhausted",
+                    severity=events.Severity.CRITICAL,
+                    dedup_key=f"proxy:{selected.name}:budget",
                     body="The database kill switch is active; no new paid lease can start.",
                 )
             else:
-                await events.resolve(connection, "proxy:decodo:budget")
-        return day_report
+                await events.resolve(connection, f"proxy:{selected.name}:budget")
+        return reports[0]
     finally:
-        await connection.execute("select pg_advisory_unlock(hashtext('proxy:decodo'))")
+        await connection.execute(
+            "select pg_advisory_unlock(hashtext(%(lock)s))",
+            {"lock": selected.lock_key},
+        )
 
 
-async def finalize_retirements(connection: Any, provider: ProxyProvider) -> None:
+async def finalize_retirements(
+    connection: Any,
+    provider: ProxyProvider,
+    *,
+    provider_name: str = "decodo",
+) -> None:
     cursor = await connection.execute(
         """
         select x.*, p.provider_resource_id
           from catalogue.proxy_profile_retirements x
-          join catalogue.proxy_profiles p on p.id = x.profile_id
-         where x.state = 'draining'
+         join catalogue.proxy_profiles p on p.id = x.profile_id
+         where p.provider = %(provider)s and x.state = 'draining'
            and not exists (
              select 1 from catalogue.proxy_reservations r
               where r.profile_id = x.profile_id
@@ -276,7 +335,8 @@ async def finalize_retirements(connection: Any, provider: ProxyProvider) -> None
            )
          order by x.created_at for update skip locked
          limit 10
-        """
+        """,
+        {"provider": provider_name},
     )
     for row in await cursor.fetchall():
         await connection.execute(
@@ -297,7 +357,8 @@ async def finalize_retirements(connection: Any, provider: ProxyProvider) -> None
             )
             await connection.execute(
                 "update catalogue.proxy_budget_cycles set kill_switch = true "
-                "where provider = 'decodo' and lifecycle = 'active'"
+                "where provider = %(provider)s and lifecycle = 'active'",
+                {"provider": provider_name},
             )
             continue
         async with connection.transaction():
@@ -321,12 +382,17 @@ async def finalize_retirements(connection: Any, provider: ProxyProvider) -> None
 
 
 async def finalize_draining_profiles(
-    connection: Any, provider: ProxyProvider, secret_file: Path,
+    connection: Any,
+    provider: ProxyProvider,
+    secret_file: Path,
+    *,
+    provider_name: str = "decodo",
 ) -> None:
     """Finish drain-first disable, rotation, and retirement after lease quiescence."""
     cursor = await connection.execute(
         """select p.* from catalogue.proxy_profiles p
-             where p.lifecycle = 'draining' and p.pending_action is not null
+             where p.provider = %(provider)s
+               and p.lifecycle = 'draining' and p.pending_action is not null
                and not exists (
                  select 1 from catalogue.proxy_reservations r
                   where r.profile_id = p.id
@@ -336,7 +402,8 @@ async def finalize_draining_profiles(
                  select 1 from catalogue.proxy_profile_retirements x
                   where x.profile_id = p.id and x.state in ('draining', 'finalizing')
                )
-             order by p.updated_at for update skip locked limit 10"""
+             order by p.updated_at for update skip locked limit 10""",
+        {"provider": provider_name},
     )
     for row in await cursor.fetchall():
         resource = row["provider_resource_id"]
@@ -390,24 +457,115 @@ async def finalize_draining_profiles(
             )
             await connection.execute(
                 "update catalogue.proxy_budget_cycles set kill_switch = true "
-                "where provider = 'decodo' and lifecycle = 'active'"
+                "where provider = %(provider)s and lifecycle = 'active'",
+                {"provider": provider_name},
             )
             LOGGER.warning("proxy.profile_drain_finalize_failed", extra={"profile_id": str(row["id"])})
 
 
 async def close_stale_reservations(connection: Any) -> int:
-    """Release envelopes abandoned by terminal jobs or expired worker leases."""
+    """Release envelopes abandoned by jobs or timed-out paid probes."""
     async with connection.transaction():
+        candidates_cursor = await connection.execute(
+            """select r.id, r.provider, r.cycle_start
+                 from catalogue.proxy_reservations r
+                 left join catalogue.jobs j on j.id = r.job_id
+                 left join catalogue.proxy_probes p on p.id = r.probe_id
+                where r.state in ('active', 'revocation_requested')
+                  and (
+                    (r.job_id is not null
+                     and (j.state in ('succeeded', 'degraded', 'failed', 'cancelled', 'skipped')
+                          or (j.state in ('leased', 'running')
+                              and j.lease_expires_at < now())))
+                    or
+                    (r.probe_id is not null
+                     and p.state in ('pending', 'running')
+                     and greatest(p.requested_at, r.created_at)
+                         < now() - make_interval(secs => %(probe_timeout)s))
+                  )
+                order by r.provider, r.cycle_start, r.id""",
+            {"probe_timeout": STALE_PROBE_TIMEOUT_SECONDS},
+        )
+        candidates = await candidates_cursor.fetchall()
+        if not candidates:
+            return 0
+
+        # Match the paid-traffic lock hierarchy used by reserve/close/revoke:
+        # budget cycle first, then reservation. Deterministic cycle ordering
+        # also prevents two cleanup runs from deadlocking each other.
+        cycles = sorted({(row["provider"], row["cycle_start"]) for row in candidates})
+        for provider, cycle_start in cycles:
+            await connection.execute(
+                """select 1
+                     from catalogue.proxy_budget_cycles
+                    where provider = %(provider)s and cycle_start = %(cycle_start)s
+                    for update""",
+                {"provider": provider, "cycle_start": cycle_start},
+            )
+
         cursor = await connection.execute(
             """update catalogue.proxy_reservations r
                   set state = 'cancelled', closed_at = now()
-                 from catalogue.jobs j
-                where r.job_id = j.id and r.state in ('active', 'revocation_requested')
-                  and (j.state in ('succeeded', 'degraded', 'failed', 'cancelled', 'skipped')
-                       or (j.state in ('leased', 'running') and j.lease_expires_at < now()))
-                returning r.id, r.provider"""
+                where r.id = any(%(candidate_ids)s::uuid[])
+                  and r.state in ('active', 'revocation_requested')
+                  and (
+                    exists (
+                      select 1 from catalogue.jobs j
+                       where j.id = r.job_id
+                         and (j.state in
+                                ('succeeded', 'degraded', 'failed', 'cancelled', 'skipped')
+                              or (j.state in ('leased', 'running')
+                                  and j.lease_expires_at < now()))
+                    )
+                    or exists (
+                      select 1 from catalogue.proxy_probes p
+                       where p.id = r.probe_id
+                         and p.state in ('pending', 'running')
+                         and greatest(p.requested_at, r.created_at)
+                             < now() - make_interval(secs => %(probe_timeout)s)
+                    )
+                  )
+                returning r.id, r.provider, r.cycle_start, r.probe_id""",
+            {
+                "candidate_ids": [row["id"] for row in candidates],
+                "probe_timeout": STALE_PROBE_TIMEOUT_SECONDS,
+            },
         )
         rows = await cursor.fetchall()
+        settled_cycles = sorted(
+            {(row["provider"], row["cycle_start"]) for row in rows}
+        )
+        for provider, cycle_start in settled_cycles:
+            await connection.execute(
+                """update catalogue.proxy_budget_cycles
+                      set application_bytes = greatest(
+                            application_bytes,
+                            (select coalesce(sum(estimated_bytes), 0)
+                               from catalogue.proxy_reservations
+                              where provider = %(provider)s
+                                and cycle_start = %(cycle_start)s
+                                and state in ('closed', 'cancelled'))
+                          ),
+                          kill_switch = kill_switch or (
+                            select coalesce(sum(estimated_bytes), 0) >= operational_bytes
+                              from catalogue.proxy_reservations
+                             where provider = %(provider)s
+                               and cycle_start = %(cycle_start)s
+                               and state in ('closed', 'cancelled')
+                          )
+                    where provider = %(provider)s and cycle_start = %(cycle_start)s""",
+                {"provider": provider, "cycle_start": cycle_start},
+            )
+        probe_ids = [row["probe_id"] for row in rows if row["probe_id"] is not None]
+        if probe_ids:
+            await connection.execute(
+                """update catalogue.proxy_probes
+                      set state = 'cancelled', completed_at = coalesce(completed_at, now()),
+                          error_category = coalesce(error_category, 'stale_timeout')
+                    where id = any(%(probe_ids)s::uuid[])
+                      and state in ('pending', 'running')""",
+                {"probe_ids": probe_ids},
+            )
         for row in rows:
             await connection.execute(
                 """insert into catalogue.proxy_reconcile_requests
@@ -423,15 +581,18 @@ async def close_stale_reservations(connection: Any) -> int:
                 payload={"count": len(rows)},
             )
         return len(rows)
+
+
 class ReconciliationScheduler:
     def __init__(
         self, pool: Any, provider: ProxyProvider, interval: float,
-        secret_file: Path | None = None,
+        secret_file: Path | None = None, *, provider_name: str = "decodo",
     ) -> None:
         self.pool = pool
         self.provider = provider
         self.interval = max(60.0, interval)
         self.secret_file = secret_file
+        self.spec = provider_spec(provider_name)
         self.task: asyncio.Task[None] | None = None
         self.stopping = False
 
@@ -451,19 +612,33 @@ class ReconciliationScheduler:
             try:
                 async with self.pool.connection() as connection:
                     await close_stale_reservations(connection)
-                    await finalize_retirements(connection, self.provider)
-                    if self.secret_file is not None:
+                    if self.spec.can_provision_subusers and self.spec.has_subuser_status:
+                        await finalize_retirements(
+                            connection,
+                            self.provider,
+                            provider_name=self.spec.name,
+                        )
+                    if self.spec.can_provision_subusers and self.secret_file is not None:
                         await finalize_draining_profiles(
-                            connection, self.provider, self.secret_file
+                            connection,
+                            self.provider,
+                            self.secret_file,
+                            provider_name=self.spec.name,
                         )
                     pending = await connection.execute(
                         "select exists(select 1 from catalogue.proxy_reconcile_requests "
-                        "where completed_at is null) as pending"
+                        "where provider = %(provider)s and completed_at is null) as pending",
+                        {"provider": self.spec.name},
                     )
                     row = await pending.fetchone()
                     now = asyncio.get_running_loop().time()
                     if (row and row["pending"]) or now - last_scheduled >= self.interval:
-                        await reconcile_now(connection, self.provider, reason="outbox" if row and row["pending"] else "scheduled")
+                        await reconcile_now(
+                            connection,
+                            self.provider,
+                            reason="outbox" if row and row["pending"] else "scheduled",
+                            spec=self.spec,
+                        )
                         last_scheduled = now
             except Exception:
                 LOGGER.warning("proxy.reconciliation_failed", exc_info=True)

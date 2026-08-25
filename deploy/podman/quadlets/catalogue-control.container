@@ -12,7 +12,9 @@ UserNS=keep-id:uid=10001,gid=10001
 EnvironmentFile=/etc/makersbrain/catalogue/control.env
 Environment=CATALOGUE_NATS_URL=nats://catalogue-nats:4222
 Environment=CATALOGUE_NATS_STATS_CREDENTIALS_FILE=/run/queue/nats-stats-credentials.json
+Environment=CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE=/run/secrets/webshare-gateway/webshare-gateway.json
 Volume=/etc/makersbrain/catalogue-secrets/nats-stats-credentials.json:/run/queue/nats-stats-credentials.json:ro
+Volume=/etc/makersbrain/catalogue-secrets/webshare-gateway:/run/secrets/webshare-gateway
 Volume=/etc/makersbrain/tenant-runtime-secrets/postgres-ca.crt:/run/database/postgres-ca.crt:ro
 Volume=catalogue-dumps.volume:/var/lib/catalogue/dumps:ro
 HealthCmd=python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8687/health')"

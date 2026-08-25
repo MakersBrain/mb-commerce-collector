@@ -13,10 +13,44 @@ containers never receive the NATS administrator credential. `release.py`
 verifies the signed record and every image, stages immutable content and
 atomically selects the Quadlet bundle with rollback on activation failure.
 
+The optional Infisical export
+`catalogue/proxy/WEBSHARE_GATEWAY_V2_JSON` is copied byte-for-byte into the
+private runtime stage as `secrets/webshare-gateway/webshare-gateway.json`.
+Missing input leaves that file absent so control can create generation 1;
+the dedicated directory still exists. Control alone receives it writable,
+which permits same-directory atomic secret generation replacement; plain and
+browser workers receive it read-only so a
+rename is immediately visible. Service, dispatcher, explorer, and NATS never
+receive gateway credentials. The directory is mode `0700` and owned by the
+rootless tenant identity; a bootstrap file is mode `0600` and control-written
+rotations are mode `0400`. Staging or mounting it does not enable paid traffic:
+the Webshare data-plane enable setting remains absent and therefore false.
+Enabling it requires a separate, qualified deployment change after the durable
+runtime gate passes.
+
 The single `tenant-runtime` Podman context owns two private networks. Catalogue
 containers join `catalogue.network`; MakersBrain containers join
 `makersbrain.network`; only vmagent and cloudflared join both. No Catalogue
 container publishes a host port.
+
+### Gateway rotation smoke
+
+On a deployment host, prefer a generated Quadlet/container smoke with Podman.
+When Podman is unavailable but Docker is present, the executable fallback runs
+the actual worker entrypoint and store implementation as `10001:10001`, with a
+read-only root filesystem, no network, no capabilities, and the gateway store
+mounted read-only in the worker:
+
+```sh
+python deploy/podman/smoke_webshare_rotation.py \
+  --image catalogue-ceramics-worker:<candidate-tag>
+```
+
+It installs generation 1, starts the worker entrypoint, atomically replaces the
+credential with generation 2 from a separate writable container, and requires
+the already-running worker process to observe the replacement. The result is
+explicitly Docker rootless-identity emulation, not evidence of Quadlet
+generation or activation; use it only as the strongest local fallback.
 
 ## Database transfer
 

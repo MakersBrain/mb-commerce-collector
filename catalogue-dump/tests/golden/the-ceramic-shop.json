@@ -1,0 +1,304 @@
+{
+  "digest": "afaf02537c0b3fee0c3f8715d22a6029a95539477c5a184651d8b9426c95d83e",
+  "discovered": 288,
+  "error_count": 0,
+  "errors": [],
+  "extraction_method": "opengraph",
+  "field_coverage": {
+    "all_image_urls": 245,
+    "brand": 194,
+    "category_path": 245,
+    "claims": 0,
+    "colour": 215,
+    "description": 245,
+    "documents": 99,
+    "effects": 3,
+    "family": 245,
+    "firing": 78,
+    "form": 9,
+    "gtin": 0,
+    "manufacturer_sku": 46,
+    "package_size": 126,
+    "stock_quantity": 0,
+    "supplier_reference": 245,
+    "surface": 87,
+    "unit_price": 126,
+    "vat_status": 245
+  },
+  "notes": [
+    "288 product URLs from category pages"
+  ],
+  "records": 245,
+  "rendered_pages": 0,
+  "requests": 295,
+  "sample": [
+    {
+      "all_image_urls": [
+        "https://cdn.powered-by-nitrosell.com/product_images/9/2167/amaco-11-clay-a-mix-50lbs.jpg",
+        "https://cdn.powered-by-nitrosell.com/product_images/9/2167/",
+        "https://cdn.powered-by-nitrosell.com/product_images/9/2167/large-amaco-11-clay-a-mix-50lbs.jpg",
+        "https://cdn.powered-by-nitrosell.com/product_images/9/2167/amaco-11-clay-a-mix-50lbs.jpg&url=https://www.theceramicshop.com%2Fproduct%2F24066%2Famaco-11-a-mix-50lbs%2F&is_video=false&description=Amaco"
+      ],
+      "application_methods": null,
+      "availability": "https://schema.org/InStock",
+      "brand": "AMACO",
+      "brand_basis": "named_in_title",
+      "category_path": [
+        "Clay",
+        "Amaco",
+        "High Fire"
+      ],
+      "claims": null,
+      "coats": null,
+      "colour": {
+        "basis": "product_name",
+        "name": "Amaco #11 A-Mix 50lbs"
+      },
+      "currency": "USD",
+      "description": "Amaco #11 A-Mix 50lbs: Priced per 50 pound box. Quantities represent number of boxes.. . High Fire. Cone 5 to Cone 10.. . An all-purpose off-white pl",
+      "documents": null,
+      "effects": null,
+      "external_id": "the-ceramic-shop:https://www.theceramicshop.com/product/24066/amaco-11-a-mix-50lbs/",
+      "extraction_method": "opengraph",
+      "family": "clay_body",
+      "fetched_at": "<volatile>",
+      "firing": {
+        "basis": "published_text",
+        "cone_max": "10",
+        "cone_min": "5",
+        "cone_system": "orton",
+        "evidence": "Cone 5 to Cone 10",
+        "max_celsius": 1305,
+        "min_celsius": 1207,
+        "temperature_basis": "derived_from_cone"
+      },
+      "form": null,
+      "format": "ceramics.catalogue_item.v2",
+      "gtin": null,
+      "image_url": "https://cdn.powered-by-nitrosell.com/product_images/9/2167/amaco-11-clay-a-mix-50lbs.jpg",
+      "list_price": null,
+      "manufacturer_sku": null,
+      "manufacturer_sku_basis": null,
+      "min_order_quantity": null,
+      "name": "Amaco #11 A-Mix 50lbs",
+      "name_parsed_from": [
+        "Amaco"
+      ],
+      "name_raw": "Amaco #11 A-Mix 50lbs",
+      "package_size": {
+        "dimension": "weight",
+        "evidence": "50lbs",
+        "grams": 22679.6,
+        "unit": "lbs",
+        "value": 50.0
+      },
+      "parent_external_id": "the-ceramic-shop:https://www.theceramicshop.com/product/24066/amaco-11-a-mix-50lbs/",
+      "price": 46.0,
+      "price_text": "46.00 USD",
+      "product_name": "Amaco #11 A-Mix 50lbs",
+      "product_url": "https://www.theceramicshop.com/product/24066/amaco-11-a-mix-50lbs/",
+      "raw": {
+        "og": {
+          "og:availability": "instock",
+          "og:brand": "Amaco",
+          "og:title": "Amaco #11 A-Mix 50lbs",
+          "og:upc": "AC11",
+          "product:price:amount": "46.00",
+          "product:price:currency": "USD"
+        }
+      },
+      "source": "the-ceramic-shop",
+      "source_detail_level": "product_page",
+      "source_updated_at": null,
+      "stock_quantity": null,
+      "supplier_reference": "AC11",
+      "surface": null,
+      "technical_attributes": {
+        "\" + name + \"": "\" + itemcode + \" \" + department + \" \"+ category + \" \" + supplier + \" \" + \"$\" + price + \" \" + quantity + \" $\" + (price * quantity) + \" $\" + ((price * quantity) * ((100-discount)/100)).toFixed(2)+ \" \" + discount + \"",
+        "10": "$36.45",
+        "20": "$35.44",
+        "5": "$38.47",
+        "Product": "Item Lookup Code Department Category Brand Price per Unit Quantity Regular Price Quoted Price",
+        "Qty": "Unit Price:"
+      },
+      "unit_price": {
+        "currency": "USD",
+        "per": "kg",
+        "value": 2.0283
+      },
+      "variant_title": null,
+      "vat_rate": null,
+      "vat_status": "exclusive"
+    },
+    {
+      "all_image_urls": [
+        "https://cdn.powered-by-nitrosell.com/product_images/9/2167/amaco-38-white-stoneware.jpg",
+        "https://cdn.powered-by-nitrosell.com/product_images/9/2167/",
+        "https://cdn.powered-by-nitrosell.com/product_images/9/2167/large-amaco-38-white-stoneware.jpg",
+        "https://cdn.powered-by-nitrosell.com/product_images/9/2167/amaco-38-white-stoneware.jpg&url=https://www.theceramicshop.com%2Fproduct%2F3886%2Famaco-38-white-stoneware-50lb%2F&is_video=false&description=Amaco"
+      ],
+      "application_methods": null,
+      "availability": "https://schema.org/InStock",
+      "brand": "AMACO",
+      "brand_basis": "named_in_title",
+      "category_path": [
+        "Clay",
+        "Amaco",
+        "High Fire"
+      ],
+      "claims": null,
+      "coats": null,
+      "colour": null,
+      "currency": "USD",
+      "description": "Amaco #38 White Stoneware 50lb: Priced per 50 pound box. Quantities represent number of boxes.. . Stoneware. Cone 5 - Cone 10. . White Stoneware No.",
+      "documents": null,
+      "effects": null,
+      "external_id": "the-ceramic-shop:https://www.theceramicshop.com/product/3886/amaco-38-white-stoneware-50lb/",
+      "extraction_method": "opengraph",
+      "family": "clay_body",
+      "fetched_at": "<volatile>",
+      "firing": {
+        "basis": "published_text",
+        "cone_max": "10",
+        "cone_min": "5",
+        "cone_system": "orton",
+        "evidence": "Cone 5 - Cone 10",
+        "max_celsius": 1305,
+        "min_celsius": 1207,
+        "temperature_basis": "derived_from_cone"
+      },
+      "form": null,
+      "format": "ceramics.catalogue_item.v2",
+      "gtin": null,
+      "image_url": "https://cdn.powered-by-nitrosell.com/product_images/9/2167/amaco-38-white-stoneware.jpg",
+      "list_price": null,
+      "manufacturer_sku": null,
+      "manufacturer_sku_basis": null,
+      "min_order_quantity": null,
+      "name": "Amaco #38 White Stoneware 50lb",
+      "name_parsed_from": [
+        "Amaco"
+      ],
+      "name_raw": "Amaco #38 White Stoneware 50lb",
+      "package_size": {
+        "dimension": "weight",
+        "evidence": "50lb",
+        "grams": 22679.6,
+        "unit": "lb",
+        "value": 50.0
+      },
+      "parent_external_id": "the-ceramic-shop:https://www.theceramicshop.com/product/3886/amaco-38-white-stoneware-50lb/",
+      "price": 46.0,
+      "price_text": "46.00 USD",
+      "product_name": "Amaco #38 White Stoneware 50lb",
+      "product_url": "https://www.theceramicshop.com/product/3886/amaco-38-white-stoneware-50lb/",
+      "raw": {
+        "og": {
+          "og:availability": "instock",
+          "og:brand": "Amaco",
+          "og:title": "Amaco #38 White Stoneware 50lb",
+          "og:upc": "AC38",
+          "product:price:amount": "46.00",
+          "product:price:currency": "USD"
+        }
+      },
+      "source": "the-ceramic-shop",
+      "source_detail_level": "product_page",
+      "source_updated_at": null,
+      "stock_quantity": null,
+      "supplier_reference": "AC38",
+      "surface": null,
+      "technical_attributes": {
+        "\" + name + \"": "\" + itemcode + \" \" + department + \" \"+ category + \" \" + supplier + \" \" + \"$\" + price + \" \" + quantity + \" $\" + (price * quantity) + \" $\" + ((price * quantity) * ((100-discount)/100)).toFixed(2)+ \" \" + discount + \"",
+        "10": "$36.45",
+        "20": "$35.44",
+        "5": "$38.47",
+        "Product": "Item Lookup Code Department Category Brand Price per Unit Quantity Regular Price Quoted Price",
+        "Qty": "Unit Price:"
+      },
+      "unit_price": {
+        "currency": "USD",
+        "per": "kg",
+        "value": 2.0283
+      },
+      "variant_title": null,
+      "vat_rate": null,
+      "vat_status": "exclusive"
+    },
+    {
+      "all_image_urls": [
+        "https://cdn.powered-by-nitrosell.com/product_images/9/2167/violet-lustre-5-oz.jpg",
+        "https://cdn.powered-by-nitrosell.com/product_images/9/2167/",
+        "https://cdn.powered-by-nitrosell.com/product_images/9/2167/large-violet-lustre-5-oz.jpg",
+        "https://cdn.powered-by-nitrosell.com/product_images/9/2167/violet-lustre-5-oz.jpg&url=https://www.theceramicshop.com%2Fproduct%2F24967%2Fviolet-lustre-5oz%2F&is_video=false&description=Violet"
+      ],
+      "application_methods": null,
+      "availability": "https://schema.org/OutOfStock",
+      "brand": "Maryland China",
+      "brand_basis": "published",
+      "category_path": [
+        "Luster Overglazes",
+        "Maryland China Colored Lustres"
+      ],
+      "claims": null,
+      "coats": null,
+      "colour": {
+        "basis": "product_name",
+        "name": "Violet Lustre, ."
+      },
+      "currency": "USD",
+      "description": "Violet Lustre, .5oz: Lustres have a thin reflective surface that creates a prism of color. Lusters give a wide variety of effects and the final colors",
+      "documents": null,
+      "effects": null,
+      "external_id": "the-ceramic-shop:https://www.theceramicshop.com/product/24967/violet-lustre-5oz/",
+      "extraction_method": "opengraph",
+      "family": "glaze",
+      "fetched_at": "<volatile>",
+      "firing": null,
+      "form": null,
+      "format": "ceramics.catalogue_item.v2",
+      "gtin": null,
+      "image_url": "https://cdn.powered-by-nitrosell.com/product_images/9/2167/violet-lustre-5-oz.jpg",
+      "list_price": 86.32,
+      "manufacturer_sku": null,
+      "manufacturer_sku_basis": null,
+      "min_order_quantity": null,
+      "name": "Violet Lustre, .5oz",
+      "name_parsed_from": null,
+      "name_raw": "Violet Lustre, .5oz",
+      "package_size": null,
+      "parent_external_id": "the-ceramic-shop:https://www.theceramicshop.com/product/24967/violet-lustre-5oz/",
+      "price": 82.0,
+      "price_text": "82.00 USD",
+      "product_name": "Violet Lustre, .5oz",
+      "product_url": "https://www.theceramicshop.com/product/24967/violet-lustre-5oz/",
+      "raw": {
+        "og": {
+          "og:availability": "outofstock",
+          "og:brand": "Maryland China",
+          "og:title": "Violet Lustre, .5oz",
+          "og:upc": "LUSVIO",
+          "product:price:amount": "82.00",
+          "product:price:currency": "USD"
+        }
+      },
+      "source": "the-ceramic-shop",
+      "source_detail_level": "product_page",
+      "source_updated_at": null,
+      "stock_quantity": 0,
+      "supplier_reference": "LUSVIO",
+      "surface": "metallic",
+      "technical_attributes": {
+        "\" + name + \"": "\" + itemcode + \" \" + department + \" \"+ category + \" \" + supplier + \" \" + \"$\" + price + \" \" + quantity + \" $\" + (price * quantity) + \" $\" + ((price * quantity) * ((100-discount)/100)).toFixed(2)+ \" \" + discount + \"",
+        "Product": "Item Lookup Code Department Category Brand Price per Unit Quantity Regular Price Quoted Price"
+      },
+      "unit_price": null,
+      "variant_title": null,
+      "vat_rate": null,
+      "vat_status": "exclusive"
+    }
+  ],
+  "scraper": "nitrosell",
+  "source": "the-ceramic-shop",
+  "truncated": false
+}

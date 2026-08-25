@@ -1,0 +1,274 @@
+{
+  "collection_request": {
+    "base_url": "https://shop.example/",
+    "deadline": null,
+    "partitions": [
+      "main"
+    ],
+    "refresh_mode": "full",
+    "requested_fields": [
+      "identity",
+      "offers",
+      "stock"
+    ],
+    "result_limit": null,
+    "source_id": "example-shop"
+  },
+  "commerce_product_snapshot": {
+    "canonical_url": "https://shop.example/products/stoneware-clay",
+    "categories": [
+      {
+        "external_id": "clay",
+        "name": "Clay",
+        "url": null
+      }
+    ],
+    "connector": "shopify",
+    "contract_version": "commerce.product_snapshot.v1",
+    "description": null,
+    "documents": [],
+    "external_id": "product-100",
+    "images": [
+      {
+        "alt_text": "Stoneware clay bag",
+        "external_id": null,
+        "media_type": "image/jpeg",
+        "url": "https://shop.example/media/stoneware-clay.jpg"
+      }
+    ],
+    "observed_at": "2026-08-22T12:00:00Z",
+    "platform_extensions": {},
+    "published_attributes": {},
+    "source_id": "example-shop",
+    "source_updated_at": null,
+    "title": "Stoneware Clay",
+    "variants": [
+      {
+        "canonical_url": null,
+        "external_id": "variant-500g",
+        "gtin": null,
+        "image": null,
+        "is_default": true,
+        "offers": [
+          {
+            "availability": "in_stock",
+            "availability_evidence": [
+              {
+                "confidence": "published",
+                "method": "api",
+                "observed_at": "2026-08-22T12:00:00Z",
+                "source_field": "products[0]",
+                "source_url": "https://shop.example/products.json"
+              }
+            ],
+            "evidence": [
+              {
+                "confidence": "published",
+                "method": "api",
+                "observed_at": "2026-08-22T12:00:00Z",
+                "source_field": "products[0]",
+                "source_url": "https://shop.example/products.json"
+              }
+            ],
+            "minimum_quantity": null,
+            "observed_at": "2026-08-22T12:00:00Z",
+            "pack_size": null,
+            "price": {
+              "amount": "12.30",
+              "currency": "EUR"
+            },
+            "role": "regular",
+            "seller_id": null,
+            "seller_name": null,
+            "unit": null,
+            "valid_from": null,
+            "valid_until": null,
+            "vat_rate": null,
+            "vat_status": "unknown"
+          }
+        ],
+        "options": {
+          "weight": "500 g"
+        },
+        "platform_extensions": {},
+        "published_attributes": {},
+        "sku": "CLAY-500",
+        "stock": {
+          "availability": "in_stock",
+          "evidence": [
+            {
+              "confidence": "published",
+              "method": "api",
+              "observed_at": "2026-08-22T12:00:00Z",
+              "source_field": "products[0]",
+              "source_url": "https://shop.example/products.json"
+            }
+          ],
+          "observed_at": "2026-08-22T12:00:00Z",
+          "quantity": 8,
+          "quantity_kind": "exact"
+        },
+        "title": null
+      }
+    ],
+    "vendor": null
+  },
+  "connector_checkpoint": {
+    "checkpoint_schema_version": 1,
+    "collection_fingerprint": "af4621986f54f516ec50ba365bd1e16c588a01691dded54a54d30551c2c4ef85",
+    "connector": "shopify",
+    "connector_version": "1",
+    "lineage": "example-lineage",
+    "resume_after": {
+      "page": 2,
+      "partition": "main"
+    },
+    "source_id": "example-shop"
+  },
+  "diagnostic": {
+    "affects_completeness": false,
+    "code": "optional_enrichment_skipped",
+    "entity_id": "product-100",
+    "message": "optional description enrichment was not requested",
+    "metadata": {
+      "stage": "enrichment"
+    },
+    "retryable": false,
+    "severity": "info",
+    "url": null
+  },
+  "entity_page": {
+    "diagnostics": [
+      {
+        "affects_completeness": false,
+        "code": "optional_enrichment_skipped",
+        "entity_id": "product-100",
+        "message": "optional description enrichment was not requested",
+        "metadata": {
+          "stage": "enrichment"
+        },
+        "retryable": false,
+        "severity": "info",
+        "url": null
+      }
+    ],
+    "discovered": 1,
+    "enumeration_intact": true,
+    "items": [
+      {
+        "canonical_url": "https://shop.example/products/stoneware-clay",
+        "categories": [
+          {
+            "external_id": "clay",
+            "name": "Clay",
+            "url": null
+          }
+        ],
+        "connector": "shopify",
+        "contract_version": "commerce.product_snapshot.v1",
+        "description": null,
+        "documents": [],
+        "external_id": "product-100",
+        "images": [
+          {
+            "alt_text": "Stoneware clay bag",
+            "external_id": null,
+            "media_type": "image/jpeg",
+            "url": "https://shop.example/media/stoneware-clay.jpg"
+          }
+        ],
+        "observed_at": "2026-08-22T12:00:00Z",
+        "platform_extensions": {},
+        "published_attributes": {},
+        "source_id": "example-shop",
+        "source_updated_at": null,
+        "title": "Stoneware Clay",
+        "variants": [
+          {
+            "canonical_url": null,
+            "external_id": "variant-500g",
+            "gtin": null,
+            "image": null,
+            "is_default": true,
+            "offers": [
+              {
+                "availability": "in_stock",
+                "availability_evidence": [
+                  {
+                    "confidence": "published",
+                    "method": "api",
+                    "observed_at": "2026-08-22T12:00:00Z",
+                    "source_field": "products[0]",
+                    "source_url": "https://shop.example/products.json"
+                  }
+                ],
+                "evidence": [
+                  {
+                    "confidence": "published",
+                    "method": "api",
+                    "observed_at": "2026-08-22T12:00:00Z",
+                    "source_field": "products[0]",
+                    "source_url": "https://shop.example/products.json"
+                  }
+                ],
+                "minimum_quantity": null,
+                "observed_at": "2026-08-22T12:00:00Z",
+                "pack_size": null,
+                "price": {
+                  "amount": "12.30",
+                  "currency": "EUR"
+                },
+                "role": "regular",
+                "seller_id": null,
+                "seller_name": null,
+                "unit": null,
+                "valid_from": null,
+                "valid_until": null,
+                "vat_rate": null,
+                "vat_status": "unknown"
+              }
+            ],
+            "options": {
+              "weight": "500 g"
+            },
+            "platform_extensions": {},
+            "published_attributes": {},
+            "sku": "CLAY-500",
+            "stock": {
+              "availability": "in_stock",
+              "evidence": [
+                {
+                  "confidence": "published",
+                  "method": "api",
+                  "observed_at": "2026-08-22T12:00:00Z",
+                  "source_field": "products[0]",
+                  "source_url": "https://shop.example/products.json"
+                }
+              ],
+              "observed_at": "2026-08-22T12:00:00Z",
+              "quantity": 8,
+              "quantity_kind": "exact"
+            },
+            "title": null
+          }
+        ],
+        "vendor": null
+      }
+    ],
+    "page_id": "main:0",
+    "partition_key": "main",
+    "partition_terminal": true,
+    "resume_after": null,
+    "sequence": 0,
+    "terminal": true
+  },
+  "source_definition": {
+    "base_url": "https://shop.example/",
+    "connector": "shopify",
+    "connector_options": {
+      "currency": "EUR"
+    },
+    "id": "example-shop",
+    "label": "Example Shop"
+  }
+}

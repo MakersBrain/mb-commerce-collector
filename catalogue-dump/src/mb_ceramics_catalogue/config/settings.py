@@ -323,6 +323,11 @@ class Settings(BaseSettings):
     #: fields or run parameters.
     proxy_enabled: bool = False
     proxy_secret_file: Path | None = None
+    #: Webshare paid traffic remains separately default-off until operators
+    #: install a provider-bound gateway secret and explicitly enable its data
+    #: plane. The Decodo secret path above remains unchanged for compatibility.
+    proxy_webshare_data_plane_enabled: bool = False
+    proxy_webshare_gateway_secret_file: Path | None = None
     proxy_api_secret_file: Path | None = None
     proxy_reconcile_profile: str = "decodo"
     proxy_billing_cycle_start: datetime | None = None

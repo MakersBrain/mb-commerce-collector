@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
+from typing import Any
+from urllib.parse import urljoin
+
+from mb_commerce_scraper.models import (
+    Availability,
+    CommerceOffer,
+    CommerceProductSnapshot,
+    CommerceVariant,
+    Evidence,
+    MediaRef,
+    Money,
+    StockState,
+)
+from mb_commerce_scraper.parsing._structured import jsonld_images, jsonld_products
+
+
+class JsonLdProductParser:
+    name = "jsonld"
+    version = "1"
+
+    def __init__(self, *, currency: str | None = None) -> None:
+        self.currency = currency
+
+    def parse(self, document: str, *, url: str, source_id: str) -> tuple[CommerceProductSnapshot, ...]:
+        return self.parse_products(jsonld_products(document), url=url, source_id=source_id)
+
+    def parse_products(
+        self, raw_items: Iterable[dict[str, Any]], *, url: str, source_id: str
+    ) -> tuple[CommerceProductSnapshot, ...]:
+        """Build snapshots from already-decoded JSON-LD ``Product`` objects."""
+
+        products: list[CommerceProductSnapshot] = []
+        observed = datetime.now(UTC)
+        for raw in raw_items:
+            name = str(raw.get("name") or "").strip()
+            identifier = str(raw.get("sku") or raw.get("productID") or raw.get("@id") or url).strip()
+            if not name or not identifier:
+                continue
+            canonical_url = urljoin(url, str(raw.get("url") or url))
+            evidence = Evidence(method="jsonld", source_url=url, observed_at=observed)
+            offers_raw = raw.get("offers")
+            offers_list = offers_raw if isinstance(offers_raw, list) else [offers_raw]
+            offers: list[CommerceOffer] = []
+            availability = Availability.UNKNOWN
+            for offer in offers_list:
+                if not isinstance(offer, dict):
+                    continue
+                availability = self._availability(offer.get("availability"))
+                try:
+                    amount = Decimal(str(offer.get("price")))
+                except (InvalidOperation, ValueError):
+                    continue
+                currency = str(offer.get("priceCurrency") or self.currency or "").upper()
+                if amount.is_finite() and amount >= 0 and len(currency) == 3:
+                    offers.append(CommerceOffer(
+                        price=Money(amount=amount, currency=currency), observed_at=observed,
+                        evidence=(evidence,), availability=availability,
+                        availability_evidence=(evidence,),
+                    ))
+            images = tuple(MediaRef(url=value) for value in jsonld_images(raw, url))
+            products.append(CommerceProductSnapshot(
+                connector="generic-pages", source_id=source_id, external_id=identifier,
+                canonical_url=canonical_url, title=name, observed_at=observed,
+                description=str(raw.get("description") or "") or None,
+                vendor=self._brand(raw.get("brand")), images=images,
+                variants=(CommerceVariant(external_id=identifier, sku=str(raw.get("sku") or "") or None, offers=tuple(offers), stock=StockState(availability=availability, observed_at=observed, evidence=(evidence,))),),
+            ))
+        return tuple(products)
+
+    @staticmethod
+    def _brand(value: Any) -> str | None:
+        if isinstance(value, dict):
+            value = value.get("name")
+        return str(value).strip() if value else None
+
+    @staticmethod
+    def _availability(value: Any) -> Availability:
+        normalized = str(value or "").rsplit("/", 1)[-1].casefold()
+        return {
+            "instock": Availability.IN_STOCK,
+            "limitedavailability": Availability.LIMITED,
+            "outofstock": Availability.OUT_OF_STOCK,
+            "soldout": Availability.OUT_OF_STOCK,
+            "backorder": Availability.BACKORDER,
+            "preorder": Availability.PREORDER,
+            "discontinued": Availability.DISCONTINUED,
+        }.get(normalized, Availability.UNKNOWN)

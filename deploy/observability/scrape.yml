@@ -1,0 +1,47 @@
+# Read by vmagent via -promscrape.config. Same format as Prometheus, minus
+# rule_files -- vmalert owns rule evaluation -- and minus the per-job dns_sd
+# refresh interval, which vmagent sets globally via -promscrape.dnsSDCheckInterval.
+# vmagent stores nothing: everything scraped here is remote-written to the plane.
+global:
+  scrape_interval: 15s
+  # The plane receives catalogue series from two deployments: MakersBrain's
+  # vmagent in mb-infra forwards catalogue-control and catalogue-service from
+  # the podman release, and this one forwards the compose stack. Without a
+  # distinguishing label the two collapse onto the same series.
+  # %{...}, not ${...}: vmagent expands its own placeholder syntax here.
+  external_labels:
+    deployment: compose
+    environment: '%{CATALOGUE_ENVIRONMENT}'
+
+scrape_configs:
+  - job_name: catalogue-control
+    static_configs:
+      - targets: [control:8687]
+
+  - job_name: catalogue-service
+    static_configs:
+      - targets: [service:8686]
+
+  - job_name: catalogue-dispatcher
+    static_configs:
+      - targets: [dispatcher:9110]
+
+  - job_name: catalogue-worker
+    dns_sd_configs:
+      - names: [worker]
+        type: A
+        port: 9109
+    relabel_configs:
+      - source_labels: [__meta_dns_name]
+        target_label: pool
+        replacement: plain
+
+  - job_name: catalogue-worker-browser
+    dns_sd_configs:
+      - names: [worker-browser]
+        type: A
+        port: 9109
+    relabel_configs:
+      - source_labels: [__meta_dns_name]
+        target_label: pool
+        replacement: browser

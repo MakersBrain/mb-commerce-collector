@@ -9,7 +9,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import quote
 from uuid import UUID
 
@@ -29,9 +29,29 @@ class ProxyDenied(RuntimeError):
     """No new paid traffic may start under the current safety state."""
 
 
+@dataclass(frozen=True)
+class ProxyReservationUsage:
+    estimated_bytes: int
+    request_count: int
+    revoked: bool
+    exhausted: bool
+
+
+class ReservationLease(Protocol):
+    reservation_id: UUID
+    used_bytes: int
+    requests: int
+
+
 def redact_url(value: str) -> str:
     """Remove URL userinfo without changing the useful endpoint identity."""
     return _USERINFO.sub(r"\g<scheme>[REDACTED]@", value)
+
+
+def _validated_provider(provider: str) -> str:
+    if re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", provider) is None:
+        raise ProxyDenied("proxy provider is invalid")
+    return provider
 
 
 @dataclass(frozen=True)
@@ -165,13 +185,16 @@ async def reserve(
     probe_id: UUID | None = None, profile: str, profile_id: UUID | None = None,
     route_id: UUID | None = None, cycle_start: datetime | None = None,
     cycle_end: datetime | None = None, requested_bytes: int = DEFAULT_JOB_BYTES,
-    pilot: bool = False, secret_generation: int = 0,
+    pilot: bool = False, secret_generation: int = 0, provider: str = "decodo",
 ) -> UUID:
     """Atomically reserve across job, day, pilot, and billing-cycle limits."""
     if (job_id is None) == (probe_id is None):
         raise ProxyDenied("a proxy reservation requires exactly one job or probe")
     if requested_bytes <= 0:
         raise ProxyDenied("proxy reservation bytes must be positive")
+    provider = _validated_provider(provider)
+    if profile_id is None or route_id is None:
+        raise ProxyDenied("durable proxy reservation requires profile and route identities")
     if cycle_start is not None and cycle_start.tzinfo is None:
         raise ProxyDenied("proxy billing-cycle boundaries must include UTC offsets")
     if cycle_end is not None and cycle_end.tzinfo is None:
@@ -181,17 +204,18 @@ async def reserve(
         cycle = await connection.execute(
             """
             select * from catalogue.proxy_budget_cycles
-             where provider = 'decodo' and lifecycle = 'active'
+             where provider = %(provider)s and lifecycle = 'active'
                and cycle_start <= now() and cycle_end > now()
              for update
             """,
+            {"provider": provider},
         )
         rows = await cycle.fetchall()
         if len(rows) > 1:
-            raise ProxyDenied("multiple active Decodo billing cycles exist")
+            raise ProxyDenied(f"multiple active {provider} billing cycles exist")
         row = rows[0] if rows else None
         if row is None:
-            raise ProxyDenied("Decodo billing cycle has not been reconciled and opened")
+            raise ProxyDenied(f"{provider} billing cycle has not been reconciled and opened")
         if cycle_start is not None and row["cycle_start"] != cycle_start:
             raise ProxyDenied("configured billing-cycle start disagrees with the active ledger")
         if cycle_end is not None and row["cycle_end"] != cycle_end:
@@ -201,26 +225,54 @@ async def reserve(
         if not (cycle_start <= now < cycle_end):
             raise ProxyDenied("active proxy billing cycle does not cover the current time")
         if row["kill_switch"] or not row["reconciliation_ok"] or row["reconciled_at"] is None:
-            raise ProxyDenied("Decodo reconciliation is unsafe or the kill switch is active")
-        if profile_id is not None:
-            allocation_cursor = await connection.execute(
-                """
-                select a.allocated_bytes,
-                       coalesce(sum(r.reserved_bytes) filter (where r.state in
-                         ('active', 'revocation_requested')), 0) as active
-                  from catalogue.proxy_profile_allocations a
-                  left join catalogue.proxy_reservations r
-                    on r.profile_id = a.profile_id and r.provider = a.provider
-                   and r.cycle_start = a.cycle_start
-                 where a.provider = 'decodo' and a.cycle_start = %(start)s
-                   and a.profile_id = %(profile_id)s
-                 group by a.allocated_bytes
-                """,
-                {"start": cycle_start, "profile_id": profile_id},
+            raise ProxyDenied(
+                f"{provider} reconciliation is unsafe or the kill switch is active"
             )
-            allocation = await allocation_cursor.fetchone()
-            if allocation is None or allocation["active"] + requested_bytes > allocation["allocated_bytes"]:
-                raise ProxyDenied("proxy profile allocation would be exceeded")
+        identity_cursor = await connection.execute(
+            """
+            select p.id
+              from catalogue.proxy_profiles p
+              join catalogue.proxy_routes r
+                on r.id = %(route_id)s and r.profile_id = p.id
+             where p.id = %(profile_id)s and p.provider = %(provider)s
+               and p.logical_name = %(profile)s
+               and p.secret_generation = %(generation)s
+               and p.enabled and p.lifecycle = 'enabled'
+               and r.enabled and r.retired_at is null
+             for share of p, r
+            """,
+            {
+                "provider": provider,
+                "profile": profile,
+                "profile_id": profile_id,
+                "route_id": route_id,
+                "generation": secret_generation,
+            },
+        )
+        if await identity_cursor.fetchone() is None:
+            raise ProxyDenied("proxy profile or route snapshot is no longer active")
+        allocation_cursor = await connection.execute(
+            """
+            select a.allocated_bytes,
+                   coalesce(sum(r.reserved_bytes) filter (where r.state in
+                     ('active', 'revocation_requested')), 0) as active
+              from catalogue.proxy_profile_allocations a
+              left join catalogue.proxy_reservations r
+                on r.profile_id = a.profile_id and r.provider = a.provider
+               and r.cycle_start = a.cycle_start
+             where a.provider = %(provider)s and a.cycle_start = %(start)s
+               and a.profile_id = %(profile_id)s
+             group by a.allocated_bytes
+            """,
+            {
+                "provider": provider,
+                "start": cycle_start,
+                "profile_id": profile_id,
+            },
+        )
+        allocation = await allocation_cursor.fetchone()
+        if allocation is None or allocation["active"] + requested_bytes > allocation["allocated_bytes"]:
+            raise ProxyDenied("proxy profile allocation would be exceeded")
         usage_cursor = await connection.execute(
             """
             select
@@ -229,43 +281,46 @@ async def reserve(
               coalesce(sum(estimated_bytes) filter (where created_at >= date_trunc('day', now())), 0) daily,
               coalesce(sum(estimated_bytes) filter (where pilot), 0) pilot_used
             from catalogue.proxy_reservations
-            where provider = 'decodo' and cycle_start = %(start)s
+            where provider = %(provider)s and cycle_start = %(start)s
             """,
-            {"start": cycle_start},
+            {"provider": provider, "start": cycle_start},
         )
         usage = await usage_cursor.fetchone()
         assert usage is not None
         accounted = max(row["provider_reported_bytes"], row["application_bytes"])
         active = usage["active"]
         if accounted + active + requested_bytes > row["operational_bytes"]:
-            raise ProxyDenied("Decodo operational billing-cycle ceiling would be exceeded")
+            raise ProxyDenied(
+                f"{provider} operational billing-cycle ceiling would be exceeded"
+            )
         remaining_days = max(1, math.ceil((cycle_end - now).total_seconds() / 86_400))
         dynamic_daily = min(
             row["daily_bytes"], max(0, (row["operational_bytes"] - accounted - active) // remaining_days)
         )
         if usage["daily"] + active + requested_bytes > dynamic_daily:
-            raise ProxyDenied("Decodo daily allocation would be exceeded")
+            raise ProxyDenied(f"{provider} daily allocation would be exceeded")
         if pilot:
             # Two different denials, and one message for both sent an operator
             # looking at a budget that was 18% used: the-ceramic-shop failed
             # five nights running because the pilot had been *stopped*, not
             # because it had spent anything.
             if not row["pilot_active"]:
-                raise ProxyDenied("Decodo pilot is not active on this billing cycle")
+                raise ProxyDenied(f"{provider} pilot is not active on this billing cycle")
             if usage["pilot_used"] + active + requested_bytes > row["pilot_bytes"]:
-                raise ProxyDenied("Decodo pilot allocation would be exceeded")
+                raise ProxyDenied(f"{provider} pilot allocation would be exceeded")
         cursor = await connection.execute(
             """
             insert into catalogue.proxy_reservations
               (job_id, probe_id, purpose, provider, profile, profile_id, route_id,
                cycle_start, reserved_bytes, pilot, secret_generation)
-            values (%(job)s, %(probe)s, %(purpose)s, 'decodo', %(profile)s,
+            values (%(job)s, %(probe)s, %(purpose)s, %(provider)s, %(profile)s,
                     %(profile_id)s, %(route_id)s, %(start)s, %(bytes)s, %(pilot)s,
                     %(generation)s)
             returning id
             """,
             {
                 "job": job_id, "probe": probe_id,
+                "provider": provider,
                 "purpose": "job" if job_id is not None else "probe",
                 "profile": profile, "profile_id": profile_id, "route_id": route_id,
                 "start": cycle_start, "bytes": requested_bytes, "pilot": pilot,
@@ -278,23 +333,79 @@ async def reserve(
         return inserted["id"]
 
 
-async def close_reservation(connection: AsyncConnection[Any], lease: ProxyLease) -> None:
+async def close_reservation(
+    connection: AsyncConnection[Any], lease: ReservationLease
+) -> None:
     """Close a reservation and monotonically advance application accounting."""
     async with connection.transaction():
+        identity_cursor = await connection.execute(
+            """
+            select provider, cycle_start
+              from catalogue.proxy_reservations
+             where id = %(id)s
+            """,
+            {"id": lease.reservation_id},
+        )
+        identity = await identity_cursor.fetchone()
+        if identity is None:
+            return
+        # Every paid-traffic transition takes the cycle before an individual
+        # reservation. Profile draining uses the same order, so worker cleanup
+        # cannot deadlock against a concurrent control-plane revocation.
+        await connection.execute(
+            """
+            select 1
+              from catalogue.proxy_budget_cycles
+             where provider = %(provider)s and cycle_start = %(start)s
+             for update
+            """,
+            {"provider": identity["provider"], "start": identity["cycle_start"]},
+        )
         cursor = await connection.execute(
             """
             update catalogue.proxy_reservations
                set estimated_bytes = greatest(estimated_bytes, %(bytes)s),
                    request_count = greatest(request_count, %(requests)s),
                    state = 'closed', closed_at = now()
-             where id = %(id)s and state in ('active', 'revocation_requested')
+             where id = %(id)s and provider = %(provider)s
+               and cycle_start = %(start)s
+               and state in ('active', 'revocation_requested')
             returning provider, cycle_start, estimated_bytes
             """,
-            {"id": lease.reservation_id, "bytes": lease.used_bytes, "requests": lease.requests},
+            {
+                "id": lease.reservation_id,
+                "provider": identity["provider"],
+                "start": identity["cycle_start"],
+                "bytes": lease.used_bytes,
+                "requests": lease.requests,
+            },
         )
         row = await cursor.fetchone()
+        late_settlement = False
+        if row is None:
+            late_cursor = await connection.execute(
+                """
+                update catalogue.proxy_reservations
+                   set estimated_bytes = greatest(estimated_bytes, %(bytes)s),
+                       request_count = greatest(request_count, %(requests)s)
+                 where id = %(id)s and provider = %(provider)s
+                   and cycle_start = %(start)s and state = 'cancelled'
+                   and (estimated_bytes < %(bytes)s or request_count < %(requests)s)
+                returning provider, cycle_start, estimated_bytes
+                """,
+                {
+                    "id": lease.reservation_id,
+                    "provider": identity["provider"],
+                    "start": identity["cycle_start"],
+                    "bytes": lease.used_bytes,
+                    "requests": lease.requests,
+                },
+            )
+            row = await late_cursor.fetchone()
+            late_settlement = row is not None
         if row:
-            metrics.proxy_reservation("closed")
+            if not late_settlement:
+                metrics.proxy_reservation("closed")
             metrics.proxy_bytes("application", row["estimated_bytes"])
             await connection.execute(
                 """
@@ -304,13 +415,13 @@ async def close_reservation(connection: AsyncConnection[Any], lease: ProxyLease)
                      (select coalesce(sum(estimated_bytes), 0)
                         from catalogue.proxy_reservations
                        where provider = %(provider)s and cycle_start = %(start)s
-                         and state = 'closed')
+                         and state in ('closed', 'cancelled'))
                    ),
                    kill_switch = kill_switch or (
                      select coalesce(sum(estimated_bytes), 0) >= operational_bytes
                        from catalogue.proxy_reservations
                       where provider = %(provider)s and cycle_start = %(start)s
-                        and state = 'closed'
+                        and state in ('closed', 'cancelled')
                    )
                  where provider = %(provider)s and cycle_start = %(start)s
                 """,
@@ -320,12 +431,268 @@ async def close_reservation(connection: AsyncConnection[Any], lease: ProxyLease)
                 """
                 insert into catalogue.proxy_reconcile_requests
                        (provider, reason, reservation_id, dedup_key)
-                values (%(provider)s, 'reservation_closed', %(reservation)s,
-                        'reservation:' || %(reservation)s::text)
+                values (%(provider)s, %(reason)s, %(reservation)s, %(dedup)s)
                 on conflict (dedup_key) do nothing
                 """,
-                {"provider": row["provider"], "reservation": lease.reservation_id},
+                {
+                    "provider": row["provider"],
+                    "reservation": lease.reservation_id,
+                    "reason": (
+                        "reservation_late_settled"
+                        if late_settlement
+                        else "reservation_closed"
+                    ),
+                    "dedup": (
+                        f"reservation:{lease.reservation_id}:late-settlement"
+                        if late_settlement
+                        else f"reservation:{lease.reservation_id}"
+                    ),
+                },
             )
+
+
+async def authorize_reservation_attempt(
+    connection: AsyncConnection[Any],
+    *,
+    reservation_id: UUID,
+    estimated_bytes: int,
+    maximum_requests: int | None,
+) -> UUID | None:
+    """Atomically retain capacity for one physical attempt.
+
+    The reservation row lock serializes authorizations across workers. The
+    separate attempt row lets an undispatched authorization return its estimate
+    without ever counting that estimate as paid usage.
+    """
+    if estimated_bytes < 0:
+        raise ValueError("proxy attempt estimate must be non-negative")
+    if maximum_requests is not None and maximum_requests < 1:
+        raise ValueError("proxy request cap must be positive")
+    async with connection.transaction():
+        # Lock the owning cycle, profile, route, and reservation in that order.
+        # Holding each outer lock while acquiring the next prevents a committed
+        # control-plane transition from racing a new physical-attempt token into
+        # existence.
+        cycle_cursor = await connection.execute(
+            """
+            select c.lifecycle, c.kill_switch, c.reconciliation_ok,
+                   c.reconciled_at,
+                   c.cycle_start <= now() and c.cycle_end > now() as current
+              from catalogue.proxy_reservations r
+              join catalogue.proxy_budget_cycles c
+                on c.provider = r.provider and c.cycle_start = r.cycle_start
+             where r.id = %(id)s
+             for update of c
+            """,
+            {"id": reservation_id},
+        )
+        cycle = await cycle_cursor.fetchone()
+        if cycle is None:
+            raise ProxyDenied("proxy reservation has no billing cycle")
+        if (
+            cycle["lifecycle"] != "active"
+            or not cycle["current"]
+            or cycle["kill_switch"]
+            or not cycle["reconciliation_ok"]
+            or cycle["reconciled_at"] is None
+        ):
+            raise ProxyDenied("proxy billing cycle does not authorize new paid traffic")
+        profile_cursor = await connection.execute(
+            """
+            select p.enabled, p.lifecycle,
+                   p.secret_generation = r.secret_generation as secret_current
+              from catalogue.proxy_reservations r
+              join catalogue.proxy_profiles p
+                on p.id = r.profile_id and p.provider = r.provider
+               and p.logical_name = r.profile
+             where r.id = %(id)s
+             for share of p
+            """,
+            {"id": reservation_id},
+        )
+        profile = await profile_cursor.fetchone()
+        if (
+            profile is None
+            or not profile["enabled"]
+            or profile["lifecycle"] != "enabled"
+            or not profile["secret_current"]
+        ):
+            raise ProxyDenied("proxy profile does not authorize new paid traffic")
+        route_cursor = await connection.execute(
+            """
+            select r.enabled, r.retired_at is null as current
+              from catalogue.proxy_reservations x
+              join catalogue.proxy_routes r
+                on r.id = x.route_id and r.provider = x.provider
+               and r.profile_id = x.profile_id
+             where x.id = %(id)s
+             for share of r
+            """,
+            {"id": reservation_id},
+        )
+        route = await route_cursor.fetchone()
+        if route is None or not route["enabled"] or not route["current"]:
+            raise ProxyDenied("proxy route does not authorize new paid traffic")
+        cursor = await connection.execute(
+            """
+            select x.reserved_bytes, x.estimated_bytes, x.request_count,
+                   x.revocation_requested or
+                       x.state = 'revocation_requested' as revoked
+              from catalogue.proxy_reservations x
+              join catalogue.proxy_profiles p
+                on p.id = x.profile_id and p.provider = x.provider
+               and p.logical_name = x.profile
+               and p.secret_generation = x.secret_generation
+              join catalogue.proxy_routes r
+                on r.id = x.route_id and r.provider = x.provider
+               and r.profile_id = x.profile_id
+             where x.id = %(id)s
+               and x.state in ('active', 'revocation_requested')
+               and p.enabled and p.lifecycle = 'enabled'
+               and r.enabled and r.retired_at is null
+             for update of x
+            """,
+            {"id": reservation_id},
+        )
+        reservation = await cursor.fetchone()
+        if reservation is None:
+            raise ProxyDenied("proxy reservation is not active")
+        if reservation["revoked"]:
+            raise ProxyDenied("proxy reservation was revoked")
+        pending_cursor = await connection.execute(
+            """
+            select coalesce(sum(estimated_bytes), 0) as bytes, count(*) as requests
+              from catalogue.proxy_attempt_authorizations
+             where reservation_id = %(id)s and state = 'authorized'
+            """,
+            {"id": reservation_id},
+        )
+        pending = await pending_cursor.fetchone()
+        assert pending is not None
+        if (
+            reservation["estimated_bytes"] + pending["bytes"] + estimated_bytes
+            > reservation["reserved_bytes"]
+        ) or (
+            maximum_requests is not None
+            and reservation["request_count"] + pending["requests"] >= maximum_requests
+        ):
+            return None
+        inserted = await connection.execute(
+            """
+            insert into catalogue.proxy_attempt_authorizations
+                   (reservation_id, estimated_bytes)
+            values (%(reservation)s, %(bytes)s)
+            returning id
+            """,
+            {"reservation": reservation_id, "bytes": estimated_bytes},
+        )
+        row = await inserted.fetchone()
+        assert row is not None
+        return row["id"]
+
+
+async def reconcile_reservation_attempt(
+    connection: AsyncConnection[Any],
+    *,
+    authorization_id: UUID,
+    actual_bytes: int,
+    physical_requests: int,
+) -> ProxyReservationUsage:
+    """Exactly once reconcile a dispatched attempt into durable actuals."""
+    if actual_bytes < 0 or physical_requests < 0:
+        raise ValueError("proxy attempt actual counters must be non-negative")
+    async with connection.transaction():
+        cursor = await connection.execute(
+            """
+            select reservation_id, state, actual_bytes, physical_requests
+              from catalogue.proxy_attempt_authorizations
+             where id = %(id)s
+             for update
+            """,
+            {"id": authorization_id},
+        )
+        authorization = await cursor.fetchone()
+        if authorization is None:
+            raise ProxyDenied("proxy attempt authorization does not exist")
+        if authorization["state"] == "released":
+            raise ProxyDenied("proxy attempt authorization was released")
+        if authorization["state"] == "authorized":
+            await connection.execute(
+                """
+                update catalogue.proxy_attempt_authorizations
+                   set state = 'reconciled', actual_bytes = %(bytes)s,
+                       physical_requests = %(requests)s, resolved_at = now()
+                 where id = %(id)s
+                """,
+                {
+                    "id": authorization_id,
+                    "bytes": actual_bytes,
+                    "requests": physical_requests,
+                },
+            )
+            await connection.execute(
+                """
+                update catalogue.proxy_reservations
+                   set estimated_bytes = estimated_bytes + %(bytes)s,
+                       request_count = request_count + %(requests)s
+                 where id = %(reservation)s
+                """,
+                {
+                    "reservation": authorization["reservation_id"],
+                    "bytes": actual_bytes,
+                    "requests": physical_requests,
+                },
+            )
+        elif (
+            authorization["actual_bytes"] != actual_bytes
+            or authorization["physical_requests"] != physical_requests
+        ):
+            raise ProxyDenied("proxy attempt was already reconciled with different actuals")
+        usage_cursor = await connection.execute(
+            """
+            select estimated_bytes, request_count, reserved_bytes,
+                   revocation_requested or state = 'revocation_requested' as revoked
+              from catalogue.proxy_reservations
+             where id = %(reservation)s
+            """,
+            {"reservation": authorization["reservation_id"]},
+        )
+        usage = await usage_cursor.fetchone()
+        if usage is None:
+            raise ProxyDenied("proxy reservation does not exist")
+        return ProxyReservationUsage(
+            estimated_bytes=usage["estimated_bytes"],
+            request_count=usage["request_count"],
+            revoked=bool(usage["revoked"]),
+            exhausted=usage["estimated_bytes"] > usage["reserved_bytes"],
+        )
+
+
+async def release_reservation_attempt(
+    connection: AsyncConnection[Any], *, authorization_id: UUID
+) -> None:
+    """Release capacity for an attempt proven not to have dispatched."""
+    cursor = await connection.execute(
+        """
+        update catalogue.proxy_attempt_authorizations
+           set state = 'released', resolved_at = now()
+         where id = %(id)s and state = 'authorized'
+        returning id
+        """,
+        {"id": authorization_id},
+    )
+    row = await cursor.fetchone()
+    if row is not None:
+        return
+    state_cursor = await connection.execute(
+        "select state from catalogue.proxy_attempt_authorizations where id = %(id)s",
+        {"id": authorization_id},
+    )
+    state = await state_cursor.fetchone()
+    if state is None:
+        raise ProxyDenied("proxy attempt authorization does not exist")
+    if state["state"] != "released":
+        raise ProxyDenied("a dispatched proxy attempt cannot be released")
 
 
 async def reservation_revoked(connection: AsyncConnection[Any], reservation_id: UUID) -> bool:
@@ -340,9 +707,10 @@ async def reservation_revoked(connection: AsyncConnection[Any], reservation_id: 
 
 async def reconcile(
     connection: AsyncConnection[Any], *, cycle_start: datetime,
-    provider_reported_bytes: int, successful: bool,
+    provider_reported_bytes: int, successful: bool, provider: str = "decodo",
 ) -> None:
     """Record provider usage without ever automatically lowering the ledger."""
+    provider = _validated_provider(provider)
     await connection.execute(
         """
         update catalogue.proxy_budget_cycles
@@ -350,9 +718,14 @@ async def reconcile(
                reconciled_at = case when %(ok)s then now() else reconciled_at end,
                reconciliation_ok = %(ok)s,
                kill_switch = kill_switch or greatest(provider_reported_bytes, %(reported)s) >= operational_bytes
-         where provider = 'decodo' and cycle_start = %(start)s
+         where provider = %(provider)s and cycle_start = %(start)s
         """,
-        {"reported": max(0, provider_reported_bytes), "ok": successful, "start": cycle_start},
+        {
+            "provider": provider,
+            "reported": max(0, provider_reported_bytes),
+            "ok": successful,
+            "start": cycle_start,
+        },
     )
 
 

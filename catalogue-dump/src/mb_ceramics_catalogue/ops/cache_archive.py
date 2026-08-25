@@ -104,12 +104,31 @@ def digest(path: Path) -> str:
     return sha.hexdigest()
 
 
-def entries(cache: Path) -> list[Path]:
-    """Every file in the cache, in a stable order."""
-    return sorted(path for path in cache.rglob("*") if path.is_file())
+def entries(cache: Path, hosts: tuple[str, ...] = ()) -> list[Path]:
+    """Selected cache files in stable order; no hosts means the whole cache."""
+    roots = [cache]
+    if hosts:
+        roots = []
+        for host in sorted(set(hosts)):
+            if not host or Path(host).name != host or host in {".", ".."}:
+                raise CacheArchiveError(f"invalid cache host selection: {host!r}")
+            root = cache / host
+            if not root.is_dir():
+                raise CacheArchiveError(f"selected cache host is absent: {host}")
+            roots.append(root)
+    return sorted(
+        path
+        for root in roots
+        for path in root.rglob("*")
+        if path.is_file()
+    )
 
 
-def build(cache: Path, destination: Path) -> None:
+def build(
+    cache: Path,
+    destination: Path,
+    files: list[Path] | None = None,
+) -> None:
     """Tar the cache without compressing it.
 
     The entries are gzipped pages already; a second pass buys a percent or two
@@ -119,7 +138,7 @@ def build(cache: Path, destination: Path) -> None:
     "this afternoon".
     """
     with tarfile.open(destination, "w", format=tarfile.PAX_FORMAT) as archive:
-        for path in entries(cache):
+        for path in files if files is not None else entries(cache):
             info = archive.gettarinfo(str(path), arcname=str(path.relative_to(cache)))
             info.uid = info.gid = 0
             info.uname = info.gname = ""
@@ -144,17 +163,23 @@ def write_manifest(record: dict[str, Any], path: Path = MANIFEST) -> None:
     path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def push(settings: Settings, *, cache: Path = CACHE, manifest: Path = MANIFEST) -> dict[str, Any]:
+def push(
+    settings: Settings,
+    *,
+    cache: Path = CACHE,
+    manifest: Path = MANIFEST,
+    hosts: tuple[str, ...] = (),
+) -> dict[str, Any]:
     """Archive the local cache, upload it, and record what was uploaded."""
     if not cache.is_dir():
         raise CacheArchiveError(f"no response cache at {cache}; nothing to push")
-    files = entries(cache)
+    files = entries(cache, hosts)
     if not files:
         raise CacheArchiveError(f"response cache at {cache} is empty; nothing to push")
 
     with tempfile.TemporaryDirectory() as scratch:
         archive = Path(scratch) / "cache.tar"
-        build(cache, archive)
+        build(cache, archive, files)
         sha = digest(archive)
         key = f"cache/{sha[:16]}.tar"
         record = {
@@ -162,7 +187,9 @@ def push(settings: Settings, *, cache: Path = CACHE, manifest: Path = MANIFEST) 
             "sha256": sha,
             "bytes": archive.stat().st_size,
             "files": len(files),
-            "hosts": sorted(path.name for path in cache.iterdir() if path.is_dir()),
+            "hosts": sorted(
+                {path.relative_to(cache).parts[0] for path in files}
+            ),
         }
         LOGGER.info("cache.archive.push", key=key, bytes=record["bytes"], files=len(files))
         client(settings).upload_file(str(archive), settings.bucket, key)
@@ -230,7 +257,15 @@ def verify(settings: Settings, *, manifest: Path = MANIFEST) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("push", help="archive the local cache and upload it")
+    push_parser = commands.add_parser(
+        "push", help="archive the local cache and upload it"
+    )
+    push_parser.add_argument(
+        "--host",
+        action="append",
+        default=[],
+        help="include only this cache host; repeat for a reviewed subset",
+    )
     pull_parser = commands.add_parser("pull", help="download the archive the manifest names")
     pull_parser.add_argument(
         "--force", action="store_true", help="replace an existing local cache"
@@ -243,7 +278,7 @@ def main() -> int:
     try:
         settings = Settings.from_env()
         if options.command == "push":
-            record = push(settings)
+            record = push(settings, hosts=tuple(options.host))
         elif options.command == "pull":
             record = pull(settings, force=options.force)
         else:

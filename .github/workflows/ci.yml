@@ -69,6 +69,10 @@ jobs:
       - run: make lint
       - run: make typecheck
       - run: make test
+      - name: Build and verify the reusable scraper distribution
+        run: make scraper-build scraper-contracts
+      - name: Verify installed catalogue and scraper composition
+        run: make catalogue-artifact-contracts
       # Never hand-edit a generated OpenAPI document. This is what stops
       # "regenerate it later" from becoming "the spec is six months old".
       - name: Check the generated contracts have not drifted
@@ -113,76 +117,22 @@ jobs:
           enable-cache: true
           cache-dependency-glob: catalogue-dump/uv.lock
       - name: Sync
-        run: uv --directory catalogue-dump sync --all-groups
-      # Until the bucket, the machine identity and a published archive all
-      # exist, these two steps are skipped and the golden tests skip with an
-      # empty cache — which is exactly what this job did before. Setting the
-      # INFISICAL_PROJECT_SLUG variable is what turns the gate on, and the
-      # `Confirm` step below is what stops a missing variable from reading as a
-      # passing replay for a second time.
-      #
-      # The only secrets in this repository are the machine identity itself.
-      # Everything the job actually uses is read from Infisical at run time, so
-      # rotating an R2 key is a change in one place and never a commit here.
-      #
-      # Two curl calls rather than Infisical's action: this repository allows a
-      # short list of actions and pins every one of them to a SHA, and the API
-      # is stable enough that adding a third-party action to the supply chain
-      # buys nothing. The identity logs in, reads one path, and the values are
-      # masked before they reach the environment.
-      - name: Read the cache credentials from Infisical
-        if: vars.INFISICAL_PROJECT_SLUG != ''
-        env:
-          CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
-          PROJECT_SLUG: ${{ vars.INFISICAL_PROJECT_SLUG }}
-        run: |
-          set -euo pipefail
-          token=$(curl -sS --fail-with-body \
-            -X POST https://app.infisical.com/api/v1/auth/universal-auth/login \
-            -H 'Content-Type: application/json' \
-            -d "$(jq -nc --arg id "$CLIENT_ID" --arg secret "$CLIENT_SECRET" \
-                  '{clientId: $id, clientSecret: $secret}')" \
-            | jq -r .accessToken)
-          echo "::add-mask::$token"
-
-          secrets=$(curl -sS --fail-with-body -G \
-            https://app.infisical.com/api/v3/secrets/raw \
-            -H "Authorization: Bearer $token" \
-            --data-urlencode "workspaceSlug=$PROJECT_SLUG" \
-            --data-urlencode "environment=ci" \
-            --data-urlencode "secretPath=/catalogue/cache")
-
-          # Mask before export: a value that reaches the log unmasked is
-          # rotated, not un-logged.
-          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY \
-                      CATALOGUE_CACHE_BUCKET CATALOGUE_CACHE_ENDPOINT; do
-            value=$(jq -r --arg n "$name" \
-              '.secrets[] | select(.secretKey == $n) | .secretValue' <<<"$secrets")
-            if [ -z "$value" ] || [ "$value" = "null" ]; then
-              echo "::error::$name is not set at /catalogue/cache in the ci environment"
-              exit 1
-            fi
-            echo "::add-mask::$value"
-            echo "$name=$value" >> "$GITHUB_ENV"
-          done
-      # The identity this job authenticates as can read the cache archive and
-      # nothing else. A build has no reason to be able to publish one.
+        run: uv --directory catalogue-dump sync --all-groups --extra archive
+      # These credentials are an R2 token scoped to object-read access on the
+      # cache bucket. The manifest pins the immutable object and the pull
+      # verifies its digest before extracting anything. There is deliberately
+      # no feature gate: a missing credential or archive must fail CI.
       - name: Fetch the recorded response cache
-        if: vars.INFISICAL_PROJECT_SLUG != ''
-        run: uv --directory catalogue-dump run -- catalogue-cache-archive pull --force
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          CATALOGUE_CACHE_BUCKET: ${{ vars.CATALOGUE_CACHE_BUCKET }}
+          CATALOGUE_CACHE_ENDPOINT: ${{ vars.CATALOGUE_CACHE_ENDPOINT }}
+        run: |
+          uv --directory catalogue-dump run -- catalogue-cache-archive pull --force
+          echo "CATALOGUE_GOLDEN_ARCHIVE_REQUIRED=1" >> "$GITHUB_ENV"
       - name: Replay every cached source
         run: make test-golden
-      # A skipped replay is not a passing replay. Once the cache is provisioned
-      # this fails the job if the suite quietly collected nothing, which is the
-      # failure mode that hid a dormant golden suite for months.
-      - name: Confirm the replay actually replayed something
-        if: vars.INFISICAL_PROJECT_SLUG != ''
-        run: |
-          test -d catalogue-dump/.cache || {
-            echo "::error::the response cache was not fetched; the replay asserted nothing"
-            exit 1
-          }
       - name: Keep the differing output for inspection
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -239,11 +189,27 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Loader
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/loader/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Database transfer tool
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: docker/database-transfer/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Backup and restore tool
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/backup/Dockerfile
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max

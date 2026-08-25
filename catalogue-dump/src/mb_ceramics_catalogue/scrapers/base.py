@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import gzip
+import hashlib
 import json as json_lib
 import logging
 import random
@@ -15,15 +16,25 @@ from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urljoin, urlparse
 
 import httpx
+from mb_commerce_scraper.proxy import (
+    BrowserSubrequestAuthorization,
+    BrowserSubrequestAuthorizer,
+    BrowserSubrequestOutcome,
+    ProxyBudgetExhausted,
+)
 
 from mb_ceramics_catalogue.observability import metrics
 from mb_ceramics_catalogue.proxy import ProxyDenied
 from mb_ceramics_catalogue.transports.browser import (
+    BrowserEvaluationResult,
+    BrowserFetchResponse,
     BrowserJobContext,
+    BrowserNetworkAccounting,
     BrowserSession,
     BrowserUnavailable,
     TransportBlocked,
@@ -518,6 +529,177 @@ class ImpersonatingClient:
         }
 
 
+class _BrowserSubrequestMeter:
+    """Own one authorization token for every continued page request."""
+
+    def __init__(
+        self,
+        authorizer: BrowserSubrequestAuthorizer,
+        accounting: BrowserNetworkAccounting,
+    ) -> None:
+        self._authorizer = authorizer
+        self._accounting = accounting
+        self._pending: dict[int, tuple[BrowserSubrequestAuthorization, int]] = {}
+        self._tasks: set[asyncio.Task[None]] = set()
+        self._route_tasks: set[asyncio.Task[Any]] = set()
+        self._failure: BaseException | None = None
+
+    async def continue_request(
+        self, route: Any, request: Any, transmitted_bytes: int
+    ) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            self._route_tasks.add(task)
+        try:
+            try:
+                authorization = await self._authorizer.authorize(transmitted_bytes)
+            except BaseException as error:
+                self._remember_failure(error)
+                await route.abort()
+                raise
+            if authorization is None:
+                denied = ProxyBudgetExhausted()
+                self._remember_failure(denied)
+                await route.abort()
+                raise denied
+            key = id(request)
+            try:
+                self._accounting.record(transmitted_bytes, 0, 1)
+                self._pending[key] = (authorization, transmitted_bytes)
+            except BaseException:
+                await asyncio.shield(authorization.release())
+                raise
+            try:
+                # Calling continue transfers ownership to the browser. Even if it
+                # then raises or is cancelled, the attempt may have been dispatched.
+                await route.continue_()
+            except BaseException as error:
+                await asyncio.shield(
+                    self._resolve(
+                        request,
+                        BrowserSubrequestOutcome(
+                            classification=(
+                                "cancelled"
+                                if isinstance(error, asyncio.CancelledError)
+                                else "transport_failure"
+                            )
+                        )
+                    )
+                )
+                raise
+        finally:
+            if task is not None:
+                self._route_tasks.discard(task)
+
+    def request_finished(self, request: Any) -> None:
+        self._schedule(self._finish(request))
+
+    def request_failed(self, request: Any) -> None:
+        self._schedule(self._failed(request))
+
+    async def drain(self) -> None:
+        await self._wait_tasks()
+        if self._failure is not None:
+            raise self._failure
+
+    async def _wait_tasks(self) -> None:
+        current = asyncio.current_task()
+        while self._tasks or any(task is not current for task in self._route_tasks):
+            pending = tuple(self._tasks) + tuple(
+                task for task in self._route_tasks if task is not current
+            )
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+
+    async def close(self, classification: str) -> None:
+        await self._wait_tasks()
+        for key, (authorization, transmitted_bytes) in tuple(self._pending.items()):
+            if self._pending.pop(key, None) is None:
+                continue
+            try:
+                await authorization.reconcile(
+                    BrowserSubrequestOutcome(
+                        transmitted_bytes=transmitted_bytes,
+                        classification=classification,
+                    )
+                )
+            except BaseException as error:  # noqa: BLE001 - token failures fail closed
+                self._remember_failure(error)
+        if self._failure is not None:
+            raise self._failure
+
+    async def _finish(self, request: Any) -> None:
+        response = await request.response()
+        status = response.status if response is not None else None
+        length = self._content_length(response.headers if response is not None else {})
+        classification = (
+            "blocked"
+            if status == 403
+            else "rate_limited"
+            if status == 429
+            else "success"
+            if status is not None and status < 400
+            else "http_error"
+        )
+        await self._resolve(
+            request,
+            BrowserSubrequestOutcome(
+                status=status,
+                received_bytes=length,
+                classification=classification,
+            ),
+        )
+
+    async def _failed(self, request: Any) -> None:
+        await self._resolve(
+            request,
+            BrowserSubrequestOutcome(classification="transport_failure"),
+        )
+
+    async def _resolve(
+        self, request: Any, outcome: BrowserSubrequestOutcome
+    ) -> None:
+        pending = self._pending.pop(id(request), None)
+        if pending is None:
+            return
+        authorization, transmitted_bytes = pending
+        self._accounting.record(0, outcome.received_bytes, 0)
+        try:
+            await authorization.reconcile(
+                outcome.model_copy(
+                    update={
+                        "transmitted_bytes": max(
+                            outcome.transmitted_bytes, transmitted_bytes
+                        )
+                    }
+                )
+            )
+        except BaseException as error:  # noqa: BLE001 - token failures fail closed
+            self._remember_failure(error)
+
+    def _schedule(self, coroutine: Any) -> None:
+        task = asyncio.create_task(self._run_event(coroutine))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _run_event(self, coroutine: Any) -> None:
+        try:
+            await coroutine
+        except BaseException as error:  # noqa: BLE001 - event task must retain failure
+            self._remember_failure(error)
+
+    def _remember_failure(self, error: BaseException) -> None:
+        if self._failure is None:
+            self._failure = error
+
+    @staticmethod
+    def _content_length(headers: Any) -> int:
+        try:
+            return max(0, int(headers.get("content-length", "0")))
+        except (TypeError, ValueError):
+            return 0
+
+
 class BrowserRenderer:
     """One lazily started Camoufox instance, shared by the scrapers that need it.
 
@@ -539,10 +721,26 @@ class BrowserRenderer:
     backend: Literal["camoufox"] = "camoufox"
 
     def __init__(
-        self, enabled: bool, pages: int = 1, proxy_lease: ProxyLease | None = None,
+        self,
+        enabled: bool,
+        pages: int = 1,
+        proxy_lease: ProxyLease | None = None,
+        *,
+        proxy_configuration: dict[str, str] | None = None,
+        network_accounting: BrowserNetworkAccounting | None = None,
+        subrequest_authorizer: BrowserSubrequestAuthorizer | None = None,
     ) -> None:
+        if proxy_lease is not None and proxy_configuration is not None:
+            raise ValueError("browser proxy lease and neutral configuration are exclusive")
+        if proxy_configuration is None and network_accounting is not None:
+            raise ValueError("browser accounting requires a proxy configuration")
+        if subrequest_authorizer is not None and network_accounting is None:
+            raise ValueError("browser authorization requires network accounting")
         self.enabled = enabled
         self.proxy_lease = proxy_lease
+        self.proxy_configuration = proxy_configuration
+        self.network_accounting = network_accounting
+        self.subrequest_authorizer = subrequest_authorizer
         self.manager: Any = None
         self.browser: Any = None
         #: Held only while the browser is starting, never across a page load.
@@ -551,6 +749,7 @@ class BrowserRenderer:
         #: which is what a single job's renders were always limited to.
         self.pages = asyncio.Semaphore(max(1, pages))
         self._pages: dict[str, Any] = {}
+        self._network_meters: dict[int, _BrowserSubrequestMeter] = {}
         self._page_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     async def _start(self) -> Any:
@@ -565,9 +764,16 @@ class BrowserRenderer:
             # images are loaded normally even though the dump never reads them.
             self.manager = AsyncCamoufox(
                 headless=True,
-                block_images=self.proxy_lease is not None,
+                block_images=(
+                    self.proxy_lease is not None
+                    or self.proxy_configuration is not None
+                ),
                 humanize=False,
-                proxy=self.proxy_lease.browser_proxy if self.proxy_lease else None,
+                proxy=(
+                    self.proxy_lease.browser_proxy
+                    if self.proxy_lease
+                    else self.proxy_configuration
+                ),
             )
             try:
                 self.browser = await self.manager.__aenter__()
@@ -580,33 +786,61 @@ class BrowserRenderer:
                 raise BrowserUnavailable(f"camoufox could not start: {error}") from error
         return self.browser
 
-    async def _meter_page(self, page: Any) -> None:
+    async def _meter_page(self, page: Any) -> _BrowserSubrequestMeter | None:
         """Block paid browser noise and meter every allowed subrequest."""
-        if self.proxy_lease is None:
-            return
+        if self.proxy_lease is None and self.network_accounting is None:
+            return None
         blocked = {"image", "media", "font"}
         blocked_hosts = ("google-analytics.com", "googletagmanager.com", "doubleclick.net")
+        meter = (
+            _BrowserSubrequestMeter(
+                self.subrequest_authorizer,
+                self.network_accounting,
+            )
+            if self.subrequest_authorizer is not None
+            and self.network_accounting is not None
+            else None
+        )
 
         async def route_request(route: Any, request: Any) -> None:
             if request.resource_type in blocked or any(host in request.url for host in blocked_hosts):
                 await route.abort()
                 return
-            self.proxy_lease.ensure_request_allowed()
-            self.proxy_lease.account(
-                len(request.method.encode()) + len(request.url.encode()) + 64, 0, 1
+            transmitted = (
+                len(request.method.encode()) + len(request.url.encode()) + 64
             )
+            if self.proxy_lease is not None:
+                self.proxy_lease.ensure_request_allowed()
+                self.proxy_lease.account(transmitted, 0, 1)
+            elif meter is not None:
+                await meter.continue_request(route, request, transmitted)
+                return
+            else:
+                assert self.network_accounting is not None
+                self.network_accounting.record(transmitted, 0, 1)
             await route.continue_()
 
         def response_received(response: Any) -> None:
+            if meter is not None:
+                return
             headers = response.headers
             try:
                 length = int(headers.get("content-length", "0"))
             except (TypeError, ValueError):
                 length = 0
-            self.proxy_lease.account(0, length, 0)
+            if self.proxy_lease is not None:
+                self.proxy_lease.account(0, length, 0)
+            else:
+                assert self.network_accounting is not None
+                self.network_accounting.record(0, length, 0)
 
         await page.route("**/*", route_request)
         page.on("response", response_received)
+        if meter is not None:
+            page.on("requestfinished", meter.request_finished)
+            page.on("requestfailed", meter.request_failed)
+            self._network_meters[id(page)] = meter
+        return meter
 
     async def _started(self) -> Any:
         """Start the browser if it is not running, once however many ask at once."""
@@ -641,8 +875,17 @@ class BrowserRenderer:
             page = self._pages.get(origin)
             if page is None or page.is_closed():
                 page = await self.browser.new_page()
-                await self._meter_page(page)
-                await page.goto(page_url, wait_until="domcontentloaded", timeout=45_000)
+                meter = await self._meter_page(page)
+                try:
+                    await page.goto(page_url, wait_until="domcontentloaded", timeout=45_000)
+                    if meter is not None:
+                        await meter.drain()
+                except BaseException:
+                    await page.close()
+                    if meter is not None:
+                        await meter.close("cancelled")
+                        self._network_meters.pop(id(page), None)
+                    raise
                 self._pages[origin] = page
             result = await page.evaluate(
                 """async ({endpoint, method, headers, body}) => {
@@ -655,6 +898,9 @@ class BrowserRenderer:
                 }""",
                 {"endpoint": endpoint, "method": method, "headers": headers or {}, "body": body},
             )
+            meter = self._network_meters.get(id(page))
+            if meter is not None:
+                await meter.drain()
             if result["status"] >= 400:
                 raise Blocked(
                     f"{endpoint} returned {result['status']} in the browser context: "
@@ -671,8 +917,9 @@ class BrowserRenderer:
         async with self.pages:
             await self._started()
             page = await self.browser.new_page()
+            meter: _BrowserSubrequestMeter | None = None
             try:
-                await self._meter_page(page)
+                meter = await self._meter_page(page)
                 await page.goto(url, wait_until="domcontentloaded", timeout=45_000)
                 if wait_for:
                     try:
@@ -680,11 +927,22 @@ class BrowserRenderer:
                     except Exception:  # noqa: BLE001 - a missing selector is not fatal
                         LOGGER.debug("selector %s never appeared on %s", wait_for, url)
                 await page.wait_for_timeout(wait_ms)
+                if meter is not None:
+                    await meter.drain()
                 return await page.content()
             finally:
                 await page.close()
+                if meter is not None:
+                    await asyncio.shield(meter.close("cancelled"))
+                    self._network_meters.pop(id(page), None)
 
     async def evaluate(self, url: str, script: str, wait_ms: int = 2000, wait_for: str | None = None) -> Any:
+        return (await self.evaluate_result(url, script, wait_ms, wait_for)).value
+
+    async def evaluate_result(
+        self, url: str, script: str, wait_ms: int = 2000,
+        wait_for: str | None = None,
+    ) -> BrowserEvaluationResult:
         """Load a page and run a script in it, returning a JSON-safe value.
 
         Used where a supplier computes what it sells in the page itself, so the
@@ -695,8 +953,9 @@ class BrowserRenderer:
         async with self.pages:
             await self._started()
             page = await self.browser.new_page()
+            meter: _BrowserSubrequestMeter | None = None
             try:
-                await self._meter_page(page)
+                meter = await self._meter_page(page)
                 await page.goto(url, wait_until="domcontentloaded", timeout=45_000)
                 if wait_for:
                     try:
@@ -704,13 +963,30 @@ class BrowserRenderer:
                     except Exception:  # noqa: BLE001
                         LOGGER.debug("selector %s never appeared on %s", wait_for, url)
                 await page.wait_for_timeout(wait_ms)
-                return await page.evaluate(script)
+                if meter is not None:
+                    await meter.drain()
+                value = await page.evaluate(script)
+                if meter is not None:
+                    await meter.drain()
+                return BrowserEvaluationResult(
+                    value=value,
+                    final_url=str(page.url),
+                )
             finally:
                 await page.close()
+                if meter is not None:
+                    await asyncio.shield(meter.close("cancelled"))
+                    self._network_meters.pop(id(page), None)
 
     async def close(self) -> None:
         if self.manager is not None:
-            self._pages.clear()
+            pages, self._pages = tuple(self._pages.values()), {}
+            for page in pages:
+                if not page.is_closed():
+                    await page.close()
+            meters, self._network_meters = tuple(self._network_meters.values()), {}
+            for meter in meters:
+                await asyncio.shield(meter.close("cancelled"))
             await self.manager.__aexit__(None, None, None)
             self.manager = self.browser = None
 
@@ -758,10 +1034,45 @@ class CamoufoxBrowserSession:
         self._ensure_open()
         return await self.backend.evaluate(url, script, wait_ms, wait_for)
 
+    async def evaluate_result(
+        self, url: str, script: str, wait_ms: int = 2000,
+        wait_for: str | None = None,
+    ) -> BrowserEvaluationResult:
+        self._ensure_open()
+        return await self.backend.evaluate_result(url, script, wait_ms, wait_for)
+
     async def request_json(
         self, page_url: str, endpoint: str, *, method: str = "POST",
         headers: dict[str, str] | None = None, body: Any = None,
     ) -> Any:
+        response = await self.request(
+            page_url,
+            endpoint,
+            method=method,
+            headers=headers,
+            json_body=body,
+        )
+        if response.status >= 400:
+            raise Blocked(
+                f"{endpoint} returned {response.status} in the browser context"
+            )
+        try:
+            return json_lib.loads(response.content)
+        except json_lib.JSONDecodeError as error:
+            raise Blocked(
+                f"{endpoint} did not return JSON in the browser context"
+            ) from error
+
+    async def request(
+        self,
+        page_url: str,
+        endpoint: str,
+        *,
+        method: str = "GET",
+        headers: dict[str, str] | None = None,
+        json_body: Any = None,
+    ) -> BrowserFetchResponse:
+        """Issue an HTTP request inside this isolated browser context."""
         self._ensure_open()
         if not self.backend.enabled:
             raise Blocked("browser rendering disabled (use --browser auto or always)")
@@ -771,8 +1082,17 @@ class CamoufoxBrowserSession:
             page = self._pages.get(origin)
             if page is None or page.is_closed():
                 page = await self.backend.browser.new_page()
-                await self.backend._meter_page(page)
-                await page.goto(page_url, wait_until="domcontentloaded", timeout=45_000)
+                meter = await self.backend._meter_page(page)
+                try:
+                    await page.goto(page_url, wait_until="domcontentloaded", timeout=45_000)
+                    if meter is not None:
+                        await meter.drain()
+                except BaseException:
+                    await page.close()
+                    if meter is not None:
+                        await meter.close("cancelled")
+                        self.backend._network_meters.pop(id(page), None)
+                    raise
                 self._pages[origin] = page
             result = await page.evaluate(
                 """async ({endpoint, method, headers, body}) => {
@@ -781,21 +1101,34 @@ class CamoufoxBrowserSession:
                         body: body === null ? undefined : JSON.stringify(body),
                         credentials: 'include',
                     });
-                    return {status: response.status, text: await response.text()};
+                    return {
+                        status: response.status,
+                        headers: Object.fromEntries(response.headers.entries()),
+                        text: await response.text(),
+                        url: response.url,
+                    };
                 }""",
-                {"endpoint": endpoint, "method": method, "headers": headers or {}, "body": body},
+                {
+                    "endpoint": endpoint,
+                    "method": method,
+                    "headers": headers or {},
+                    "body": json_body,
+                },
             )
-            if result["status"] >= 400:
-                raise Blocked(
-                    f"{endpoint} returned {result['status']} in the browser context: "
-                    f"{result['text'][:400]}"
-                )
-            try:
-                return json_lib.loads(result["text"])
-            except json_lib.JSONDecodeError as error:
-                raise Blocked(
-                    f"{endpoint} did not return JSON in the browser context"
-                ) from error
+            meter = self.backend._network_meters.get(id(page))
+            if meter is not None:
+                await meter.drain()
+            return BrowserFetchResponse(
+                status=int(result["status"]),
+                headers=MappingProxyType(
+                    {
+                        str(key): str(value)
+                        for key, value in result["headers"].items()
+                    }
+                ),
+                content=str(result["text"]).encode("utf-8"),
+                final_url=str(result["url"]),
+            )
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -809,6 +1142,9 @@ class CamoufoxBrowserSession:
         for page in pages:
             if not page.is_closed():
                 await page.close()
+            meter = self.backend._network_meters.pop(id(page), None)
+            if meter is not None:
+                await asyncio.shield(meter.close("cancelled"))
 
 
 def _headers_size(headers: Any) -> int:
@@ -1135,6 +1471,11 @@ class Fetcher:
                 content=stored.body.encode("utf-8"),
                 headers=stored.headers,
                 request=httpx.Request(method, stored.url or url),
+                extensions={
+                    "catalogue_cache_provenance": (
+                        "replayed" if self.cache.mode == "replay" else "fresh"
+                    )
+                },
             )
         if self.cache.mode == "replay":
             raise NotCached(f"{method} {url} is not in the cache")
@@ -1287,6 +1628,7 @@ class Fetcher:
                 content=stale.body.encode("utf-8"),
                 headers=stale.headers,
                 request=httpx.Request(method, stale.url or url),
+                extensions={"catalogue_cache_provenance": "fresh"},
             )
         if (
             stale is not None
@@ -1378,7 +1720,10 @@ class Fetcher:
             content=stale.body.encode("utf-8"),
             headers=stale.headers,
             request=httpx.Request(method, stale.url or url),
-            extensions={"catalogue_stale_on_error": True},
+            extensions={
+                "catalogue_cache_provenance": "stale",
+                "catalogue_stale_on_error": True,
+            },
         )
 
     async def _impersonate(
@@ -1485,10 +1830,29 @@ class Fetcher:
         return document
 
     async def evaluate_in_browser(
-        self, url: str, script: str, wait_ms: int = 2000, wait_for: str | None = None,
+        self,
+        url: str,
+        script: str,
+        wait_ms: int = 2000,
+        wait_for: str | None = None,
+        *,
+        action_id: str = "legacy-evaluate.v1",
     ) -> Any:
+        key = self.cache.key(
+            "browser-evaluate",
+            url,
+            action_id=action_id,
+            script_sha256=hashlib.sha256(script.encode()).hexdigest(),
+            wait_ms=wait_ms,
+            wait_for=wait_for,
+        )
+        if stored := self.cache.read(key, url):
+            return json_lib.loads(stored.body)
+        if self.cache.mode == "replay":
+            raise NotCached(f"browser evaluation for {url} is not in the cache")
         if self.browser_policy == "never":
             raise Blocked("browser rendering disabled")
+        proxy_requests_before = self.proxy_lease.requests if self.proxy_lease else 0
         async with self.limiter.gate(url):
             await self.limiter.wait(url)
             try:
@@ -1497,6 +1861,22 @@ class Fetcher:
                 self.limiter.record_failure(url, type(error).__name__)
                 raise
             self.limiter.record_success(url)
+        encoded = json_lib.dumps(result, ensure_ascii=False, separators=(",", ":"))
+        self.stats.browser_requests += 1
+        if self.proxy_lease:
+            self.stats.proxy_requests += self.proxy_lease.requests - proxy_requests_before
+        self.stats.browser_rx_bytes_estimated += len(encoded.encode())
+        self.cache.write(
+            key,
+            CachedResponse(
+                status=200,
+                url=url,
+                body=encoded,
+                headers={"content-type": "application/json"},
+                fetched_at=time.time(),
+                kind="browser-evaluate",
+            ),
+        )
         return result
 
     async def request_json_in_browser(

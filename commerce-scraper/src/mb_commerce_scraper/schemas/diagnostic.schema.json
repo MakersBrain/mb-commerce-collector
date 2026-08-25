@@ -1,0 +1,96 @@
+{
+  "$defs": {
+    "DiagnosticCode": {
+      "enum": [
+        "result_limit_reached",
+        "request_budget_exhausted",
+        "enumeration_incomplete",
+        "entity_fetch_failed",
+        "parser_unsupported",
+        "browser_required",
+        "rate_limited",
+        "proxy_budget_exhausted",
+        "optional_enrichment_skipped",
+        "schema_changed",
+        "checkpoint_invalid"
+      ],
+      "title": "DiagnosticCode",
+      "type": "string"
+    },
+    "DiagnosticSeverity": {
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ],
+      "title": "DiagnosticSeverity",
+      "type": "string"
+    },
+    "JsonValue": {}
+  },
+  "$id": "https://makersbrain.com/schemas/mb-commerce-scraper/v1/diagnostic.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "affects_completeness": {
+      "title": "Affects Completeness",
+      "type": "boolean"
+    },
+    "code": {
+      "$ref": "#/$defs/DiagnosticCode"
+    },
+    "entity_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Entity Id"
+    },
+    "message": {
+      "maxLength": 2048,
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Metadata",
+      "type": "object"
+    },
+    "retryable": {
+      "title": "Retryable",
+      "type": "boolean"
+    },
+    "severity": {
+      "$ref": "#/$defs/DiagnosticSeverity"
+    },
+    "url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Url"
+    }
+  },
+  "required": [
+    "code",
+    "severity",
+    "message",
+    "retryable",
+    "affects_completeness"
+  ],
+  "title": "Diagnostic",
+  "type": "object"
+}

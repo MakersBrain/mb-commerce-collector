@@ -113,33 +113,44 @@ def schema_directory() -> Any:
     return Path(__file__).resolve().parent / "schema"
 
 
-#: The schema files, in the order they have to run.
+#: The whole schema, in one file.
 #:
-#: Spelled out rather than globbed, because the order is load-bearing and
-#: alphabetical is not it: `catalogue-canonical-promotion.sql` sorts first and
-#: alters `catalogue.canonical_products`, which the reference schema three
-#: entries below is what creates. Globbing worked only for as long as the names
-#: happened to sort correctly, and stopped the day the promotion file was added.
+#: It was eleven files applied in a hand-maintained order, and the order was
+#: load-bearing: `catalogue-canonical-promotion.sql` sorts first alphabetically
+#: but alters a table the reference schema creates. That ordering had to be
+#: repeated in `docker-compose.yml`'s initdb mounts, and the two lists drifted
+#: — the compose side never gained `catalogue-ops-schema-v6.sql`, so a freshly
+#: initialised stack was a version behind until a worker ran this function.
 #:
-#: `docker-compose.yml` mounts the same files into initdb under numeric
-#: prefixes for the same reason. Both lists have to agree.
+#: One baseline removes the class of bug. It is a `pg_dump --schema-only` of a
+#: database with all eleven applied; regenerate it the same way rather than
+#: editing it by hand.
+BASELINE = "catalogue-schema.sql"
+LINEAGE_RUNTIME_MIGRATION = "catalogue-lineage-runtime-v1.sql"
+LINEAGE_LIMITED_MIGRATION = "catalogue-lineage-limited-v1.sql"
+PROXY_ATTEMPT_AUTHORIZATION_MIGRATION = "catalogue-proxy-attempt-authorization-v1.sql"
+PROXY_AUDIT_ROLE_MIGRATION = "catalogue-proxy-audit-role-v1.sql"
+PROXY_PROVIDER_INTEGRITY_MIGRATION = "catalogue-proxy-provider-integrity-v1.sql"
+PROXY_PROFILE_SECRET_INTENT_MIGRATION = "catalogue-proxy-profile-secret-intent-v1.sql"
+
 SCHEMA_FILES = (
-    "catalogue-reference-schema.sql",
-    "catalogue-reference-schema-v2.sql",
-    "catalogue-reference-schema-v3.sql",
-    "catalogue-reference-schema-v4.sql",
-    "catalogue-ops-schema.sql",
-    "catalogue-ops-schema-v2.sql",
-    "catalogue-ops-schema-v3.sql",
-    "catalogue-ops-schema-v4.sql",
-    "catalogue-ops-schema-v5.sql",
-    "catalogue-ops-schema-v6.sql",
-    "catalogue-canonical-promotion.sql",
+    BASELINE,
+    LINEAGE_RUNTIME_MIGRATION,
+    LINEAGE_LIMITED_MIGRATION,
+    PROXY_ATTEMPT_AUTHORIZATION_MIGRATION,
+    PROXY_AUDIT_ROLE_MIGRATION,
+    PROXY_PROVIDER_INTEGRITY_MIGRATION,
+    PROXY_PROFILE_SECRET_INTENT_MIGRATION,
 )
+
+#: The table added by the last file that went into the baseline. Its presence
+#: is what separates a database that is already at head from one that stopped
+#: somewhere in the middle of the old sequence.
+HEAD_SENTINEL = "catalogue.source_health_probes"
 
 
 async def apply_schema(connection: psycopg.AsyncConnection[dict[str, Any]]) -> list[str]:
-    """Apply each unrecorded schema file, adopting a legacy initdb baseline."""
+    """Apply each unrecorded schema file, adopting a database already at head."""
     directory = schema_directory()
     await connection.execute("create schema if not exists catalogue")
     await connection.execute(
@@ -150,17 +161,28 @@ async def apply_schema(connection: psycopg.AsyncConnection[dict[str, Any]]) -> l
     )
     recorded = await fetch_all(connection, "select filename from catalogue.schema_migrations")
     done = {row["filename"] for row in recorded}
-    baseline = SCHEMA_FILES[0]
-    if baseline not in done:
+    if BASELINE not in done:
         existing = await fetch_one(
             connection, "select to_regclass('catalogue.sources') is not null as present"
         )
         if existing and existing["present"]:
-            await connection.execute(
-                "insert into catalogue.schema_migrations(filename) values (%s)", (baseline,)
+            # Populated by initdb, or by the eleven files this baseline
+            # replaces. Either way the DDL is already there and running it
+            # again would fail on the first `create table`.
+            head = await fetch_one(
+                connection, "select to_regclass(%s) is not null as present", (HEAD_SENTINEL,)
             )
-            done.add(baseline)
-            LOGGER.info("schema.adopted", file=baseline)
+            if not (head and head["present"]):
+                raise RuntimeError(
+                    f"{HEAD_SENTINEL} is missing, so this database stopped part-way through the "
+                    "pre-squash migrations. Apply them with the previous release before "
+                    f"upgrading to {BASELINE}, which can only create a schema, not migrate one."
+                )
+            await connection.execute(
+                "insert into catalogue.schema_migrations(filename) values (%s)", (BASELINE,)
+            )
+            done.add(BASELINE)
+            LOGGER.info("schema.adopted", file=BASELINE)
 
     applied: list[str] = []
     for name in SCHEMA_FILES:

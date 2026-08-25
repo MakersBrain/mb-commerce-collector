@@ -219,12 +219,10 @@ class WebshareProvider:
         requests = payload.get("requests_total")
         requests = requests if isinstance(requests, int) and requests >= 0 else 0
         return UsageReport(
-            total_received_bytes=total,
             total_bytes=total,
             requests=requests,
             buckets=[UsageBucket(
-                key=start.date().isoformat(), received_bytes=total,
-                total_bytes=total, requests=requests,
+                key=start.date().isoformat(), total_bytes=total, requests=requests,
             )],
         )
 

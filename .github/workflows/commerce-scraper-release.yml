@@ -1,0 +1,46 @@
+name: Commerce scraper distribution release
+
+on:
+  push:
+    tags: ["commerce-scraper-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: commerce-scraper-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: commerce-scraper/uv.lock
+      - name: Require a tagged commit from main
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+      - name: Verify source, contracts, and clean installed consumers
+        run: make scraper-check
+      - name: Verify immutable release metadata
+        run: >-
+          uv --directory commerce-scraper run --extra dev --
+          python scripts/verify_release.py --tag "$GITHUB_REF_NAME"
+      - name: Publish the verified GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          commerce-scraper/dist/mb_commerce_scraper-*.whl
+          commerce-scraper/dist/mb_commerce_scraper-*.tar.gz
+          --verify-tag
+          --title "mb-commerce-scraper ${GITHUB_REF_NAME#commerce-scraper-v}"
+          --generate-notes

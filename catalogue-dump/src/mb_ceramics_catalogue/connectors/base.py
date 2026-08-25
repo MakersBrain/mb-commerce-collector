@@ -6,9 +6,12 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from enum import StrEnum
 from typing import Generic, Protocol, TypeVar, runtime_checkable
 
+from mb_commerce_scraper.models import (
+    CommerceProductSnapshot,
+    ContractModel,
+    StockQuantityKind,
+)
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
-
-from .commerce import CommerceProductSnapshot, ContractModel, StockQuantityKind
 
 
 class SnapshotField(StrEnum):
@@ -122,11 +125,12 @@ def result_limit_diagnostic(limit: int, url: str) -> Diagnostic:
 class Diagnostic(ContractModel):
     code: DiagnosticCode
     severity: DiagnosticSeverity
-    message: str = Field(min_length=1)
+    message: str = Field(min_length=1, max_length=2048)
     retryable: bool
     affects_completeness: bool
     url: str | None = None
     entity_id: str | None = None
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class ConnectorCheckpoint(ContractModel):

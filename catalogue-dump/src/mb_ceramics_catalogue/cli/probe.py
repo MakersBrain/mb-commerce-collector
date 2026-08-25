@@ -19,6 +19,10 @@ from mb_ceramics_catalogue.config.settings import CrawlParams
 from mb_ceramics_catalogue.config.sources import SourcesFile, default_path
 from mb_ceramics_catalogue.crawl.session import open_session
 from mb_ceramics_catalogue.observability import logging as obs
+from mb_ceramics_catalogue.observability import tracing
+from mb_ceramics_catalogue.ops.commerce_scraper_runtime import (
+    open_local_commerce_session,
+)
 from mb_ceramics_catalogue.scrapers.cache import MODES as CACHE_MODES
 from mb_ceramics_catalogue.scrapers.record import RecordBuilder, coverage
 
@@ -40,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--cache", nargs="?", const=".cache", default=None, metavar="DIR")
     parser.add_argument("--cache-mode", choices=CACHE_MODES, default="auto")
+    parser.add_argument(
+        "--pipeline",
+        choices=("legacy", "connector_canary"),
+        default="legacy",
+        help="explicitly select the reusable connector canary",
+    )
     parser.add_argument("--show", type=int, default=2, help="how many sample rows to print")
     parser.add_argument("--log-level", default="WARNING")
     return parser
@@ -47,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def run(options: argparse.Namespace) -> int:
     obs.configure(options.log_level)
+    tracing.configure("catalogue-probe")
     sources = SourcesFile.load(options.sources_file or default_path())
     if options.source not in sources:
         raise ValueError(f"unknown source; known: {', '.join(sorted(sources.names()))}")
@@ -60,20 +71,39 @@ async def run(options: argparse.Namespace) -> int:
         impersonate=options.impersonate,
         robots=options.robots,
         cache_mode=options.cache_mode if options.cache else "off",
+        pipeline=options.pipeline,
         # A probe wants what is on the site now, not what was there last week.
         cache_max_age_hours=0 if options.cache_mode == "replay" else 1,
     )
 
     with RecordBuilder(sources.as_scraper_configs()):
-        async with open_session(params, Path(options.cache) if options.cache else None) as session:
-            scraper = scrapers.build(
-                config.scraper, options.source, config.as_scraper_config(), session.fetcher
-            )
-            result = await scraper.run(options.limit)
+        cache_directory = Path(options.cache) if options.cache else None
+        if params.pipeline == "connector_canary":
+            async with open_local_commerce_session(
+                params, cache_directory
+            ) as local_session:
+                local_scraper = local_session.build(
+                    config.scraper,
+                    options.source,
+                    config.as_scraper_config(),
+                    None,
+                )
+                result = await local_scraper.run(options.limit)
+                scraper_method = local_scraper.method
+        else:
+            async with open_session(params, cache_directory) as legacy_session:
+                legacy_scraper = scrapers.build(
+                    config.scraper,
+                    options.source,
+                    config.as_scraper_config(),
+                    legacy_session.fetcher,
+                )
+                result = await legacy_scraper.run(options.limit)
+                scraper_method = legacy_scraper.method
 
     records = result.records
     print(f"\nsource   : {options.source} ({config.label})")
-    print(f"scraper  : {config.scraper} / method={scraper.method}")
+    print(f"scraper  : {config.scraper} / method={scraper_method}")
     print(f"records  : {len(records)}   requests={result.requests}   rendered={result.rendered_pages}")
     print(f"discovered={result.discovered}  truncated={result.truncated}  errors={len(result.errors)}")
     for note in result.notes:

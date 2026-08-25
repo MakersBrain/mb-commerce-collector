@@ -1,0 +1,54 @@
+{
+  "$defs": {
+    "JsonValue": {}
+  },
+  "$id": "https://makersbrain.com/schemas/mb-commerce-scraper/v1/connector-checkpoint.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "checkpoint_schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Checkpoint Schema Version",
+      "type": "integer"
+    },
+    "collection_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Collection Fingerprint",
+      "type": "string"
+    },
+    "connector": {
+      "minLength": 1,
+      "title": "Connector",
+      "type": "string"
+    },
+    "connector_version": {
+      "minLength": 1,
+      "title": "Connector Version",
+      "type": "string"
+    },
+    "lineage": {
+      "minLength": 1,
+      "title": "Lineage",
+      "type": "string"
+    },
+    "resume_after": {
+      "$ref": "#/$defs/JsonValue"
+    },
+    "source_id": {
+      "minLength": 1,
+      "title": "Source Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "connector",
+    "connector_version",
+    "source_id",
+    "lineage",
+    "collection_fingerprint",
+    "resume_after"
+  ],
+  "title": "ConnectorCheckpoint",
+  "type": "object"
+}

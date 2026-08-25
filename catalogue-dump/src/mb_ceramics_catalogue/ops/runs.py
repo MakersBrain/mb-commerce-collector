@@ -25,6 +25,7 @@ from psycopg.types.json import Jsonb
 from mb_ceramics_catalogue.config.sources import SourcesFile
 from mb_ceramics_catalogue.observability import logging as obs
 from mb_ceramics_catalogue.ops import events, outbox
+from mb_ceramics_catalogue.scrapers import adapter_capabilities
 
 LOGGER = obs.get_logger("catalogue.runs")
 
@@ -32,12 +33,6 @@ Connection = psycopg.AsyncConnection[dict[str, Any]]
 
 #: States a job can no longer leave.
 TERMINAL = ("succeeded", "degraded", "failed", "cancelled", "skipped")
-
-#: Sources that need a browser, and the capability a worker must advertise to
-#: claim them (§5.5). A browser makes the image large and the process
-#: memory-hungry, and most workers do not need one.
-BROWSER_SOURCES = frozenset({"ceramicolours", "keramik-kraft"})
-
 
 def host_of(url: str) -> str:
     return urlparse(url).netloc
@@ -125,7 +120,8 @@ async def create_jobs(
                r.id as route_id, r.protocol, r.country, r.state as route_state,
                r.city, r.session_mode, r.session_minutes, r.max_bytes as route_max_bytes,
                r.enabled as route_enabled,
-               f.id as profile_id, f.logical_name as profile,
+               f.id as profile_id, f.provider, f.logical_name as profile,
+               f.secret_generation,
                f.enabled as profile_enabled, f.lifecycle as profile_lifecycle
           from catalogue.source_proxy_policies p
           left join catalogue.proxy_routes r on r.id = p.route_id
@@ -160,7 +156,9 @@ async def create_jobs(
                 "policy_revision": policy["revision"],
                 "route_id": str(policy["route_id"]),
                 "profile_id": str(policy["profile_id"]),
+                "provider": policy["provider"],
                 "profile": policy["profile"],
+                "secret_generation": policy["secret_generation"],
                 "protocol": policy["protocol"],
                 "country": policy["country"] or (config.country.upper() if config.country else None),
                 "state": policy["route_state"],
@@ -191,7 +189,9 @@ async def create_jobs(
                 "host": host,
                 "priority": priority,
                 "max_attempts": max_attempts,
-                "requires": ["browser"] if name in BROWSER_SOURCES else [],
+                "requires": list(
+                    adapter_capabilities(config.scraper).required_worker_capabilities
+                ),
                 "proxy_snapshot": Jsonb(proxy_snapshot),
                 # Only sources sharing a host are spread out; the common case of
                 # one source per host gets no delay at all.

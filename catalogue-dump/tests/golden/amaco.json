@@ -1,0 +1,579 @@
+{
+  "digest": "289a03620eb3b2d405817e078a294b2034359b9158ff20861e1155abddb0952c",
+  "discovered": 962,
+  "error_count": 0,
+  "errors": [],
+  "extraction_method": "graphql",
+  "field_coverage": {
+    "all_image_urls": 635,
+    "brand": 635,
+    "category_path": 635,
+    "claims": 106,
+    "colour": 591,
+    "description": 634,
+    "documents": 0,
+    "effects": 350,
+    "family": 635,
+    "firing": 294,
+    "form": 48,
+    "gtin": 0,
+    "manufacturer_sku": 635,
+    "package_size": 619,
+    "stock_quantity": 0,
+    "supplier_reference": 635,
+    "surface": 102,
+    "unit_price": 619,
+    "vat_status": 635
+  },
+  "notes": [
+    "storefront token discovered on https://shop.amaco.com/glazes-underglazes/"
+  ],
+  "records": 635,
+  "rendered_pages": 0,
+  "requests": 21,
+  "sample": [
+    {
+      "all_image_urls": [
+        "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/157/3011/Magic_Mud_48661M__13551.1659625419.jpg",
+        "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/157/3010/Magic_Mud_Owl__73335.1659625419.jpg"
+      ],
+      "application_methods": null,
+      "availability": "https://schema.org/InStock",
+      "brand": "AMACO",
+      "brand_basis": "published",
+      "category_path": [
+        "Air Dry Clay"
+      ],
+      "claims": null,
+      "coats": null,
+      "colour": null,
+      "currency": "USD",
+      "description": "Our Magic Mud Multi-Project Pack includes 25 lb. of our Air Dry Magic Mud clay, an 8\" wire clay cutter, and our Parent/Teacher guide.",
+      "documents": null,
+      "effects": null,
+      "external_id": "amaco:https://shop.amaco.com/magic-mud-multi-project-pack-25lb/#122",
+      "extraction_method": "graphql",
+      "family": "clay_body",
+      "fetched_at": "<volatile>",
+      "firing": null,
+      "form": null,
+      "format": "ceramics.catalogue_item.v2",
+      "gtin": null,
+      "image_url": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/157/3011/Magic_Mud_48661M__13551.1659625419.jpg",
+      "list_price": null,
+      "manufacturer_sku": "48661M",
+      "manufacturer_sku_basis": "manufacturer_shop",
+      "min_order_quantity": null,
+      "name": "Magic Mud Multi-Project Pack 25lb",
+      "name_parsed_from": null,
+      "name_raw": "Magic Mud Multi-Project Pack 25lb",
+      "package_size": {
+        "dimension": "weight",
+        "evidence": "25lb",
+        "grams": 11339.8,
+        "unit": "lb",
+        "value": 25.0
+      },
+      "parent_external_id": "amaco:https://shop.amaco.com/magic-mud-multi-project-pack-25lb/",
+      "price": 60.0,
+      "price_text": null,
+      "product_name": "Magic Mud Multi-Project Pack 25lb",
+      "product_url": "https://shop.amaco.com/magic-mud-multi-project-pack-25lb/",
+      "raw": {
+        "product": {
+          "availabilityV2": {
+            "description": "",
+            "status": "Available"
+          },
+          "brand": {
+            "name": "AMACO"
+          },
+          "categories": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Air Dry Clay",
+                  "path": "/clays/air-dry-clay/"
+                }
+              }
+            ]
+          },
+          "customFields": {
+            "edges": [
+              {
+                "node": {
+                  "name": "product_details",
+                  "value": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/image-manager/ap-logo.png"
+                }
+              }
+            ]
+          },
+          "defaultImage": {
+            "urlOriginal": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/157/3011/Magic_Mud_48661M__13551.1659625419.jpg"
+          },
+          "description": "Our Magic Mud Multi-Project Pack includes 25 lb. of our Air Dry Magic Mud clay, an 8\" wire clay cutter, and our Parent/Teacher guide.",
+          "entityId": 157,
+          "images": {
+            "edges": [
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/157/3011/Magic_Mud_48661M__13551.1659625419.jpg"
+                }
+              },
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/157/3010/Magic_Mud_Owl__73335.1659625419.jpg"
+                }
+              }
+            ]
+          },
+          "name": "Magic Mud Multi-Project Pack 25lb",
+          "path": "/magic-mud-multi-project-pack-25lb/",
+          "prices": {
+            "price": {
+              "currencyCode": "USD",
+              "value": 60.0
+            },
+            "retailPrice": null
+          },
+          "sku": "48661M"
+        },
+        "variant": {
+          "defaultImage": null,
+          "entityId": 122,
+          "inventory": {
+            "aggregated": null,
+            "isInStock": true
+          },
+          "options": {
+            "edges": []
+          },
+          "prices": {
+            "price": {
+              "currencyCode": "USD",
+              "value": 60.0
+            }
+          },
+          "sku": "48661M"
+        }
+      },
+      "source": "amaco",
+      "source_detail_level": "api",
+      "source_updated_at": null,
+      "stock_quantity": null,
+      "supplier_reference": "48661M",
+      "surface": null,
+      "technical_attributes": {
+        "product_details": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/image-manager/ap-logo.png"
+      },
+      "unit_price": {
+        "currency": "USD",
+        "per": "kg",
+        "value": 5.2911
+      },
+      "variant_title": null,
+      "vat_rate": null,
+      "vat_status": "exclusive"
+    },
+    {
+      "all_image_urls": [
+        "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/160/3007/Mexican_48652C_2011__25082.1660165762.jpg",
+        "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/160/3008/Mexican_bowl__87846.1660165762.jpg"
+      ],
+      "application_methods": null,
+      "availability": "https://schema.org/InStock",
+      "brand": "AMACO",
+      "brand_basis": "published",
+      "category_path": [
+        "Self Hardening Clay"
+      ],
+      "claims": null,
+      "coats": null,
+      "colour": null,
+      "currency": "USD",
+      "description": "Our rich terra cotta premium quality self-hardening clay is formulated for handbuilding, sculpture and wheel throwing. Modeled objects with resemble Native American or Mexican Pottery with little or no decoration necessary. Moist, ready-to-use. Pieces dry hard and durable, but not waterproof. Can be painted.",
+      "documents": null,
+      "effects": null,
+      "external_id": "amaco:https://shop.amaco.com/mexican-pottery-self-hardening-clay/#2004",
+      "extraction_method": "graphql",
+      "family": "clay_body",
+      "fetched_at": "<volatile>",
+      "firing": null,
+      "form": null,
+      "format": "ceramics.catalogue_item.v2",
+      "gtin": null,
+      "image_url": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/160/3007/Mexican_48652C_2011__25082.1660165762.jpg",
+      "list_price": null,
+      "manufacturer_sku": "48652C",
+      "manufacturer_sku_basis": "manufacturer_shop",
+      "min_order_quantity": null,
+      "name": "Mexican Pottery Self-Hardening Clay 5 lb",
+      "name_parsed_from": null,
+      "name_raw": "Mexican Pottery Self-Hardening Clay 5 lb",
+      "package_size": {
+        "dimension": "weight",
+        "evidence": "5 lb",
+        "grams": 2267.96,
+        "unit": "lb",
+        "value": 5.0
+      },
+      "parent_external_id": "amaco:https://shop.amaco.com/mexican-pottery-self-hardening-clay/",
+      "price": 27.0,
+      "price_text": null,
+      "product_name": "Mexican Pottery Self-Hardening Clay",
+      "product_url": "https://shop.amaco.com/mexican-pottery-self-hardening-clay/",
+      "raw": {
+        "product": {
+          "availabilityV2": {
+            "description": "",
+            "status": "Available"
+          },
+          "brand": {
+            "name": "AMACO"
+          },
+          "categories": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Self Hardening Clay",
+                  "path": "/clays/self-hardening-clay/"
+                }
+              }
+            ]
+          },
+          "customFields": {
+            "edges": [
+              {
+                "node": {
+                  "name": "product_details",
+                  "value": "Unit of Measure\tEA"
+                }
+              }
+            ]
+          },
+          "defaultImage": {
+            "urlOriginal": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/160/3007/Mexican_48652C_2011__25082.1660165762.jpg"
+          },
+          "description": "Our rich terra cotta premium quality self-hardening clay is formulated for handbuilding, sculpture and wheel throwing. Modeled objects with resemble Native American or Mexican Pottery with little or no decoration necessary. Moist, ready-to-use. Pieces dry hard and durable, but not waterproof. Can be painted.",
+          "entityId": 160,
+          "images": {
+            "edges": [
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/160/3007/Mexican_48652C_2011__25082.1660165762.jpg"
+                }
+              },
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/160/3008/Mexican_bowl__87846.1660165762.jpg"
+                }
+              }
+            ]
+          },
+          "name": "Mexican Pottery Self-Hardening Clay",
+          "path": "/mexican-pottery-self-hardening-clay/",
+          "prices": {
+            "price": {
+              "currencyCode": "USD",
+              "value": 27.0
+            },
+            "retailPrice": null
+          },
+          "sku": ""
+        },
+        "variant": {
+          "defaultImage": null,
+          "entityId": 2004,
+          "inventory": {
+            "aggregated": null,
+            "isInStock": true
+          },
+          "options": {
+            "edges": [
+              {
+                "node": {
+                  "displayName": "Size",
+                  "values": {
+                    "edges": [
+                      {
+                        "node": {
+                          "label": "5 lb"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "prices": {
+            "price": {
+              "currencyCode": "USD",
+              "value": 27.0
+            }
+          },
+          "sku": "48652C"
+        }
+      },
+      "source": "amaco",
+      "source_detail_level": "api",
+      "source_updated_at": null,
+      "stock_quantity": null,
+      "supplier_reference": "48652C",
+      "surface": null,
+      "technical_attributes": {
+        "Size": "5 lb",
+        "product_details": "Unit of Measure EA"
+      },
+      "unit_price": {
+        "currency": "USD",
+        "per": "kg",
+        "value": 11.905
+      },
+      "variant_title": "5 lb",
+      "vat_rate": null,
+      "vat_status": "exclusive"
+    },
+    {
+      "all_image_urls": [
+        "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/2386/4807/P-65_SiennaFrost_Square_WEB__91134.1786809426.jpg",
+        "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/2386/4806/P-65_Cone6_BudVase1_WEB__64935.1786809426.jpg",
+        "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/2386/4805/P-65_SiennaFrost_PintJar_WEB__05565.1786809426.jpg"
+      ],
+      "application_methods": [
+        "brushing"
+      ],
+      "availability": "https://schema.org/OutOfStock",
+      "brand": "AMACO",
+      "brand_basis": "published",
+      "category_path": [
+        "Glazes & Underglazes",
+        "Mid-High Fire Glazes",
+        "(P) Pearlescent"
+      ],
+      "claims": [
+        {
+          "basis": "published_text",
+          "claim": true,
+          "evidence": "Food Safe: Tested for lead and cadmium release in accordance with ASTM C738-94.",
+          "type": "food_contact_suitability"
+        }
+      ],
+      "coats": {
+        "evidence": "2 coats",
+        "maximum": 2,
+        "minimum": 2
+      },
+      "colour": {
+        "basis": "product_name",
+        "name": "Sienna Frost"
+      },
+      "currency": "USD",
+      "description": "Available for Pre-Order! Contact your AMACO distributor to place your pre-order for the Pearlescent Glaze Series. Get your order in early to be among the first to receive these new glazes when they become available. P-65 Sienna Frost is a fluid, orange-tan with iridescent mottling where thick. Food Safe: Tested for lead and cadmium release in accordance with ASTM C738-94. Application Tips: 3 brush coats recommended. If you apply the glaze heavily, 2 coats will also work. Best glazing brush to use: AMACO Fitch Fan Brush. Underapplication will result in a dry glaze with no crystals. Overapplication will cause a rough appearance. Can also lead to heavier flow. Layers well over AMACO Celadons , other Potter's Choice, and Satin Matte glazes. Glaze layering fired results may run if paired with a runny glaze. Apply receding coats when layering to help with runniness of final fired result. We recommend testing any layering combination before applying it to a full ceramic piece. Fire to cone 6 when used alone or layered for results similar to AMACO imagery. Shake well before use. For best results, do not thin the glaze; apply 3 coats with a brush to Cone 04 bisque. (Let the glaze dry between coats.) Glaze fire to Cone 5-6. Due to variations in raw materials used during manufacturing, we recommend firing glazed test tiles before using each new batch of glaze.",
+      "documents": null,
+      "effects": null,
+      "external_id": "amaco:https://shop.amaco.com/p-65-sienna-frost/#4124",
+      "extraction_method": "graphql",
+      "family": "underglaze",
+      "fetched_at": "<volatile>",
+      "firing": {
+        "basis": "published_text",
+        "cone_max": "6",
+        "cone_min": "6",
+        "cone_system": "orton",
+        "evidence": "cone 6",
+        "max_celsius": 1231,
+        "min_celsius": 1231,
+        "temperature_basis": "derived_from_cone"
+      },
+      "form": null,
+      "format": "ceramics.catalogue_item.v2",
+      "gtin": null,
+      "image_url": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/2386/4807/P-65_SiennaFrost_Square_WEB__91134.1786809426.jpg",
+      "list_price": null,
+      "manufacturer_sku": "P65",
+      "manufacturer_sku_basis": "manufacturer_shop",
+      "min_order_quantity": null,
+      "name": "Sienna Frost Pint",
+      "name_parsed_from": [
+        "P-65"
+      ],
+      "name_raw": "P-65 Sienna Frost Pint",
+      "package_size": {
+        "basis": "named_container",
+        "dimension": "volume",
+        "evidence": "pint",
+        "millilitres": 473.176,
+        "unit": "pint",
+        "value": 1.0
+      },
+      "parent_external_id": "amaco:https://shop.amaco.com/p-65-sienna-frost/",
+      "price": 30.0,
+      "price_text": null,
+      "product_name": "P-65 Sienna Frost",
+      "product_url": "https://shop.amaco.com/p-65-sienna-frost/",
+      "raw": {
+        "product": {
+          "availabilityV2": {
+            "description": "",
+            "status": "Unavailable"
+          },
+          "brand": {
+            "name": "AMACO"
+          },
+          "categories": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Glazes & Underglazes",
+                  "path": "/glazes-underglazes/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Mid-High Fire Glazes",
+                  "path": "/glazes-underglazes/mid-high-fire-glazes/"
+                }
+              },
+              {
+                "node": {
+                  "name": "(P) Pearlescent",
+                  "path": "/glazes-underglazes/mid-high-fire-glazes/p-pearlescent/"
+                }
+              }
+            ]
+          },
+          "customFields": {
+            "edges": [
+              {
+                "node": {
+                  "name": "product_details",
+                  "value": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/image-manager/ap-logo.png?t=1675301871"
+                }
+              },
+              {
+                "node": {
+                  "name": "product_details",
+                  "value": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/image-manager/cone-logo.png?t=1675398848"
+                }
+              },
+              {
+                "node": {
+                  "name": "product_details",
+                  "value": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/image-manager/layerinicon-web.png?t=1714060929"
+                }
+              },
+              {
+                "node": {
+                  "name": "product_details",
+                  "value": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/320w/image-manager/opaque-icon-web.png?t=1723556271"
+                }
+              },
+              {
+                "node": {
+                  "name": "product_details",
+                  "value": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/320w/image-manager/do-not-use-food-safe-logo-with-tm-with-words-black.png?t=1781012012"
+                }
+              },
+              {
+                "node": {
+                  "name": "product_info_badge",
+                  "value": "NEW!"
+                }
+              }
+            ]
+          },
+          "defaultImage": {
+            "urlOriginal": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/2386/4807/P-65_SiennaFrost_Square_WEB__91134.1786809426.jpg"
+          },
+          "description": "<p><span style=\"color: #800000;\"><strong>Available for Pre-Order!</strong></span><span> Contact your <a href=\"https://amaco.com/find-a-distributor/\" target=\"_blank\" rel=\"noopener\">AMACO distributor</a> to place your pre-order for the Pearlescent Glaze Series. Get your order in early to be among the first to receive these new glazes when they become available.</span></p>\n<p>P-65 Sienna Frost is a fluid, orange-tan with iridescent mottling where thick.</p>\n<p><strong>Food Safe:</strong> Tested for lead and cadmium release in accordance with ASTM C738-94.</p>\n<p><span style=\"text-decoration: underline;\"><strong>Application Tips:&nbsp;</strong></span></p>\n<ul>\n<li>3 brush coats recommended.\n<ul>\n<li>If you apply the glaze heavily, 2 coats will also work.</li>\n</ul>\n</li>\n<li>Best glazing brush to use: <a title=\"AMACO Fitch Fan Brush\" href=\"https://shop.amaco.com/fitch-fan-brush/\">AMACO Fitch Fan Brush.</a></li>\n<li>Underapplication will result in a dry glaze with no crystals.</li>\n<li>Overapplication will cause a rough appearance.\n<ul>\n<li>Can also lead to heavier flow.</li>\n</ul>\n</li>\n</ul>\n<p class=\"p1\"><span>Layers well over AMACO <a href=\"https://shop.amaco.com/glazes-underglazes/high-fire-glazes/c-celadon/\">Celadons</a>, other <a href=\"https://shop.amaco.com/glazes-underglazes/high-fire-glazes/pc-potters-choice/\">Potter's Choice,</a> and <a href=\"https://shop.amaco.com/glazes-underglazes/high-fire-glazes/sm-satin-matte/\">Satin Matte</a> glazes. Glaze layering fired results may run if paired with a runny glaze. Apply receding coats when layering to help with runniness of final fired result. We recommend testing any layering combination before applying it to a full ceramic piece.&nbsp;</span></p>\n<p class=\"p1\"><span>Fire to cone 6 when used alone or layered for results similar to AMACO imagery.</span></p>\n<div class=\"ewa-rteLine\">Shake well before use. For best results, do not thin the glaze; apply 3 coats with a brush to Cone 04 bisque. (Let the glaze dry between coats.) Glaze fire to Cone 5-6. Due to variations in raw materials used during manufacturing, we recommend firing glazed test tiles before using each new batch of glaze.<span></span></div>",
+          "entityId": 2386,
+          "images": {
+            "edges": [
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/2386/4807/P-65_SiennaFrost_Square_WEB__91134.1786809426.jpg"
+                }
+              },
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/2386/4806/P-65_Cone6_BudVase1_WEB__64935.1786809426.jpg"
+                }
+              },
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/original/products/2386/4805/P-65_SiennaFrost_PintJar_WEB__05565.1786809426.jpg"
+                }
+              }
+            ]
+          },
+          "name": "P-65 Sienna Frost",
+          "path": "/p-65-sienna-frost/",
+          "prices": {
+            "price": {
+              "currencyCode": "USD",
+              "value": 30.0
+            },
+            "retailPrice": null
+          },
+          "sku": ""
+        },
+        "variant": {
+          "defaultImage": null,
+          "entityId": 4124,
+          "inventory": {
+            "aggregated": null,
+            "isInStock": false
+          },
+          "options": {
+            "edges": [
+              {
+                "node": {
+                  "displayName": "Size",
+                  "values": {
+                    "edges": [
+                      {
+                        "node": {
+                          "label": "Pint"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "prices": {
+            "price": {
+              "currencyCode": "USD",
+              "value": 30.0
+            }
+          },
+          "sku": "30038R"
+        }
+      },
+      "source": "amaco",
+      "source_detail_level": "api",
+      "source_updated_at": null,
+      "stock_quantity": 0,
+      "supplier_reference": "30038R",
+      "surface": null,
+      "technical_attributes": {
+        "Size": "Pint",
+        "product_details": "https://cdn11.bigcommerce.com/s-a0h9fhqogk/images/stencil/320w/image-manager/do-not-use-food-safe-logo-with-tm-with-words-black.png?t=1781012012",
+        "product_info_badge": "NEW!"
+      },
+      "unit_price": {
+        "currency": "USD",
+        "per": "l",
+        "value": 63.4014
+      },
+      "variant_title": "Pint",
+      "vat_rate": null,
+      "vat_status": "exclusive"
+    }
+  ],
+  "scraper": "bigcommerce",
+  "source": "amaco",
+  "truncated": false
+}

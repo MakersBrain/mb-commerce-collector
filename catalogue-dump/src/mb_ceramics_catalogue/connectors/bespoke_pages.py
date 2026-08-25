@@ -12,6 +12,19 @@ from typing import Any, Literal, Protocol, cast
 from urllib.parse import parse_qs, urljoin, urlparse
 
 import httpx
+from mb_commerce_scraper.models import (
+    Availability,
+    CategoryRef,
+    CommerceOffer,
+    CommerceProductSnapshot,
+    CommerceVariant,
+    DocumentRef,
+    Evidence,
+    MediaRef,
+    Money,
+    StockQuantityKind,
+    StockState,
+)
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from .base import (
@@ -33,19 +46,6 @@ from .budget import (
     ConnectorBudget,
     RequestBudgetProtocol,
     RequestPriority,
-)
-from .commerce import (
-    Availability,
-    CategoryRef,
-    CommerceOffer,
-    CommerceProductSnapshot,
-    CommerceVariant,
-    DocumentRef,
-    Evidence,
-    MediaRef,
-    Money,
-    StockQuantityKind,
-    StockState,
 )
 from .page import canonical, clean, pdf_links
 from .pagecommerce import PageTransport

@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     proxy_enabled: bool = False
     proxy_api_secret_file: Path | None = None
     proxy_secret_file: Path | None = None
+    #: Control-owned writable gateway store. Workers receive the containing
+    #: directory through a separate read-only mount so atomic replacements are
+    #: visible without sharing provider-management credentials.
+    proxy_webshare_gateway_secret_file: Path | None = None
     proxy_actor_public_keys_file: Path | None = None
     proxy_provider_limit_unit: Literal["unconfirmed", "decimal_gb"] = "unconfirmed"
     proxy_provider_base_url: str = "https://api.decodo.com"

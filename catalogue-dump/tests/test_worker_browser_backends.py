@@ -96,7 +96,7 @@ def test_worker_uses_exact_selected_backend_without_platform_branching() -> None
     backend = DummyBackend()
     worker = worker_with({BrowserBackendName.CDP_EXTENSION_PROXY: backend})
     selected, context = worker._browser_for_job(
-        claimed(BrowserBackendName.CDP_EXTENSION_PROXY), CrawlParams(), None
+        claimed(BrowserBackendName.CDP_EXTENSION_PROXY), CrawlParams(), False
     )
     assert selected is backend
     assert context is not None
@@ -113,7 +113,7 @@ def test_worker_does_not_fallback_after_backend_lineage_is_selected() -> None:
     worker._browser_backends.pop(BrowserBackendName.CDP_EXTENSION_PROXY)
     with pytest.raises(BrowserUnavailable, match=r"cdp_extension_proxy.*unavailable"):
         worker._browser_for_job(
-            claimed(BrowserBackendName.CDP_EXTENSION_PROXY), CrawlParams(), None
+            claimed(BrowserBackendName.CDP_EXTENSION_PROXY), CrawlParams(), False
         )
     assert BrowserBackendName.CAMOUFOX not in worker._browser_backends
 
@@ -124,7 +124,7 @@ def test_cdp_selected_job_rejects_paid_proxy_transport() -> None:
         worker._browser_for_job(
             claimed(BrowserBackendName.CDP_EXTENSION_PROXY),
             CrawlParams(),
-            object(),  # type: ignore[arg-type]
+            True,
         )
 
 

@@ -8,11 +8,15 @@ Image=@@WORKER_BROWSER_IMAGE@@
 Pull=never
 ContainerName=catalogue-worker-browser
 Network=catalogue.network
+UserNS=keep-id:uid=10001,gid=10001
+User=10001
+Group=10001
 EnvironmentFile=/etc/makersbrain/catalogue/worker-browser.env
 Environment=CATALOGUE_NATS_URL=nats://catalogue-nats:4222
 Environment=CATALOGUE_NATS_CONSUME_CREDENTIALS_FILE=/run/queue/nats-consume-credentials.json
 Environment=CATALOGUE_MAX_JOBS=25
 Volume=/etc/makersbrain/catalogue-secrets/nats-consume-credentials.json:/run/queue/nats-consume-credentials.json:ro
+Volume=/etc/makersbrain/catalogue-secrets/webshare-gateway:/run/secrets/webshare-gateway:ro
 Volume=/etc/makersbrain/tenant-runtime-secrets/postgres-ca.crt:/run/database/postgres-ca.crt:ro
 Volume=catalogue-cache.volume:/var/lib/catalogue/cache
 Volume=catalogue-dumps.volume:/var/lib/catalogue/dumps

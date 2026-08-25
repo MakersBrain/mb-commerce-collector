@@ -36,7 +36,7 @@ from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from catalogue_control import proxy_api, queries
+from catalogue_control import proxy_api, queries, webshare_profile_api
 from catalogue_control.auth import load_public_keys
 from catalogue_control.broker import Broker, Subscriber, parse_topics
 from catalogue_control.proxy_control import ReconciliationScheduler
@@ -1046,6 +1046,11 @@ def create_app(settings: Settings | None = None, *, proxy_provider: Any = None) 
         Route("/v1/proxy/reservations", proxy_api.reservations),
         Route("/v1/proxy/profiles", proxy_api.profiles, methods=["GET"]),
         Route("/v1/proxy/profiles", proxy_api.create_profile, methods=["POST"]),
+        Route(
+            "/v1/proxy/profiles/import",
+            webshare_profile_api.import_webshare_profile,
+            methods=["POST"],
+        ),
         Route("/v1/proxy/profiles/refresh", proxy_api.refresh_profiles, methods=["POST"]),
         Route("/v1/proxy/profiles/{id}/{action}", proxy_api.profile_action, methods=["POST", "PUT"]),
         Route("/v1/proxy/profiles/{id}", proxy_api.retire_profile, methods=["DELETE"]),
@@ -1106,6 +1111,7 @@ def create_app(settings: Settings | None = None, *, proxy_provider: Any = None) 
                         built,
                         settings.proxy_reconcile_interval_seconds,
                         settings.proxy_secret_file,
+                        provider_name=name,
                     )
                     app.state.proxy_schedulers[name] = scheduler
                     await scheduler.start()

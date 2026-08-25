@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol, TypeVar, runtime_checkable
 
+from mb_commerce_scraper.models import CommerceProductSnapshot
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from mb_ceramics_catalogue.connectors.base import SnapshotField
-from mb_ceramics_catalogue.connectors.commerce import CommerceProductSnapshot
 
 DatasetRecord = TypeVar("DatasetRecord", bound=BaseModel, covariant=True)
 

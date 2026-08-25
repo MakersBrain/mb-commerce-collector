@@ -13,6 +13,19 @@ from typing import Any, Literal, Protocol, cast
 from urllib.parse import urlencode, urljoin, urlparse, urlunparse
 
 import httpx
+from mb_commerce_scraper.models import (
+    Availability,
+    CategoryRef,
+    CommerceOffer,
+    CommerceProductSnapshot,
+    CommerceVariant,
+    DocumentRef,
+    Evidence,
+    MediaRef,
+    Money,
+    StockQuantityKind,
+    StockState,
+)
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from .base import (
@@ -36,19 +49,6 @@ from .budget import (
     RequestBudgetProtocol,
     RequestPriority,
     budget_diagnostic,
-)
-from .commerce import (
-    Availability,
-    CategoryRef,
-    CommerceOffer,
-    CommerceProductSnapshot,
-    CommerceVariant,
-    DocumentRef,
-    Evidence,
-    MediaRef,
-    Money,
-    StockQuantityKind,
-    StockState,
 )
 from .page import brand as jsonld_brand
 from .page import (
@@ -606,6 +606,7 @@ class PrestaShopConnector(CommerceConnector):
         attributes: dict[str, JsonValue] = {
             "price_text": compatibility_clean(details.get("price")) or None,
             "legacy_source_updated_at": compatibility_clean(details.get("date_upd")) or None,
+            "legacy_all_image_urls": cast(list[JsonValue], _images(details)),
         }
         image_values = _images(details)
         return CommerceVariant(

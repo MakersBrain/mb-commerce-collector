@@ -13,10 +13,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
+import psycopg
 import pytest
+from mb_commerce_scraper import CollectionRequest as LibraryCollectionRequest
 
 from mb_ceramics_catalogue import scrapers
 from mb_ceramics_catalogue.config.sources import SourcesFile
@@ -27,14 +30,14 @@ from mb_ceramics_catalogue.connectors.prestashop import (
     declared_partition_keys,
 )
 from mb_ceramics_catalogue.connectors.shopify import ShopifyConnector, ShopifyOptions
-from mb_ceramics_catalogue.ops import events, leases, outputs, runs, worker
+from mb_ceramics_catalogue.ops import events, leases, library_lineages, outputs, runs, worker
 from mb_ceramics_catalogue.ops.sink import JobLogHandler, PostgresSink
 from mb_ceramics_catalogue.pipeline.outputs import BatchIdentity, LocalArtifactStore, StoredBatch
 from mb_ceramics_catalogue.pipeline.runner import DatasetPageOutcome, DatasetPageState
 from mb_ceramics_catalogue.scrapers.activity import CURRENT_JOB
 from mb_ceramics_catalogue.storage import db as storage_db
 
-from .conftest import requires_postgres
+from .conftest import EXTENSIONS, requires_postgres
 from .test_prestashop_connector import Transport as PrestaTransport
 from .test_shopify_connector import FakeFetcher as ShopifyFetcher
 
@@ -47,7 +50,11 @@ SOURCES = SourcesFile.model_validate(
         "ceradel": {"label": "Ceradel", "url": "https://ceradel.fr/", "scraper": "shopify"},
         # Same host as les-cousins, to exercise the per-host stagger.
         "les-cousins-two": {"label": "LC2", "url": "https://lescousins.fr/other", "scraper": "woocommerce"},
-        "ceramicolours": {"label": "Ceramicolours", "url": "https://www.ceramicolours.it/", "scraper": "ceramicolours"},
+        "browser-shop": {
+            "label": "Ceramicolours",
+            "url": "https://www.ceramicolours.it/",
+            "scraper": "ceramicolours",
+        },
     }
 )
 
@@ -95,9 +102,9 @@ class TestRunsAndJobs:
     async def test_browser_sources_declare_the_capability_they_need(self, db):
         """Only a worker started with `--capabilities browser` may claim these."""
         run_id = await runs.create_run(db)
-        await runs.create_jobs(db, run_id, SOURCES, ["ceramicolours", "ceradel"])
+        await runs.create_jobs(db, run_id, SOURCES, ["browser-shop", "ceradel"])
         stored = {row["source_id"]: row for row in await rows(db, "select * from catalogue.jobs")}
-        assert stored["ceramicolours"]["requires"] == ["browser"]
+        assert stored["browser-shop"]["requires"] == ["browser"]
         assert stored["ceradel"]["requires"] == []
 
     async def test_two_sources_on_one_host_are_staggered(self, db):
@@ -612,6 +619,255 @@ class TestCheckpointOutputs:
         )
         return job_id, lineage
 
+    async def test_library_lineage_identity_round_trips_and_never_matches_legacy(
+        self, db
+    ):
+        run_id = await runs.create_run(db)
+        job_id = (await runs.create_jobs(db, run_id, SOURCES, ["ceradel"]))[
+            "ceradel"
+        ]
+        durable_request = {
+            "source_id": "ceradel",
+            "base_url": "https://shop.test/",
+            "refresh_mode": "full",
+            "requested_fields": ["identity"],
+        }
+        durable_options = {"currency": "EUR", "page_limit": 50}
+        lineage = await outputs.create_lineage(
+            db,
+            job_id,
+            source_id="ceradel",
+            source_url="https://shop.test/",
+            connector="shopify",
+            connector_version="1",
+            connector_config_fingerprint="a" * 64,
+            dataset_fingerprint="b" * 64,
+            dataset_selection=[],
+            runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+            collection_request=durable_request,
+            connector_options=durable_options,
+        )
+
+        assert await outputs.lineage_runtime_configuration(
+            db, job_id, lineage
+        ) == outputs.LineageRuntimeConfiguration(
+            runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+            collection_request=durable_request,
+            connector_options=durable_options,
+        )
+        lookup = {
+            "source_url": "https://shop.test/",
+            "connector": "shopify",
+            "connector_version": "1",
+            "connector_config_fingerprint": "a" * 64,
+            "dataset_fingerprint": "b" * 64,
+        }
+        assert await outputs.find_compatible_lineage(db, job_id, **lookup) is None
+        assert await outputs.find_compatible_lineage(
+            db,
+            job_id,
+            **lookup,
+            runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+        ) == lineage
+
+        assert await outputs.reject_lineage(db, job_id, lineage)
+        assert not await outputs.reject_lineage(db, job_id, lineage)
+        assert (
+            await outputs.find_compatible_lineage(
+                db,
+                job_id,
+                **lookup,
+                runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+            )
+            is None
+        )
+
+    async def test_library_resolver_resumes_cursor_and_fences_option_drift(self, db):
+        run_id = await runs.create_run(db)
+        job_id = (await runs.create_jobs(db, run_id, SOURCES, ["ceradel"]))[
+            "ceradel"
+        ]
+        request = LibraryCollectionRequest(
+            source_id="ceradel",
+            base_url="https://shop.test/",
+        )
+        dataset = outputs.DatasetKey("ceramics", "2", "projector-1")
+
+        def spec(page_limit: int) -> library_lineages.LibraryLineageSpec:
+            return library_lineages.LibraryLineageSpec(
+                request=request,
+                connector="shopify",
+                connector_version="1",
+                connector_options={"page_limit": page_limit},
+                connector_configuration={"partitions": ["main"]},
+                dataset_fingerprint="d" * 64,
+                dataset_selection=[
+                    {
+                        "dataset": dataset.dataset,
+                        "contract_version": dataset.contract_version,
+                        "projector_version": dataset.projector_version,
+                    }
+                ],
+            )
+
+        original_spec = spec(50)
+        created = await library_lineages.resolve_library_lineage(
+            db,
+            job_id,
+            spec=original_spec,
+            datasets=[dataset],
+        )
+        assert not created.resuming
+        assert created.checkpoint is None
+        assert created.progress is outputs.LineageProgressState.EMPTY
+
+        await outputs.commit_page(
+            db,
+            job_id,
+            created.lineage,
+            partition_key="main",
+            page_id="main:1",
+            page_sequence=0,
+            resume_after={"partition": "main", "page": 2},
+            terminal=False,
+            enumeration_intact=True,
+            connector_version="1",
+            batches=[],
+        )
+        await db.execute(
+            """update catalogue.job_datasets
+                  set state = 'degraded', records = 7, rejected = 2,
+                      error = 'interrupted'
+                where job_id = %s and dataset = %s and contract_version = %s
+                  and projector_version = %s""",
+            (
+                job_id,
+                dataset.dataset,
+                dataset.contract_version,
+                dataset.projector_version,
+            ),
+        )
+
+        resumed = await library_lineages.resolve_library_lineage(
+            db,
+            job_id,
+            spec=original_spec,
+            datasets=[dataset],
+        )
+        assert resumed.lineage == created.lineage
+        assert resumed.resuming
+        assert resumed.restart_reason is None
+        assert resumed.progress is outputs.LineageProgressState.RESUMABLE
+        assert resumed.checkpoint is not None
+        assert resumed.checkpoint.collection_fingerprint == (
+            original_spec.connector_config_fingerprint
+        )
+        assert resumed.checkpoint.resume_after == {"partition": "main", "page": 2}
+        assert await rows(
+            db,
+            """select state, records, rejected, error
+                 from catalogue.job_datasets
+                where job_id = %(job)s and dataset = %(dataset)s""",
+            {"job": job_id, "dataset": dataset.dataset},
+        ) == [{"state": "staged", "records": 7, "rejected": 2, "error": None}]
+
+        drifted_spec = spec(51)
+        restarted = await library_lineages.resolve_library_lineage(
+            db,
+            job_id,
+            spec=drifted_spec,
+            datasets=[dataset],
+        )
+        assert restarted.lineage != created.lineage
+        assert not restarted.resuming
+        assert restarted.checkpoint is None
+        assert restarted.progress is outputs.LineageProgressState.EMPTY
+        assert await rows(
+            db,
+            """select checkpoint_lineage, status
+                 from catalogue.job_checkpoint_lineages
+                where job_id = %(job)s
+                order by created_at""",
+            {"job": job_id},
+        ) == [
+            {"checkpoint_lineage": created.lineage, "status": "rejected"},
+            {"checkpoint_lineage": restarted.lineage, "status": "active"},
+        ]
+        assert await outputs.lineage_runtime_configuration(
+            db, job_id, restarted.lineage
+        ) == outputs.LineageRuntimeConfiguration(
+            runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+            collection_request=request.model_dump(mode="json"),
+            connector_options=drifted_spec.connector_options,
+        )
+        assert await rows(
+            db,
+            """select state, records, rejected, error
+                 from catalogue.job_datasets
+                where job_id = %(job)s and dataset = %(dataset)s""",
+            {"job": job_id, "dataset": dataset.dataset},
+        ) == [{"state": "pending", "records": 0, "rejected": 0, "error": None}]
+
+    async def test_completed_library_lineage_remains_recoverable_for_publication(
+        self, db
+    ):
+        run_id = await runs.create_run(db)
+        job_id = (await runs.create_jobs(db, run_id, SOURCES, ["ceradel"]))[
+            "ceradel"
+        ]
+        lookup = {
+            "source_url": "https://shop.test/",
+            "connector": "shopify",
+            "connector_version": "1",
+            "connector_config_fingerprint": "a" * 64,
+            "dataset_fingerprint": "b" * 64,
+        }
+        lineage = await outputs.create_lineage(
+            db,
+            job_id,
+            source_id="ceradel",
+            connector_configuration={"partitions": ["main"]},
+            dataset_selection=[],
+            runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+            collection_request={
+                "source_id": "ceradel",
+                "base_url": "https://shop.test/",
+                "requested_fields": ["identity"],
+            },
+            connector_options={"page_limit": 50},
+            **lookup,
+        )
+        await outputs.commit_page(
+            db,
+            job_id,
+            lineage,
+            partition_key="main",
+            page_id="main:1",
+            page_sequence=0,
+            resume_after=None,
+            terminal=True,
+            enumeration_intact=True,
+            connector_version="1",
+            batches=[],
+        )
+        checksum = await outputs.lineage_checksum(db, job_id, lineage)
+        await outputs.complete_lineage(
+            db, job_id, lineage, expected_partitions=("main",), checksum=checksum
+        )
+
+        assert await outputs.find_compatible_lineage(
+            db,
+            job_id,
+            runtime_format=outputs.LineageRuntimeFormat.COMMERCE_SCRAPER_V1,
+            **lookup,
+        ) is None
+        assert await outputs.find_recoverable_library_lineage(
+            db, job_id, **lookup
+        ) == lineage
+        assert await outputs.lineage_progress(
+            db, job_id, lineage
+        ) == outputs.LineageProgress(outputs.LineageProgressState.TERMINAL_INTACT)
+
     async def test_shopify_crash_between_partitions_resumes_without_refetch(self, db):
         partitions = ("zeta", "alpha")
         job_id, lineage = await self.connector_lineage(db, "shopify", partitions)
@@ -970,13 +1226,338 @@ class TestScheduleDefault:
 
 
 class TestSchemaMigration:
-    async def test_an_existing_initdb_schema_is_adopted_then_migrations_are_recorded(self, db):
-        first = await storage_db.apply_schema(db)
-        assert "catalogue-reference-schema.sql" not in first
-        assert "catalogue-reference-schema-v3.sql" in first
+    async def install_before(self, db, migration: str) -> None:
+        await db.execute("drop schema catalogue cascade")
+        await db.execute(EXTENSIONS.read_text(encoding="utf-8"))
+        directory = storage_db.schema_directory()
+        before = storage_db.SCHEMA_FILES[:storage_db.SCHEMA_FILES.index(migration)]
+        for name in before:
+            await db.execute((directory / name).read_text(encoding="utf-8"))
+        await db.execute(
+            """create table catalogue.schema_migrations (
+                 filename text primary key,
+                 applied_at timestamptz not null default now()
+               )"""
+        )
+        for name in before:
+            await db.execute(
+                "insert into catalogue.schema_migrations(filename) values (%s)",
+                (name,),
+            )
+
+    async def test_an_existing_schema_is_adopted_rather_than_reapplied(self, db):
+        # The fixture preloads every DDL file without a migration ledger. The
+        # baseline is adopted; the idempotent incremental migration is recorded
+        # through the ordinary application path.
+        assert await storage_db.apply_schema(db) == list(storage_db.SCHEMA_FILES[1:])
         assert await storage_db.apply_schema(db) == []
         applied = await rows(db, "select filename from catalogue.schema_migrations")
         assert {row["filename"] for row in applied} == set(storage_db.SCHEMA_FILES)
+
+    async def test_a_database_short_of_head_is_refused_rather_than_adopted(self, db):
+        # A database that stopped part-way through the pre-squash sequence has
+        # the early tables and not the late ones. Stamping the baseline over it
+        # would record a schema it does not have.
+        await db.execute(f"drop table {storage_db.HEAD_SENTINEL}")
+        with pytest.raises(RuntimeError, match="stopped part-way"):
+            await storage_db.apply_schema(db)
+
+    async def test_an_empty_database_gets_the_baseline(self, db):
+        await db.execute("drop schema catalogue cascade")
+        assert await storage_db.apply_schema(db) == list(storage_db.SCHEMA_FILES)
+        assert await storage_db.apply_schema(db) == []
+
+    async def test_provider_integrity_migration_backfills_existing_routes(self, db):
+        await self.install_before(db, storage_db.PROXY_PROVIDER_INTEGRITY_MIGRATION)
+        profile = await db.execute(
+            """insert into catalogue.proxy_profiles
+                 (provider, logical_name, display_name, created_by, updated_by)
+                 values ('webshare', 'existing-webshare', 'Existing Webshare', 'test', 'test')
+                 returning id"""
+        )
+        profile_id = (await profile.fetchone())["id"]
+        route = await db.execute(
+            """insert into catalogue.proxy_routes
+                 (label, profile_id, created_by, updated_by)
+                 values ('Existing route', %s, 'test', 'test') returning id""",
+            (profile_id,),
+        )
+        route_id = (await route.fetchone())["id"]
+
+        assert await storage_db.apply_schema(db) == [
+            storage_db.PROXY_PROVIDER_INTEGRITY_MIGRATION,
+            storage_db.PROXY_PROFILE_SECRET_INTENT_MIGRATION,
+        ]
+        assert await storage_db.apply_schema(db) == []
+        migrated = await rows(
+            db,
+            "select provider from catalogue.proxy_routes where id = %s",
+            (route_id,),
+        )
+        assert migrated == [{"provider": "webshare"}]
+
+    async def test_provider_integrity_migration_refuses_dirty_existing_allocations(self, db):
+        await self.install_before(db, storage_db.PROXY_PROVIDER_INTEGRITY_MIGRATION)
+        start = datetime.now(UTC) - timedelta(days=1)
+        end = datetime.now(UTC) + timedelta(days=1)
+        await db.execute(
+            """insert into catalogue.proxy_budget_cycles
+                 (provider, cycle_start, cycle_end)
+                 values ('webshare', %s, %s)""",
+            (start, end),
+        )
+        profile = await db.execute(
+            """insert into catalogue.proxy_profiles
+                 (provider, logical_name, display_name, created_by, updated_by)
+                 values ('decodo', 'dirty-decodo', 'Dirty Decodo', 'test', 'test')
+                 returning id"""
+        )
+        profile_id = (await profile.fetchone())["id"]
+        await db.execute(
+            """insert into catalogue.proxy_profile_allocations
+                 (provider, cycle_start, profile_id, allocated_bytes, updated_by)
+                 values ('webshare', %s, %s, 1000, 'test')""",
+            (start, profile_id),
+        )
+
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            await storage_db.apply_schema(db)
+        applied = await rows(
+            db,
+            "select filename from catalogue.schema_migrations where filename = %s",
+            (storage_db.PROXY_PROVIDER_INTEGRITY_MIGRATION,),
+        )
+        assert applied == []
+
+    async def test_profile_secret_intent_migration_is_ordered_and_idempotent(self, db):
+        await self.install_before(db, storage_db.PROXY_PROFILE_SECRET_INTENT_MIGRATION)
+
+        assert await storage_db.apply_schema(db) == [
+            storage_db.PROXY_PROFILE_SECRET_INTENT_MIGRATION
+        ]
+        assert await storage_db.apply_schema(db) == []
+        relation = await rows(
+            db,
+            """select n.nspname as schema_name, c.relname as table_name
+                 from pg_class c
+                 join pg_namespace n on n.oid = c.relnamespace
+                where n.nspname = 'catalogue'
+                  and c.relname = 'proxy_profile_secret_intents'""",
+        )
+        assert relation == [
+            {
+                "schema_name": "catalogue",
+                "table_name": "proxy_profile_secret_intents",
+            }
+        ]
+        columns = await rows(
+            db,
+            """select column_name from information_schema.columns
+                 where table_schema = 'catalogue'
+                   and table_name = 'proxy_profile_secret_intents'""",
+        )
+        assert {row["column_name"] for row in columns} == {
+            "operation_id", "provider", "profile_id", "logical_name", "cycle_start",
+            "expected_generation", "target_generation", "created_profile", "state",
+            "error_code", "created_at", "updated_at", "installed_at", "completed_at",
+        }
+
+    async def test_profile_secret_intent_constraints_bind_every_durable_identity(self, db):
+        start = datetime.now(UTC) - timedelta(hours=1)
+        end = start + timedelta(days=30)
+        await db.execute(
+            """insert into catalogue.proxy_budget_cycles
+                     (provider, cycle_start, cycle_end)
+                 values ('webshare', %s, %s), ('decodo', %s, %s)""",
+            (start, end, start, end),
+        )
+        profile_cursor = await db.execute(
+            """insert into catalogue.proxy_profiles
+                     (provider, logical_name, display_name, created_by, updated_by)
+                 values ('webshare', 'intent-webshare', 'Intent Webshare', 'test', 'test')
+                 returning id"""
+        )
+        profile_id = (await profile_cursor.fetchone())["id"]
+
+        async def operation(key: str) -> UUID:
+            operation_id = uuid4()
+            await db.execute(
+                """insert into catalogue.proxy_mutation_requests
+                         (operation_id, actor, action, idempotency_key)
+                     values (%s, 'test', 'profile.secret.install', %s)""",
+                (operation_id, key),
+            )
+            return operation_id
+
+        create_operation = await operation("valid-create")
+        await db.execute(
+            """insert into catalogue.proxy_profile_secret_intents
+                     (operation_id, provider, profile_id, logical_name, cycle_start,
+                      expected_generation, target_generation, created_profile)
+                 values (%s, 'webshare', %s, 'intent-webshare', %s, null, 1, true)""",
+            (create_operation, profile_id, start),
+        )
+        await db.execute(
+            """update catalogue.proxy_profile_secret_intents
+                   set state = 'completed', installed_at = now(), completed_at = now(),
+                       updated_at = now()
+                 where operation_id = %s""",
+            (create_operation,),
+        )
+
+        rotation_operation = await operation("valid-rotation")
+        await db.execute(
+            """insert into catalogue.proxy_profile_secret_intents
+                     (operation_id, provider, profile_id, logical_name, cycle_start,
+                      expected_generation, target_generation, created_profile)
+                 values (%s, 'webshare', %s, 'intent-webshare', %s, 1, 2, false)""",
+            (rotation_operation, profile_id, start),
+        )
+        await db.execute(
+            """update catalogue.proxy_profile_secret_intents
+                   set state = 'completed', installed_at = now(), completed_at = now(),
+                       updated_at = now()
+                 where operation_id = %s""",
+            (rotation_operation,),
+        )
+
+        wrong_operation = uuid4()
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            await db.execute(
+                """insert into catalogue.proxy_profile_secret_intents
+                         (operation_id, provider, profile_id, logical_name, cycle_start,
+                          expected_generation, target_generation, created_profile)
+                     values (%s, 'webshare', %s, 'intent-webshare', %s, 2, 3, false)""",
+                (wrong_operation, profile_id, start),
+            )
+
+        wrong_profile_operation = await operation("wrong-profile-provider")
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            await db.execute(
+                """insert into catalogue.proxy_profile_secret_intents
+                         (operation_id, provider, profile_id, logical_name, cycle_start,
+                          expected_generation, target_generation, created_profile)
+                     values (%s, 'decodo', %s, 'intent-webshare', %s, 2, 3, false)""",
+                (wrong_profile_operation, profile_id, start),
+            )
+
+        wrong_name_operation = await operation("wrong-profile-name")
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            await db.execute(
+                """insert into catalogue.proxy_profile_secret_intents
+                         (operation_id, provider, profile_id, logical_name, cycle_start,
+                          expected_generation, target_generation, created_profile)
+                     values (%s, 'webshare', %s, 'other-name', %s, 2, 3, false)""",
+                (wrong_name_operation, profile_id, start),
+            )
+
+        wrong_cycle = start + timedelta(minutes=1)
+        wrong_cycle_operation = await operation("wrong-cycle")
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            await db.execute(
+                """insert into catalogue.proxy_profile_secret_intents
+                         (operation_id, provider, profile_id, logical_name, cycle_start,
+                          expected_generation, target_generation, created_profile)
+                     values (%s, 'webshare', %s, 'intent-webshare', %s, 2, 3, false)""",
+                (wrong_cycle_operation, profile_id, wrong_cycle),
+            )
+
+    @pytest.mark.parametrize(
+        ("expected", "target", "created"),
+        [(None, 2, True), (1, 2, True), (None, 1, False), (0, 1, False), (1, 3, False)],
+    )
+    async def test_profile_secret_intent_rejects_invalid_generation_transitions(
+        self, db, expected, target, created
+    ):
+        start = datetime.now(UTC) - timedelta(hours=1)
+        await db.execute(
+            """insert into catalogue.proxy_budget_cycles
+                     (provider, cycle_start, cycle_end)
+                 values ('webshare', %s, %s)""",
+            (start, start + timedelta(days=30)),
+        )
+        profile_cursor = await db.execute(
+            """insert into catalogue.proxy_profiles
+                     (provider, logical_name, display_name, created_by, updated_by)
+                 values ('webshare', 'invalid-intent', 'Invalid intent', 'test', 'test')
+                 returning id"""
+        )
+        profile_id = (await profile_cursor.fetchone())["id"]
+        operation_id = uuid4()
+        await db.execute(
+            """insert into catalogue.proxy_mutation_requests
+                     (operation_id, actor, action, idempotency_key)
+                 values (%s, 'test', 'profile.secret.install', %s)""",
+            (operation_id, str(operation_id)),
+        )
+
+        with pytest.raises(psycopg.errors.CheckViolation):
+            await db.execute(
+                """insert into catalogue.proxy_profile_secret_intents
+                         (operation_id, provider, profile_id, logical_name, cycle_start,
+                          expected_generation, target_generation, created_profile)
+                     values (%s, 'webshare', %s, 'invalid-intent', %s, %s, %s, %s)""",
+                (operation_id, profile_id, start, expected, target, created),
+            )
+
+    async def test_profile_secret_intent_allows_only_one_active_intent_and_valid_states(self, db):
+        start = datetime.now(UTC) - timedelta(hours=1)
+        await db.execute(
+            """insert into catalogue.proxy_budget_cycles
+                     (provider, cycle_start, cycle_end)
+                 values ('webshare', %s, %s)""",
+            (start, start + timedelta(days=30)),
+        )
+        profile_cursor = await db.execute(
+            """insert into catalogue.proxy_profiles
+                     (provider, logical_name, display_name, created_by, updated_by)
+                 values ('webshare', 'unique-intent', 'Unique intent', 'test', 'test')
+                 returning id"""
+        )
+        profile_id = (await profile_cursor.fetchone())["id"]
+
+        async def insert_intent(key: str, expected: int, target: int) -> UUID:
+            operation_id = uuid4()
+            await db.execute(
+                """insert into catalogue.proxy_mutation_requests
+                         (operation_id, actor, action, idempotency_key)
+                     values (%s, 'test', 'profile.secret.install', %s)""",
+                (operation_id, key),
+            )
+            await db.execute(
+                """insert into catalogue.proxy_profile_secret_intents
+                         (operation_id, provider, profile_id, logical_name, cycle_start,
+                          expected_generation, target_generation, created_profile)
+                     values (%s, 'webshare', %s, 'unique-intent', %s, %s, %s, false)""",
+                (operation_id, profile_id, start, expected, target),
+            )
+            return operation_id
+
+        first = await insert_intent("first-active", 1, 2)
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            await insert_intent("second-active", 2, 3)
+
+        with pytest.raises(psycopg.errors.CheckViolation):
+            await db.execute(
+                """update catalogue.proxy_profile_secret_intents
+                       set state = 'unknown' where operation_id = %s""",
+                (first,),
+            )
+        with pytest.raises(psycopg.errors.CheckViolation):
+            await db.execute(
+                """update catalogue.proxy_profile_secret_intents
+                       set state = 'installed' where operation_id = %s""",
+                (first,),
+            )
+
+        await db.execute(
+            """update catalogue.proxy_profile_secret_intents
+                   set state = 'failed', completed_at = now(), updated_at = now()
+                 where operation_id = %s""",
+            (first,),
+        )
+        second = await insert_intent("third-after-terminal", 2, 3)
+        assert second is not None
 
     async def test_multi_dataset_page_and_artifact_schema_enforces_identity(self, db):
         run_id = await runs.create_run(db)

@@ -1,0 +1,321 @@
+{
+  "digest": "5f4957ae01237b1e810c3a57a24282bc07ee2f1e5c47e7d0ef022d14ebfb9b46",
+  "discovered": 84,
+  "error_count": 0,
+  "errors": [],
+  "extraction_method": "dom",
+  "field_coverage": {
+    "all_image_urls": 81,
+    "brand": 0,
+    "category_path": 83,
+    "claims": 0,
+    "colour": 0,
+    "description": 5,
+    "documents": 0,
+    "effects": 0,
+    "family": 0,
+    "firing": 0,
+    "form": 0,
+    "gtin": 0,
+    "manufacturer_sku": 0,
+    "package_size": 0,
+    "stock_quantity": 42,
+    "supplier_reference": 0,
+    "surface": 0,
+    "unit_price": 0,
+    "vat_status": 83
+  },
+  "notes": [
+    "84 product URLs from the sitemap"
+  ],
+  "records": 83,
+  "rendered_pages": 0,
+  "requests": 85,
+  "sample": [
+    {
+      "all_image_urls": [
+        "https://images.sumup.com/img_3ANSF7TJQ7956BPB7RDF00GC4S"
+      ],
+      "application_methods": null,
+      "availability": "https://schema.org/OutOfStock",
+      "brand": null,
+      "brand_basis": null,
+      "category_path": [
+        "Ceramiques pour la maison"
+      ],
+      "claims": null,
+      "coats": null,
+      "colour": null,
+      "currency": "EUR",
+      "description": null,
+      "documents": null,
+      "effects": null,
+      "external_id": "emily-alarcon:https://emily-alarcon.sumupstore.com/article/carafe-ecume#c779a7bf-aa0d-425a-985e-15f0aa46dd8e",
+      "extraction_method": "dom",
+      "family": null,
+      "fetched_at": "<volatile>",
+      "firing": null,
+      "form": null,
+      "format": "ceramics.catalogue_item.v2",
+      "gtin": null,
+      "image_url": "https://images.sumup.com/img_3ANSF7TJQ7956BPB7RDF00GC4S",
+      "list_price": null,
+      "manufacturer_sku": null,
+      "manufacturer_sku_basis": null,
+      "min_order_quantity": null,
+      "name": "Carafe \"Ecume\"",
+      "name_parsed_from": null,
+      "name_raw": "Carafe \"Ecume\"",
+      "package_size": null,
+      "parent_external_id": "emily-alarcon:https://emily-alarcon.sumupstore.com/article/carafe-ecume",
+      "price": 45.0,
+      "price_text": null,
+      "product_name": "Carafe \"Ecume\"",
+      "product_url": "https://emily-alarcon.sumupstore.com/article/carafe-ecume",
+      "raw": {
+        "product": {
+          "additionalImages": [],
+          "allImages": [
+            "https://images.sumup.com/img_3ANSF7TJQ7956BPB7RDF00GC4S"
+          ],
+          "basePrice": 4500,
+          "category": {
+            "name": "Ceramiques pour la maison",
+            "uuid": "MERCHANTS_DEFAULT_CATEGORY"
+          },
+          "description": "",
+          "formattedDescription": "",
+          "hasDiscount": false,
+          "id": "6f929633-31f7-4d17-9338-62fe35533b15",
+          "image": "https://images.sumup.com/img_3ANSF7TJQ7956BPB7RDF00GC4S",
+          "isAvailable": false,
+          "isTrackingEnabled": true,
+          "modifierSets": [],
+          "name": "Carafe \"Ecume\"",
+          "optionsList": {},
+          "price": 4500,
+          "seoDescription": "",
+          "seoTitle": "Carafe \"Ecume\"",
+          "slug": "carafe-ecume",
+          "variantMap": {
+            "da39a3ee5e6b4b0d3255bfef95601890afd80709": "c779a7bf-aa0d-425a-985e-15f0aa46dd8e"
+          }
+        },
+        "variant": {
+          "basePrice": 4500,
+          "hasDiscount": false,
+          "isAvailable": false,
+          "isTrackingEnabled": true,
+          "name": "",
+          "options": [],
+          "price": 4500,
+          "quantity": 0,
+          "sku": null,
+          "uuid": "c779a7bf-aa0d-425a-985e-15f0aa46dd8e"
+        }
+      },
+      "source": "emily-alarcon",
+      "source_detail_level": "product_page",
+      "source_updated_at": null,
+      "stock_quantity": 0,
+      "supplier_reference": null,
+      "surface": null,
+      "technical_attributes": null,
+      "unit_price": null,
+      "variant_title": null,
+      "vat_rate": null,
+      "vat_status": "inclusive"
+    },
+    {
+      "all_image_urls": [
+        "https://images.sumup.com/img_3ABK8EY64Z9NB8ZGTS3BX2HCZN"
+      ],
+      "application_methods": null,
+      "availability": "https://schema.org/OutOfStock",
+      "brand": null,
+      "brand_basis": null,
+      "category_path": [
+        "Ceramiques pour la maison"
+      ],
+      "claims": null,
+      "coats": null,
+      "colour": null,
+      "currency": "EUR",
+      "description": null,
+      "documents": null,
+      "effects": null,
+      "external_id": "emily-alarcon:https://emily-alarcon.sumupstore.com/article/mug-sunset#b220fcc5-cd9a-4871-88a8-0463faf0fe52",
+      "extraction_method": "dom",
+      "family": null,
+      "fetched_at": "<volatile>",
+      "firing": null,
+      "form": null,
+      "format": "ceramics.catalogue_item.v2",
+      "gtin": null,
+      "image_url": "https://images.sumup.com/img_3ABK8EY64Z9NB8ZGTS3BX2HCZN",
+      "list_price": null,
+      "manufacturer_sku": null,
+      "manufacturer_sku_basis": null,
+      "min_order_quantity": null,
+      "name": "Mug \"sunset\"",
+      "name_parsed_from": null,
+      "name_raw": "Mug \"sunset\"",
+      "package_size": null,
+      "parent_external_id": "emily-alarcon:https://emily-alarcon.sumupstore.com/article/mug-sunset",
+      "price": 32.0,
+      "price_text": null,
+      "product_name": "Mug \"sunset\"",
+      "product_url": "https://emily-alarcon.sumupstore.com/article/mug-sunset",
+      "raw": {
+        "product": {
+          "additionalImages": [],
+          "allImages": [
+            "https://images.sumup.com/img_3ABK8EY64Z9NB8ZGTS3BX2HCZN"
+          ],
+          "basePrice": 3200,
+          "category": {
+            "name": "Ceramiques pour la maison",
+            "uuid": "MERCHANTS_DEFAULT_CATEGORY"
+          },
+          "description": "",
+          "formattedDescription": "",
+          "hasDiscount": false,
+          "id": "4f14dead-cde2-41d9-8278-bb2aacf3c929",
+          "image": "https://images.sumup.com/img_3ABK8EY64Z9NB8ZGTS3BX2HCZN",
+          "isAvailable": false,
+          "isTrackingEnabled": true,
+          "modifierSets": [],
+          "name": "Mug \"sunset\"",
+          "optionsList": {},
+          "price": 3200,
+          "seoDescription": "",
+          "seoTitle": "Mug \"sunset\"",
+          "slug": "mug-sunset",
+          "variantMap": {
+            "da39a3ee5e6b4b0d3255bfef95601890afd80709": "b220fcc5-cd9a-4871-88a8-0463faf0fe52"
+          }
+        },
+        "variant": {
+          "basePrice": 3200,
+          "hasDiscount": false,
+          "isAvailable": false,
+          "isTrackingEnabled": true,
+          "name": "",
+          "options": [],
+          "price": 3200,
+          "quantity": -2,
+          "sku": null,
+          "uuid": "b220fcc5-cd9a-4871-88a8-0463faf0fe52"
+        }
+      },
+      "source": "emily-alarcon",
+      "source_detail_level": "product_page",
+      "source_updated_at": null,
+      "stock_quantity": 0,
+      "supplier_reference": null,
+      "surface": null,
+      "technical_attributes": null,
+      "unit_price": null,
+      "variant_title": null,
+      "vat_rate": null,
+      "vat_status": "inclusive"
+    },
+    {
+      "all_image_urls": [
+        "https://images.sumup.com/img_5BTY5JB68194WT6SRC5185GZ7N"
+      ],
+      "application_methods": null,
+      "availability": "https://schema.org/InStock",
+      "brand": null,
+      "brand_basis": null,
+      "category_path": [
+        "Ceramiques pour la maison"
+      ],
+      "claims": null,
+      "coats": null,
+      "colour": null,
+      "currency": "EUR",
+      "description": null,
+      "documents": null,
+      "effects": null,
+      "external_id": "emily-alarcon:https://emily-alarcon.sumupstore.com/article/espresso-cup-bleu-ecume#d1ebd168-2f0b-42cf-80a9-e21c88c1c61e",
+      "extraction_method": "dom",
+      "family": null,
+      "fetched_at": "<volatile>",
+      "firing": null,
+      "form": null,
+      "format": "ceramics.catalogue_item.v2",
+      "gtin": null,
+      "image_url": "https://images.sumup.com/img_5BTY5JB68194WT6SRC5185GZ7N",
+      "list_price": null,
+      "manufacturer_sku": null,
+      "manufacturer_sku_basis": null,
+      "min_order_quantity": null,
+      "name": "Espresso cup bleu ecume",
+      "name_parsed_from": null,
+      "name_raw": "Espresso cup bleu ecume",
+      "package_size": null,
+      "parent_external_id": "emily-alarcon:https://emily-alarcon.sumupstore.com/article/espresso-cup-bleu-ecume",
+      "price": 15.0,
+      "price_text": null,
+      "product_name": "Espresso cup bleu ecume",
+      "product_url": "https://emily-alarcon.sumupstore.com/article/espresso-cup-bleu-ecume",
+      "raw": {
+        "product": {
+          "additionalImages": [],
+          "allImages": [
+            "https://images.sumup.com/img_5BTY5JB68194WT6SRC5185GZ7N"
+          ],
+          "basePrice": 1500,
+          "category": {
+            "name": "Ceramiques pour la maison",
+            "uuid": "MERCHANTS_DEFAULT_CATEGORY"
+          },
+          "description": "",
+          "formattedDescription": "",
+          "hasDiscount": false,
+          "id": "5bbbd7b5-596a-4de8-85bf-a33efcedb04f",
+          "image": "https://images.sumup.com/img_5BTY5JB68194WT6SRC5185GZ7N",
+          "isAvailable": true,
+          "isTrackingEnabled": true,
+          "modifierSets": [],
+          "name": "Espresso cup bleu ecume",
+          "optionsList": {},
+          "price": 1500,
+          "seoDescription": "",
+          "seoTitle": "Espresso cup bleu ecume",
+          "slug": "espresso-cup-bleu-ecume",
+          "variantMap": {
+            "da39a3ee5e6b4b0d3255bfef95601890afd80709": "d1ebd168-2f0b-42cf-80a9-e21c88c1c61e"
+          }
+        },
+        "variant": {
+          "basePrice": 1500,
+          "hasDiscount": false,
+          "isAvailable": true,
+          "isTrackingEnabled": true,
+          "name": "",
+          "options": [],
+          "price": 1500,
+          "quantity": 3,
+          "sku": null,
+          "uuid": "d1ebd168-2f0b-42cf-80a9-e21c88c1c61e"
+        }
+      },
+      "source": "emily-alarcon",
+      "source_detail_level": "product_page",
+      "source_updated_at": null,
+      "stock_quantity": 3,
+      "supplier_reference": null,
+      "surface": null,
+      "technical_attributes": null,
+      "unit_price": null,
+      "variant_title": null,
+      "vat_rate": null,
+      "vat_status": "inclusive"
+    }
+  ],
+  "scraper": "sumup",
+  "source": "emily-alarcon",
+  "truncated": false
+}

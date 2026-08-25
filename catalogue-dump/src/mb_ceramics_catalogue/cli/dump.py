@@ -26,7 +26,9 @@ from mb_ceramics_catalogue.crawl.session import open_session
 from mb_ceramics_catalogue.observability import logging as obs
 from mb_ceramics_catalogue.observability import tracing
 from mb_ceramics_catalogue.ops import recording
-from mb_ceramics_catalogue.ops.connector_adapters import runtime_plan
+from mb_ceramics_catalogue.ops.commerce_scraper_runtime import (
+    open_local_commerce_session,
+)
 from mb_ceramics_catalogue.scrapers.cache import MODES as CACHE_MODES
 from mb_ceramics_catalogue.scrapers.record import RecordBuilder
 from mb_ceramics_catalogue.storage.history import persist_history
@@ -168,22 +170,10 @@ async def run(options: argparse.Namespace) -> int:
     params = CrawlParams.from_namespace(options)
     sources = SourcesFile.load(options.sources_file or default_path())
     selected = sources.select(options.source)
-    if params.pipeline == "connector_canary":
-        if params.datasets != ("ceramics",):
-            raise ValueError(
-                "local connector_canary currently writes only the ceramics compatibility "
-                "dataset; multi-dataset publication requires the PostgreSQL worker"
-            )
-        plans = {name: runtime_plan(sources[name]) for name in selected}
-        sources = SourcesFile.model_validate(
-            {
-                name: source.model_copy(
-                    update={"scraper": plans[name].legacy_scraper_adapter}
-                    if name in selected
-                    else {}
-                )
-                for name, source in sources.items()
-            }
+    if params.pipeline == "connector_canary" and params.datasets != ("ceramics",):
+        raise ValueError(
+            "local connector_canary currently writes only the ceramics compatibility "
+            "dataset; multi-dataset publication requires the PostgreSQL worker"
         )
 
     output = Path(options.out)
@@ -224,15 +214,41 @@ async def run(options: argparse.Namespace) -> int:
     with RecordBuilder(sources.as_scraper_configs()):
         async with (
             recording.record_run(options, params, sources, selected) as record,
-            open_session(params, cache_dir) as session,
             progress_module.Progress(len(selected), sinks + record.sinks) as progress,
         ):
-            outcomes, interrupted = await crawl(
-                sources, selected, session, params, progress,
-                None if params.dry_run else output,
-                on_runner=runner_holder.append,
-            )
-            cache_line = session.cache_summary() if session.cache.enabled else ""
+            if params.pipeline == "connector_canary":
+                async with open_local_commerce_session(params, cache_dir) as local_session:
+                    outcomes, interrupted = await crawl(
+                        sources,
+                        selected,
+                        None,
+                        params,
+                        progress,
+                        None if params.dry_run else output,
+                        on_runner=runner_holder.append,
+                        scraper_factory=local_session.build,
+                    )
+                    cache_line = (
+                        local_session.cache_summary()
+                        if local_session.cache_enabled
+                        else ""
+                    )
+            else:
+                async with open_session(params, cache_dir) as legacy_session:
+                    outcomes, interrupted = await crawl(
+                        sources,
+                        selected,
+                        legacy_session,
+                        params,
+                        progress,
+                        None if params.dry_run else output,
+                        on_runner=runner_holder.append,
+                    )
+                    cache_line = (
+                        legacy_session.cache_summary()
+                        if legacy_session.cache.enabled
+                        else ""
+                    )
             await record.finish(outcomes)
 
     # Anything the crawl did not already write, because it was cancelled before

@@ -11,9 +11,11 @@ from psycopg import sql
 PROXY_TABLES = (
     "proxy_budget_cycles", "proxy_profiles", "proxy_profile_allocations",
     "proxy_profile_retirements", "proxy_routes", "source_proxy_policies",
-    "proxy_probes", "proxy_reservations", "proxy_provider_snapshots",
+    "proxy_probes", "proxy_reservations", "proxy_attempt_authorizations",
+    "proxy_provider_snapshots",
     "proxy_admin_audit", "proxy_mutation_requests", "proxy_actor_nonces",
     "proxy_reconcile_requests", "proxy_pilot_evidence",
+    "proxy_profile_secret_intents",
 )
 
 
@@ -116,6 +118,10 @@ def provision(
         )
         connection.execute(
             "grant select, insert, update on catalogue.proxy_reservations to catalogue_worker"
+        )
+        connection.execute(
+            "grant select, insert, update on catalogue.proxy_attempt_authorizations "
+            "to catalogue_worker"
         )
         # INSERT ... ON CONFLICT reads the matching unique-index row even when
         # it takes DO NOTHING, so PostgreSQL also requires SELECT here.

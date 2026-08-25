@@ -12,6 +12,19 @@ from typing import Any, Literal, Protocol, cast
 from urllib.parse import urljoin, urlparse
 
 import httpx
+from mb_commerce_scraper.models import (
+    Availability,
+    CategoryRef,
+    CommerceOffer,
+    CommerceProductSnapshot,
+    CommerceVariant,
+    DocumentRef,
+    Evidence,
+    MediaRef,
+    Money,
+    StockQuantityKind,
+    StockState,
+)
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from .base import (
@@ -34,19 +47,6 @@ from .budget import (
     RequestBudgetProtocol,
     RequestPriority,
     budget_diagnostic,
-)
-from .commerce import (
-    Availability,
-    CategoryRef,
-    CommerceOffer,
-    CommerceProductSnapshot,
-    CommerceVariant,
-    DocumentRef,
-    Evidence,
-    MediaRef,
-    Money,
-    StockQuantityKind,
-    StockState,
 )
 
 PAGE_SIZE = 100
@@ -466,7 +466,7 @@ class WooCommerceConnector(CommerceConnector):
         )
         api_categories = tuple(
             CategoryRef(
-                name=str(entry["name"]),
+                name=self._clean(entry["name"]),
                 external_id=str(entry.get("id") or "") or None,
             )
             for entry in product.get("categories") or []
@@ -489,7 +489,10 @@ class WooCommerceConnector(CommerceConnector):
                 re.IGNORECASE,
             )
         )
-        published: dict[str, JsonValue] = dict(attributes)
+        published: dict[str, JsonValue] = {
+            **attributes,
+            "supplier_reference": self._clean(product.get("sku")) or None,
+        }
         if claims:
             published["claims"] = cast(JsonValue, claims)
         raw_extensions: dict[str, JsonValue]
@@ -556,11 +559,17 @@ class WooCommerceConnector(CommerceConnector):
             None,
         )
         attributes: dict[str, JsonValue] = {}
-        price_html = self._clean(raw.get("price_html"))
+        price_html = self._clean(raw.get("price_html")) if raw is product else ""
         if price_html:
             attributes["price_text"] = price_html
+        prices = raw.get("prices")
+        if isinstance(prices, dict) and (
+            legacy_currency := self._currency(prices.get("currency_code"))
+        ):
+            attributes["legacy_currency"] = legacy_currency
         return CommerceVariant(
             external_id=external_id,
+            is_default=raw is product,
             canonical_url=self._clean(raw.get("permalink")) or self._clean(product.get("permalink")),
             title=title or None,
             sku=self._clean(raw.get("sku")) or self._clean(product.get("sku")) or None,
@@ -662,7 +671,7 @@ class WooCommerceConnector(CommerceConnector):
             terms = [
                 WooCommerceConnector._clean(term.get("name"))
                 for term in attribute.get("terms") or []
-                if isinstance(term, dict) and WooCommerceConnector._clean(term.get("name"))
+                if isinstance(term, dict)
             ]
             if not name or not terms:
                 continue

@@ -445,6 +445,9 @@ async def reconcile_action(request: Request) -> Response:
     actor = await actor_for(request, admin=True)
     if isinstance(actor, Response):
         return actor
+    pspec = provider_spec(request)
+    if isinstance(pspec, Response):
+        return pspec
     provider = provider_for(request)
     if isinstance(provider, Response):
         return provider
@@ -459,10 +462,15 @@ async def reconcile_action(request: Request) -> Response:
             return payload(mutation.replay_data or {}, status=mutation.replay_status)
         data: dict[str, Any]
         try:
-            report = await reconcile_now(connection, provider, reason=f"manual:{actor.id}")
+            report = await reconcile_now(
+                connection,
+                provider,
+                reason=f"manual:{actor.id}",
+                spec=pspec,
+            )
         except (ProviderError, RuntimeError) as error:
             data = {"error": "reconciliation_failed"}
-            status = 409 if isinstance(error, RuntimeError) else 502
+            status = 502 if isinstance(error, ProviderError) else 409
             await finish_mutation(
                 connection, mutation, actor, "reconcile", status=status, data=data,
                 state="failed", error_code="reconciliation_failed",
@@ -514,7 +522,8 @@ async def kill_switch(request: Request) -> Response:
                 await connection.execute(
                     """update catalogue.proxy_reservations
                           set revocation_requested = true, state = 'revocation_requested'
-                        where state = 'active'"""
+                        where provider = %(provider)s and state = 'active'""",
+                    {"provider": pspec.name},
                 )
         else:
             if not request.app.state.settings.proxy_enabled:
@@ -530,7 +539,8 @@ async def kill_switch(request: Request) -> Response:
                  where provider = %(provider)s and lifecycle = 'active'
                    and reconciliation_ok and reconciled_at > now() - interval '20 minutes'
                    and greatest(provider_reported_bytes, application_bytes) < operational_bytes
-                   and exists(select 1 from catalogue.proxy_profiles where enabled)
+                   and exists(select 1 from catalogue.proxy_profiles
+                               where provider = %(provider)s and enabled)
                 returning id
                 """,
                 {"provider": pspec.name},
@@ -545,7 +555,12 @@ async def kill_switch(request: Request) -> Response:
             return problem(409, "Unsafe proxy state", "no active cycle satisfies the safety gates")
         data = {"kill_switch": action != "clear", "revocation_requested": action == "revoke"}
         await finish_mutation(connection, mutation, actor, f"kill_switch.{action}", status=202, data=data)
-        await events.emit(connection, events.Topic.PROXY, "proxy.kill_switch_changed", payload=data)
+        await events.emit(
+            connection,
+            events.Topic.PROXY,
+            "proxy.kill_switch_changed",
+            payload={**data, "provider": pspec.name},
+        )
     return payload(data, status=202)
 
 
@@ -608,8 +623,22 @@ async def propose_cycle(request: Request) -> Response:
         subscription = await provider.subscription()
     except ProviderError as error:
         return problem(502, "Provider unavailable", str(error))
+    if (
+        pspec.max_reconciliation_window is not None
+        and subscription.valid_until - subscription.valid_from
+        > pspec.max_reconciliation_window
+    ):
+        return problem(
+            409,
+            "Provider usage window unsupported",
+            f"{pspec.label} cannot reconcile the complete subscription window",
+        )
     if subscription.traffic_limit_bytes is None:
-        return problem(409, "Provider units unconfirmed", "confirm decimal_gb against the dashboard first")
+        return problem(
+            409,
+            "Finite cycle ceiling required",
+            "set an explicit finite operator ceiling before proposing this cycle",
+        )
     async with request.app.state.pool.connection() as connection:
         cursor = await connection.execute(
             """
@@ -665,7 +694,12 @@ async def open_or_close_cycle(request: Request) -> Response:
     if action == "close":
         async with request.app.state.pool.connection() as reconcile_connection:
             try:
-                await reconcile_now(reconcile_connection, provider, reason=f"cycle_close:{actor.id}")
+                await reconcile_now(
+                    reconcile_connection,
+                    provider,
+                    reason=f"cycle_close:{actor.id}",
+                    spec=pspec,
+                )
             except (ProviderError, RuntimeError) as error:
                 return problem(502, "Final reconciliation failed", str(error))
     async with request.app.state.pool.connection() as connection, connection.transaction():
@@ -674,8 +708,9 @@ async def open_or_close_cycle(request: Request) -> Response:
         )
         if action == "open":
             proposed = await connection.execute(
-                "select * from catalogue.proxy_budget_cycles where id = %(id)s for update",
-                {"id": cycle_id},
+                """select * from catalogue.proxy_budget_cycles
+                    where id = %(id)s and provider = %(provider)s for update""",
+                {"id": cycle_id, "provider": pspec.name},
             )
             row = await proposed.fetchone()
             if row is None or row["lifecycle"] != "proposed":
@@ -693,20 +728,22 @@ async def open_or_close_cycle(request: Request) -> Response:
                       set lifecycle = 'active', confirmed_at = now(), confirmed_by = %(actor)s,
                           opened_at = now(), opened_by = %(actor)s, kill_switch = true,
                           reconciliation_ok = false
-                    where id = %(id)s and lifecycle = 'proposed' returning *""",
-                {"id": cycle_id, "actor": actor.id},
+                    where id = %(id)s and provider = %(provider)s
+                      and lifecycle = 'proposed' returning *""",
+                {"id": cycle_id, "actor": actor.id, "provider": pspec.name},
             )
         elif action == "close":
             changed = await connection.execute(
                 """update catalogue.proxy_budget_cycles c
                       set lifecycle = 'closed', closed_at = now(), closed_by = %(actor)s,
                           kill_switch = true
-                    where id = %(id)s and lifecycle = 'active' and cycle_end <= now()
+                    where id = %(id)s and provider = %(provider)s
+                      and lifecycle = 'active' and cycle_end <= now()
                       and not exists(select 1 from catalogue.proxy_reservations r
                         where r.provider = c.provider and r.cycle_start = c.cycle_start
                           and r.state in ('active', 'revocation_requested'))
                     returning *""",
-                {"id": cycle_id, "actor": actor.id},
+                {"id": cycle_id, "actor": actor.id, "provider": pspec.name},
             )
         else:
             return problem(404, "Not Found", "unknown cycle action")
@@ -717,7 +754,12 @@ async def open_or_close_cycle(request: Request) -> Response:
     if action == "open":
         async with request.app.state.pool.connection() as reconcile_connection:
             try:
-                await reconcile_now(reconcile_connection, provider, reason=f"cycle_open:{actor.id}")
+                await reconcile_now(
+                    reconcile_connection,
+                    provider,
+                    reason=f"cycle_open:{actor.id}",
+                    spec=pspec,
+                )
             except (ProviderError, RuntimeError) as error:
                 return problem(
                     502, "Initial reconciliation failed",
@@ -730,6 +772,9 @@ async def create_route(request: Request) -> Response:
     actor = await actor_for(request, admin=True)
     if isinstance(actor, Response):
         return actor
+    pspec = provider_spec(request)
+    if isinstance(pspec, Response):
+        return pspec
     try:
         body = await request.json()
         profile_id = UUID(str(body["profile_id"]))
@@ -750,16 +795,18 @@ async def create_route(request: Request) -> Response:
         cursor = await connection.execute(
             """
             insert into catalogue.proxy_routes
-                   (label, profile_id, protocol, country, state, city, session_mode,
+                   (provider, label, profile_id, protocol, country, state, city, session_mode,
                     session_minutes, max_bytes, pilot, enabled, created_by, updated_by)
-            select %(label)s, p.id, %(protocol)s, %(country)s, %(state)s, %(city)s,
+            select p.provider, %(label)s, p.id, %(protocol)s, %(country)s, %(state)s, %(city)s,
                    %(mode)s, %(minutes)s, %(bytes)s, %(pilot)s, %(enabled)s,
                    %(actor)s, %(actor)s
               from catalogue.proxy_profiles p
-             where p.id = %(profile)s and p.enabled and p.lifecycle = 'enabled'
+             where p.id = %(profile)s and p.provider = %(provider)s
+               and p.enabled and p.lifecycle = 'enabled'
             returning *
             """,
             {
+                "provider": pspec.name,
                 "label": str(body.get("label", "New route"))[:200], "profile": profile_id,
                 "protocol": protocol, "country": country, "state": body.get("state"),
                 "city": body.get("city"), "mode": session_mode, "minutes": session_minutes,
@@ -847,6 +894,12 @@ async def create_profile(request: Request) -> Response:
     pspec = provider_spec(request)
     if isinstance(pspec, Response):
         return pspec
+    if not pspec.can_provision_subusers:
+        return problem(
+            409,
+            "Profile provisioning unsupported",
+            f"{pspec.label} does not support caller-chosen proxy credentials",
+        )
     if denied := _writes_enabled(request):
         return denied
     provider = provider_for(request)
@@ -914,11 +967,16 @@ async def create_profile(request: Request) -> Response:
             profile_cursor = await connection.execute(
                 """
                 insert into catalogue.proxy_profiles
-                       (logical_name, display_name, lifecycle, created_by, updated_by)
-                values (%(name)s, %(display)s, 'pending', %(actor)s, %(actor)s)
+                       (provider, logical_name, display_name, lifecycle, created_by, updated_by)
+                values (%(provider)s, %(name)s, %(display)s, 'pending', %(actor)s, %(actor)s)
                 returning *
                 """,
-                {"name": logical_name, "display": display_name[:200], "actor": actor.id},
+                {
+                    "provider": pspec.name,
+                    "name": logical_name,
+                    "display": display_name[:200],
+                    "actor": actor.id,
+                },
             )
             profile = await profile_cursor.fetchone()
             assert profile is not None
@@ -1018,6 +1076,9 @@ async def refresh_profiles(request: Request) -> Response:
     actor = await actor_for(request, admin=True)
     if isinstance(actor, Response):
         return actor
+    pspec = provider_spec(request)
+    if isinstance(pspec, Response):
+        return pspec
     provider = provider_for(request)
     if isinstance(provider, Response):
         return provider
@@ -1027,7 +1088,10 @@ async def refresh_profiles(request: Request) -> Response:
         return problem(502, "Provider unavailable", str(error))
     by_id = {user.id: user for user in users}
     async with request.app.state.pool.connection() as connection, connection.transaction():
-        cursor = await connection.execute("select * from catalogue.proxy_profiles for update")
+        cursor = await connection.execute(
+            "select * from catalogue.proxy_profiles where provider = %(provider)s for update",
+            {"provider": pspec.name},
+        )
         rows = await cursor.fetchall()
         drift: list[dict[str, Any]] = []
         for row in rows:
@@ -1075,6 +1139,18 @@ async def profile_action(request: Request) -> Response:
     body = await request.json()
     if not isinstance(body, dict):
         return problem(400, "Bad Request", "a JSON object is required")
+    if action == "rotate" and not pspec.can_provision_subusers:
+        return problem(
+            409,
+            "Profile rotation unsupported",
+            f"{pspec.label} does not support caller-chosen proxy credentials",
+        )
+    if action == "disable" and not pspec.has_subuser_status:
+        return problem(
+            409,
+            "Profile disable unsupported",
+            f"{pspec.label} does not expose a sub-user status control",
+        )
     async with request.app.state.pool.connection() as connection:
         cursor = await connection.execute(
             """select p.*, a.allocated_bytes, a.cycle_start
@@ -1082,8 +1158,8 @@ async def profile_action(request: Request) -> Response:
                  left join catalogue.proxy_budget_cycles c on c.provider = p.provider and c.lifecycle = 'active'
                  left join catalogue.proxy_profile_allocations a on a.profile_id = p.id
                   and a.provider = c.provider and a.cycle_start = c.cycle_start
-                where p.id = %(id)s""",
-            {"id": profile_id},
+                where p.id = %(id)s and p.provider = %(provider)s""",
+            {"id": profile_id, "provider": pspec.name},
         )
         profile = await cursor.fetchone()
         if profile is None or not profile["provider_resource_id"]:
@@ -1099,8 +1175,9 @@ async def profile_action(request: Request) -> Response:
             return payload(mutation.replay_data or {}, status=mutation.replay_status)
         active_cursor = await connection.execute(
             """select count(*) as count from catalogue.proxy_reservations
-                where profile_id = %(id)s and state in ('active', 'revocation_requested')""",
-            {"id": profile_id},
+                where provider = %(provider)s and profile_id = %(id)s
+                  and state in ('active', 'revocation_requested')""",
+            {"id": profile_id, "provider": pspec.name},
         )
         active_row = await active_cursor.fetchone()
         active = int(active_row["count"] if active_row else 0)
@@ -1126,6 +1203,18 @@ async def profile_action(request: Request) -> Response:
                     connection, mutation, actor, mutation_action, profile_id, status=422,
                     title="Invalid rotation", detail="mode must be drain or blue-green",
                     code="invalid_rotation",
+                )
+            if mode == "blue-green" and not pspec.has_subuser_status:
+                return await mutation_problem(
+                    connection,
+                    mutation,
+                    actor,
+                    mutation_action,
+                    profile_id,
+                    status=409,
+                    title="Blue-green rotation unsupported",
+                    detail=f"{pspec.label} cannot disable the retired provider profile",
+                    code="provider_status_unsupported",
                 )
             if mode == "drain" and active:
                 await connection.execute(
@@ -1272,8 +1361,15 @@ async def profile_action(request: Request) -> Response:
                 await connection.execute(
                     """update catalogue.proxy_profile_allocations set allocated_bytes = %(bytes)s,
                               updated_at = now(), updated_by = %(actor)s
-                        where profile_id = %(id)s and cycle_start = %(start)s""",
-                    {"bytes": allocation, "actor": actor.id, "id": profile_id, "start": profile["cycle_start"]},
+                        where provider = %(provider)s and profile_id = %(id)s
+                          and cycle_start = %(start)s""",
+                    {
+                        "provider": pspec.name,
+                        "bytes": allocation,
+                        "actor": actor.id,
+                        "id": profile_id,
+                        "start": profile["cycle_start"],
+                    },
                 )
             return await mutation_payload(
                 connection, mutation, actor, mutation_action, profile_id,
@@ -1289,6 +1385,15 @@ async def retire_profile(request: Request) -> Response:
     actor = await actor_for(request, admin=True, recent=True)
     if isinstance(actor, Response):
         return actor
+    pspec = provider_spec(request)
+    if isinstance(pspec, Response):
+        return pspec
+    if not pspec.has_subuser_status:
+        return problem(
+            409,
+            "Profile retirement unsupported",
+            f"{pspec.label} does not expose the status transition required for retirement",
+        )
     if denied := _writes_enabled(request):
         return denied
     profile_id = _uuid(request)
@@ -1296,8 +1401,10 @@ async def retire_profile(request: Request) -> Response:
         return problem(400, "Bad Request", "profile id must be a UUID")
     async with request.app.state.pool.connection() as connection, connection.transaction():
         cursor = await connection.execute(
-            "select id, logical_name from catalogue.proxy_profiles where id = %(id)s and retired_at is null for update",
-            {"id": profile_id},
+            """select id, logical_name from catalogue.proxy_profiles
+                where id = %(id)s and provider = %(provider)s
+                  and retired_at is null for update""",
+            {"id": profile_id, "provider": pspec.name},
         )
         profile = await cursor.fetchone()
         if profile is None:
@@ -1729,8 +1836,7 @@ async def probe_route(request: Request) -> Response:
             await close_reservation(connection, lease)
         latency = int((time.monotonic() - started) * 1000)
         state = "failed" if error_category else "succeeded"
-        metrics.proxy_probe(state)
-        await connection.execute(
+        probe_update = await connection.execute(
             """update catalogue.proxy_probes
                   set state = %(state)s, completed_at = now(), error_category = %(error)s,
                       estimated_bytes = %(bytes)s, provider_requests = %(requests)s,
@@ -1738,13 +1844,31 @@ async def probe_route(request: Request) -> Response:
                       exit_ip_expires_at = case when %(ip)s::inet is null
                            then null else now() + interval '7 days' end,
                       latency_ms = %(latency)s
-                where id = %(id)s""",
+                where id = %(id)s and state in ('pending', 'running')
+                returning state, error_category""",
             {
                 "state": state, "error": error_category, "bytes": lease.used_bytes,
                 "requests": lease.requests, "country": result.get("exit_country"),
                 "ip": result.get("exit_ip"), "latency": latency, "id": probe["id"],
             },
         )
+        persisted = await probe_update.fetchone()
+        if persisted is None:
+            # Stale cleanup can cancel an abandoned request while its coroutine
+            # is still unwinding. Never resurrect that terminal probe after its
+            # paid envelope has been cancelled.
+            current_cursor = await connection.execute(
+                """select state, error_category
+                     from catalogue.proxy_probes
+                    where id = %(id)s""",
+                {"id": probe["id"]},
+            )
+            current = await current_cursor.fetchone()
+            if current is None:  # pragma: no cover - protected by the local insert
+                raise RuntimeError("paid probe disappeared before completion")
+            state = current["state"]
+            error_category = current["error_category"]
+        metrics.proxy_probe(state)
         await events.emit(
             connection, events.Topic.PROXY, "proxy.probe_finished",
             payload={"probe_id": str(probe["id"]), "state": state},

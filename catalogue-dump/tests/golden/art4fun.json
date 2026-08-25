@@ -1,36 +1,36 @@
 {
-  "digest": "4ce66f657fb88415514e7d9fc6a91b8078446f5ad12269e23fe01fe4342d8fc5",
-  "discovered": 2207,
+  "digest": "9905ffcaaaca8a928c4defbddabdacca451aee22f8b1670df46d42fd5f7b7b4f",
+  "discovered": 2238,
   "error_count": 0,
   "errors": [],
   "extraction_method": "dom",
   "field_coverage": {
-    "all_image_urls": 1679,
-    "brand": 1491,
-    "category_path": 1679,
+    "all_image_urls": 1713,
+    "brand": 1571,
+    "category_path": 1713,
     "claims": 0,
-    "colour": 1345,
-    "description": 1679,
+    "colour": 1376,
+    "description": 1713,
     "documents": 0,
     "effects": 98,
-    "family": 1679,
-    "firing": 90,
+    "family": 1713,
+    "firing": 91,
     "form": 2,
     "gtin": 0,
-    "manufacturer_sku": 644,
+    "manufacturer_sku": 673,
     "package_size": 72,
     "stock_quantity": 0,
-    "supplier_reference": 1679,
-    "surface": 91,
+    "supplier_reference": 1713,
+    "surface": 93,
     "unit_price": 72,
-    "vat_status": 1679
+    "vat_status": 1713
   },
   "notes": [
-    "2207 product URLs from category pages"
+    "2238 product URLs from category pages"
   ],
-  "records": 1679,
+  "records": 1713,
   "rendered_pages": 0,
-  "requests": 2256,
+  "requests": 2288,
   "sample": [
     {
       "all_image_urls": [
@@ -211,14 +211,14 @@
     },
     {
       "all_image_urls": [
-        "https://cdn.starwebserver.se/shops/art4fun/files/1116.jpg"
+        "https://cdn.starwebserver.se/shops/art4fun/files/sp-212_dup2q2zy1.jpg"
       ],
       "application_methods": [
         "brushing"
       ],
       "availability": "https://schema.org/InStock",
-      "brand": null,
-      "brand_basis": null,
+      "brand": "Mayco",
+      "brand_basis": "published",
       "category_path": [
         "Glazes & Decals"
       ],
@@ -226,13 +226,15 @@
       "coats": null,
       "colour": {
         "basis": "product_name",
-        "name": "Mirror"
+        "name": "Moody Blue - Speckled"
       },
       "currency": "SEK",
-      "description": "Brushing glaze for stoneware",
+      "description": "Brushing glaze for earthen and stoneware",
       "documents": null,
-      "effects": null,
-      "external_id": "art4fun:https://www.art4fun.se/en/product/mirror-15",
+      "effects": [
+        "speckled"
+      ],
+      "external_id": "art4fun:https://www.art4fun.se/en/product/moody-blue-speckled-2",
       "extraction_method": "dom",
       "family": "glaze",
       "fetched_at": "<volatile>",
@@ -240,47 +242,52 @@
       "form": null,
       "format": "ceramics.catalogue_item.v2",
       "gtin": null,
-      "image_url": "https://cdn.starwebserver.se/shops/art4fun/files/1116.jpg",
+      "image_url": "https://cdn.starwebserver.se/shops/art4fun/files/sp-212_dup2q2zy1.jpg",
       "list_price": null,
       "manufacturer_sku": null,
       "manufacturer_sku_basis": null,
       "min_order_quantity": null,
-      "name": "Mirror",
+      "name": "Moody Blue - Speckled",
       "name_parsed_from": null,
-      "name_raw": "Mirror",
+      "name_raw": "Moody Blue - Speckled",
       "package_size": null,
-      "parent_external_id": "art4fun:https://www.art4fun.se/en/product/mirror-15",
-      "price": 263.0,
-      "price_text": "263 SEK",
-      "product_name": "Mirror",
-      "product_url": "https://www.art4fun.se/en/product/mirror-15",
+      "parent_external_id": "art4fun:https://www.art4fun.se/en/product/moody-blue-speckled-2",
+      "price": 333.0,
+      "price_text": "333 SEK",
+      "product_name": "Moody Blue - Speckled",
+      "product_url": "https://www.art4fun.se/en/product/moody-blue-speckled-2",
       "raw": {
         "@context": "http://schema.org/",
-        "@id": "https://www.art4fun.se/en/product/mirror-15",
+        "@id": "https://www.art4fun.se/en/product/moody-blue-speckled-2?sku=SP212",
         "@type": "Product",
-        "description": "Brushing glaze for stoneware",
+        "brand": {
+          "@type": "Brand",
+          "name": "Mayco"
+        },
+        "description": "Brushing glaze for earthen and stoneware",
         "image": [
-          "https://cdn.starwebserver.se/shops/art4fun/files/1116.jpg"
+          "https://cdn.starwebserver.se/shops/art4fun/files/sp-212_dup2q2zy1.jpg"
         ],
-        "name": "Mirror",
+        "name": "Moody Blue - Speckled",
         "offers": {
           "@type": "Offer",
           "availability": "http://schema.org/InStock",
           "itemCondition": "http://schema.org/NewCondition",
-          "price": "263",
+          "price": "333",
           "priceCurrency": "SEK",
-          "url": "https://www.art4fun.se/en/product/mirror-15"
+          "url": "https://www.art4fun.se/en/product/moody-blue-speckled-2?sku=SP212"
         },
-        "sku": "STG-1116"
+        "sku": "SP212"
       },
       "source": "art4fun",
       "source_detail_level": "product_page",
       "source_updated_at": null,
       "stock_quantity": null,
-      "supplier_reference": "STG-1116",
+      "supplier_reference": "SP212",
       "surface": null,
       "technical_attributes": {
-        "Article SKU": "STG-1116",
+        "Article SKU": "SP212",
+        "Manufacturer": "Mayco",
         "Manufacturer article no": "{{mpn}}",
         "Stock status": "In stock",
         "{{stockStatusLabel}}": "{{stockStatusValue}}"

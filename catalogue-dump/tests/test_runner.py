@@ -169,6 +169,78 @@ class TestOrdinaryRun:
         assert peak <= 2, f"{peak} sources ran at once with sources=2"
 
 
+class TestScraperFactory:
+    async def test_default_factory_remains_scrapers_build(self, monkeypatch):
+        calls: list[tuple[str, str, dict[str, Any], Any]] = []
+
+        def build(scraper: str, name: str, config: dict[str, Any], fetcher: Any) -> Any:
+            calls.append((scraper, name, config, fetcher))
+            return StubScraper(name, config, fetcher)
+
+        monkeypatch.setattr(
+            "mb_ceramics_catalogue.crawl.runner.scrapers.build",
+            build,
+        )
+        sources = make_sources("alpha")
+        outcomes, _ = await run_with(sources, ["alpha"], CrawlParams())
+
+        assert outcomes[0].summary["records"] == 2
+        assert len(calls) == 1
+        scraper, name, config, fetcher = calls[0]
+        assert scraper == "shopify"
+        assert name == "alpha"
+        assert config["url"] == "https://alpha.test/"
+        assert fetcher is StubSession.fetcher
+
+    async def test_injected_factory_replaces_only_scraper_construction(self, monkeypatch):
+        def default_factory(*_: Any, **__: Any) -> Any:
+            raise AssertionError("default scraper factory was called")
+
+        monkeypatch.setattr(
+            "mb_ceramics_catalogue.crawl.runner.scrapers.build",
+            default_factory,
+        )
+        calls: list[tuple[str, str, dict[str, Any], Any]] = []
+
+        def injected(scraper: str, name: str, config: dict[str, Any], fetcher: Any) -> Any:
+            calls.append((scraper, name, config, fetcher))
+            return StubScraper(name, config, fetcher)
+
+        BEHAVIOUR["alpha"] = ("records", 3)
+        sources = make_sources("alpha")
+        progress = Progress(1)
+        runner = CrawlRunner(
+            sources,
+            None,
+            CrawlParams(),
+            progress,
+            scraper_factory=injected,
+        )
+
+        outcomes = await runner.run(["alpha"])
+
+        assert outcomes[0].summary["records"] == 3
+        assert outcomes[0].summary["extraction_method"] == "api_json"
+        assert calls == [
+            (
+                "shopify",
+                "alpha",
+                sources["alpha"].as_scraper_config(),
+                None,
+            )
+        ]
+        assert not runner.interrupted
+
+    def test_default_factory_refuses_an_absent_session(self):
+        sources = make_sources("alpha")
+
+        with pytest.raises(
+            ValueError,
+            match="default scraper factory requires a crawl session",
+        ):
+            CrawlRunner(sources, None, CrawlParams(), Progress(1))
+
+
 class TestDeadline:
     async def test_a_hanging_source_is_given_up_on(self):
         """There was no deadline at all before this.

@@ -57,28 +57,16 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Applied once, in filename order, the first time the volume is empty.
-      # The order is load-bearing twice over: the baseline loader rejects a v2
-      # record until the migration has widened it, and the ops schema adds a
-      # foreign key to `catalogue.import_runs`, which the baseline creates.
       #
-      # They live under the package (src/.../storage/schema) rather than beside
+      # One schema file, not the eleven versioned ones it replaces: keeping an
+      # order-sensitive list here in step with `storage.db.SCHEMA_FILES` was a
+      # standing bug, and the compose side had already fallen a version behind.
+      #
+      # It lives under the package (src/.../storage/schema) rather than beside
       # this file so a worker can apply the same DDL from an installed
-      # distribution — see `storage.db.apply_schema`.
+      # distribution - see `storage.db.apply_schema`.
       - ./docker/initdb/00-extensions.sql:/docker-entrypoint-initdb.d/00-extensions.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-reference-schema.sql:/docker-entrypoint-initdb.d/10-catalogue-reference-schema.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-reference-schema-v2.sql:/docker-entrypoint-initdb.d/20-catalogue-reference-schema-v2.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-reference-schema-v3.sql:/docker-entrypoint-initdb.d/25-catalogue-reference-schema-v3.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-reference-schema-v4.sql:/docker-entrypoint-initdb.d/26-catalogue-reference-schema-v4.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-ops-schema.sql:/docker-entrypoint-initdb.d/30-catalogue-ops-schema.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-ops-schema-v2.sql:/docker-entrypoint-initdb.d/35-catalogue-ops-schema-v2.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-ops-schema-v3.sql:/docker-entrypoint-initdb.d/36-catalogue-ops-schema-v3.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-ops-schema-v4.sql:/docker-entrypoint-initdb.d/37-catalogue-ops-schema-v4.sql:ro
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-ops-schema-v5.sql:/docker-entrypoint-initdb.d/38-catalogue-ops-schema-v5.sql:ro
-      # Last, and it was missing entirely: it alters `canonical_products` and
-      # defines `promote_canonical_products`, which a run calls when its last
-      # job lands. A database without it takes every source in and never folds
-      # them into the cross-supplier identities the catalogue exists to serve.
-      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-canonical-promotion.sql:/docker-entrypoint-initdb.d/40-catalogue-canonical-promotion.sql:ro
+      - ./catalogue-dump/src/mb_ceramics_catalogue/storage/schema/catalogue-schema.sql:/docker-entrypoint-initdb.d/10-catalogue-schema.sql:ro
     restart: unless-stopped
     healthcheck:
       test:
@@ -86,7 +74,7 @@ services:
         - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
       interval: 10s
       timeout: 3s
-      # initdb replays both schema files before the server accepts connections.
+      # initdb replays the schema before the server accepts connections.
       start_period: 30s
       retries: 10
 
@@ -184,6 +172,11 @@ services:
     user: "0:0"
     volumes:
       - proxy-secrets:/run/proxy-secrets
+      - webshare-gateway-secrets:/run/webshare-gateway
+      - type: bind
+        source: ${CATALOGUE_WEBSHARE_GATEWAY_SECRET_SOURCE:-/dev/null}
+        target: /seed/webshare-gateway.json
+        read_only: true
     command:
       - sh
       - -ec
@@ -194,6 +187,13 @@ services:
         fi
         chown 10001:10001 /run/proxy-secrets/profiles.json
         chmod 0400 /run/proxy-secrets/profiles.json
+        install -d -m 0700 -o 10001 -g 10001 /run/webshare-gateway
+        if [ ! -e /run/webshare-gateway/webshare-gateway.json ] && [ -s /seed/webshare-gateway.json ]; then
+          cp /seed/webshare-gateway.json /run/webshare-gateway/.webshare-gateway.json.tmp
+          chown 10001:10001 /run/webshare-gateway/.webshare-gateway.json.tmp
+          chmod 0600 /run/webshare-gateway/.webshare-gateway.json.tmp
+          mv /run/webshare-gateway/.webshare-gateway.json.tmp /run/webshare-gateway/webshare-gateway.json
+        fi
     restart: "no"
 
   # The operator control plane: run/job/worker/source control, and the live
@@ -231,6 +231,7 @@ services:
       CATALOGUE_ARTIFACTS_DIR: /var/lib/catalogue/dumps
       CATALOGUE_PROXY_ENABLED: ${CATALOGUE_PROXY_ENABLED:-false}
       CATALOGUE_PROXY_SECRET_FILE: /run/proxy-secrets/profiles.json
+      CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE: /run/secrets/webshare-gateway/webshare-gateway.json
       CATALOGUE_PROXY_ACTOR_PUBLIC_KEYS_FILE: /run/secrets/operator-public-keys.json
       CATALOGUE_PROXY_PROVIDER_LIMIT_UNIT: ${CATALOGUE_PROXY_PROVIDER_LIMIT_UNIT:-unconfirmed}
       CATALOGUE_PROXY_MUTATIONS_ENABLED: ${CATALOGUE_PROXY_MUTATIONS_ENABLED:-false}
@@ -240,6 +241,9 @@ services:
       # never needs permission to alter the audit trail.
       - dumps:/var/lib/catalogue/dumps:ro
       - proxy-secrets:/run/proxy-secrets
+      # Control alone can atomically replace gateway generations. Workers see
+      # this directory through read-only mounts so a rename becomes visible.
+      - webshare-gateway-secrets:/run/secrets/webshare-gateway
       # Provider API access exists only in control. Workers receive generated
       # sub-user credentials through the read-only shared profile volume.
       - ./decodo.env:/run/secrets/decodo.env:ro
@@ -343,6 +347,10 @@ services:
       CATALOGUE_JOB_SLOTS: ${CATALOGUE_JOB_SLOTS:-4}
       CATALOGUE_PROXY_ENABLED: ${CATALOGUE_PROXY_ENABLED:-false}
       CATALOGUE_PROXY_SECRET_FILE: /run/proxy-secrets/profiles.json
+      # A mounted gateway credential is inert until this independent gate is
+      # explicitly enabled. The entrypoint stages the file but never changes
+      # this setting.
+      CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED: ${CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED:-false}
     volumes:
       # Shared, so a replay works across workers and a run's artifacts are all
       # in one place. The cache is sharded per host and the dumps are namespaced
@@ -350,6 +358,8 @@ services:
       - cache:/var/lib/catalogue/cache
       - dumps:/var/lib/catalogue/dumps
       - proxy-secrets:/run/proxy-secrets:ro
+      # Control owns the writable store; workers can only observe rotations.
+      - webshare-gateway-secrets:/run/secrets/webshare-gateway:ro
       - type: bind
         source: ${CATALOGUE_CF_CONSUME_TOKEN_FILE:-/dev/null}
         target: /run/queue-secrets/cloudflare-consume-token
@@ -409,10 +419,12 @@ services:
       CATALOGUE_BROWSER_PAGES: ${CATALOGUE_BROWSER_PAGES:-2}
       CATALOGUE_PROXY_ENABLED: ${CATALOGUE_PROXY_ENABLED:-false}
       CATALOGUE_PROXY_SECRET_FILE: /run/proxy-secrets/profiles.json
+      CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED: ${CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED:-false}
     volumes:
       - cache:/var/lib/catalogue/cache
       - dumps:/var/lib/catalogue/dumps
       - proxy-secrets:/run/proxy-secrets:ro
+      - webshare-gateway-secrets:/run/secrets/webshare-gateway:ro
       - type: bind
         source: ${CATALOGUE_CF_CONSUME_TOKEN_FILE:-/dev/null}
         target: /run/queue-secrets/cloudflare-consume-token
@@ -520,42 +532,40 @@ services:
       start_period: 10s
       retries: 3
 
-  # Optional, bounded operational metrics. Prometheus discovers every scaled
-  # worker by Docker DNS; scraping a load-balanced worker name as one target
-  # would mix process-local counters across replicas.
-  prometheus:
+  # Operational metrics leave this host; they are not stored on it. The shared
+  # plane in mazenet-infra owns storage, and MakersBrain's vmagent in mb-infra
+  # already forwards catalogue-control and catalogue-service from production
+  # (deploy/podman/render.py, CATALOGUE_SCRAPE_JOBS). This vmagent covers the
+  # jobs that one does not: the dispatcher and both worker pools.
+  #
+  # Scraping a load-balanced worker name as one target would mix process-local
+  # counters across replicas, so the pools are discovered by Docker DNS. vmagent
+  # has no per-job dns_sd refresh_interval; -promscrape.dnsSDCheckInterval is
+  # the global equivalent.
+  #
+  # The remote-write queue is on disk on purpose: a bounded plane outage
+  # backfills instead of being lost, without putting a TSDB on this host.
+  vmagent:
     profiles: ["observability"]
-    image: prom/prometheus:v3.5.0
-    container_name: catalogue-prometheus
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=14d
-      - --storage.tsdb.retention.size=2GB
-    volumes:
-      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./deploy/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
-      - prometheus-data:/prometheus
-    ports:
-      - "127.0.0.1:${CATALOGUE_PROMETHEUS_PORT:-9090}:9090"
-    restart: unless-stopped
-
-  grafana:
-    profiles: ["observability"]
-    image: grafana/grafana:12.1.0
-    container_name: catalogue-grafana
-    depends_on:
-      - prometheus
+    image: victoriametrics/vmagent:v1.148.0
+    container_name: catalogue-vmagent
+    env_file:
+      - path: ./deploy/observability/vmagent.env
+        required: false
     environment:
-      GF_SECURITY_ADMIN_USER: ${CATALOGUE_GRAFANA_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${CATALOGUE_GRAFANA_PASSWORD:-catalogue-local}
-      GF_USERS_ALLOW_SIGN_UP: "false"
+      CATALOGUE_ENVIRONMENT: ${CATALOGUE_ENVIRONMENT:-local}
+    command:
+      - --envflag.enable
+      - --promscrape.config=/etc/vmagent/scrape.yml
+      - --promscrape.dnsSDCheckInterval=15s
+      - --remoteWrite.tmpDataPath=/vmagent-queue
+      - --remoteWrite.maxDiskUsagePerURL=268435456
+      - --httpListenAddr=:8429
     volumes:
-      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana-data:/var/lib/grafana
+      - ./deploy/observability/scrape.yml:/etc/vmagent/scrape.yml:ro
+      - vmagent-queue:/vmagent-queue
     ports:
-      - "127.0.0.1:${CATALOGUE_GRAFANA_PORT:-3001}:3000"
+      - "127.0.0.1:${CATALOGUE_VMAGENT_PORT:-8429}:8429"
     restart: unless-stopped
 
 volumes:
@@ -573,12 +583,13 @@ volumes:
   # Control replaces profiles.json atomically; workers mount the same volume
   # read-only and resolve a credential generation once per job.
   proxy-secrets:
+  # Control atomically replaces the gateway document; workers mount it RO.
+  webshare-gateway-secrets:
   # Explorer-only copy of the assertion signing key. The one-shot initializer
   # preserves the host key's 0600 mode while assigning it to the container UID.
   operator-secrets:
-  # Bounded by Prometheus' 14-day/2GB retention flags above.
-  prometheus-data:
-  grafana-data:
+  # The remote-write buffer only. Nothing here is a metrics store.
+  vmagent-queue:
 
 secrets:
   npmrc:

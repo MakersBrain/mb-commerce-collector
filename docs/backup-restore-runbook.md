@@ -175,7 +175,7 @@ resource "cloudflare_r2_bucket_lock" "backups" {
 # replacement.
 resource "cloudflare_r2_bucket" "cache" {
   account_id = var.account_id
-  name       = "makersbrain-catalogue-cache"
+  name       = "mb-catalogue-cache"
 }
 ```
 

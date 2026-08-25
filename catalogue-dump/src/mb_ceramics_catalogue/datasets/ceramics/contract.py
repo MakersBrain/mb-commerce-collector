@@ -62,11 +62,17 @@ class _CeramicsRecord(BaseModel):
     material_kind: str | None = None
     published_unit_price: str | None = None
     vat_basis: str | None = None
+    collection_mode: Literal["price"] | None = None
 
     @model_serializer(mode="wrap")
     def _preserve_legacy_key_presence(self, handler: SerializerFunctionWrapHandler) -> dict[str, JsonValue]:
         serialized: dict[str, JsonValue] = handler(self)
-        for field in ("material_kind", "published_unit_price", "vat_basis"):
+        for field in (
+            "material_kind",
+            "published_unit_price",
+            "vat_basis",
+            "collection_mode",
+        ):
             if field not in self.model_fields_set:
                 serialized.pop(field, None)
         return serialized

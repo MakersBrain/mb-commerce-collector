@@ -77,6 +77,40 @@ def test_push_uploads_and_records_what_it_uploaded(tmp_path, settings, remote):
     assert json.loads(manifest.read_text()) == record
 
 
+def test_push_can_publish_only_reviewed_hosts(tmp_path, settings, remote):
+    cache = make_cache(tmp_path)
+    manifest = tmp_path / "cache-archive.json"
+
+    record = cache_archive.push(
+        settings,
+        cache=cache,
+        manifest=manifest,
+        hosts=("shop.example",),
+    )
+
+    assert record["files"] == 2
+    assert record["hosts"] == ["shop.example"]
+    archive = remote._path(record["key"])
+    with tarfile.open(archive, "r") as opened:
+        assert [member.name for member in opened.getmembers()] == [
+            "shop.example/a.gz",
+            "shop.example/b.gz",
+        ]
+
+
+@pytest.mark.parametrize("host", ("missing.example", "../escape", ""))
+def test_push_rejects_invalid_or_absent_host_selection(
+    tmp_path, settings, remote, host
+):
+    with pytest.raises(cache_archive.CacheArchiveError, match="cache host"):
+        cache_archive.push(
+            settings,
+            cache=make_cache(tmp_path),
+            manifest=tmp_path / "cache-archive.json",
+            hosts=(host,),
+        )
+
+
 def test_the_archive_is_the_same_bytes_for_the_same_cache(tmp_path, settings, remote):
     one = cache_archive.push(
         settings, cache=make_cache(tmp_path / "one"), manifest=tmp_path / "one.json"

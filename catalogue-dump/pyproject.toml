@@ -4,6 +4,7 @@ version = "0.2.0"
 description = "Collection, loading and scheduled operation of the ceramics reference catalogue"
 requires-python = ">=3.11,<3.14"
 dependencies = [
+  "mb-commerce-scraper==0.1.0",
   # Cron expressions for `catalogue.schedules`. A five-field parser is eighty
   # lines and gets DST wrong in ways nobody notices until the clocks change.
   "croniter>=6.0",
@@ -101,6 +102,13 @@ packages = ["src/mb_ceramics_catalogue"]
 # directory happened to be the working one.
 package = true
 
+[tool.uv.sources]
+# Editable: without it uv installs a *copy*, so library edits are invisible to
+# this suite and cross-package changes get validated against a stale snapshot.
+# The installed-wheel gates deliberately test the built artifact instead and
+# are unaffected by this.
+mb-commerce-scraper = { path = "../commerce-scraper", editable = true }
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # The suite is a mix of the original unittest classes and plain pytest
@@ -109,12 +117,13 @@ asyncio_mode = "auto"
 # Replaying every cached source reads ten thousand entries and takes minutes,
 # which is the wrong default for a suite that should be run on every save. CI
 # runs `pytest -m golden` as its own step.
-addopts = "-m 'not golden and not postgres'"
+addopts = "-m 'not golden and not postgres and not camoufox'"
 filterwarnings = ["error::DeprecationWarning:mb_ceramics_catalogue.*"]
 markers = [
   "golden: replays recorded responses and compares against a frozen dump",
   "postgres: needs a live PostgreSQL; skipped when CATALOGUE_TEST_DSN is unset",
   "nats: needs a live disposable NATS JetStream; skipped when CATALOGUE_TEST_NATS_URL is unset",
+  "camoufox: needs the downloaded local Camoufox browser runtime",
 ]
 
 [tool.ruff]

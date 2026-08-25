@@ -1,138 +1,109 @@
-"""Runtime factories adapting the legacy fetcher to neutral connectors.
-
-Connectors remain transport-only.  This ops-owned registry is the composition
-root: it projects validated source configuration, supplies transport adapters,
-and is intentionally extensible for new connector canaries.
-"""
+"""Project validated catalogue sources into native connector runtime metadata."""
 
 from __future__ import annotations
 
-import gzip
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlparse
 
-from mb_ceramics_catalogue.config.sources import SourceConfig
-from mb_ceramics_catalogue.connectors import (
-    AxnerConnector,
-    AxnerOptions,
-    BigCommerceConnector,
+from mb_commerce_scraper.connectors import (
     BigCommerceOptions,
-    CeramicoloursConnector,
-    CeramicoloursOptions,
-    CommerceConnector,
-    KeramikKraftConnector,
-    KeramikKraftOptions,
-    NitroSellConnector,
+    BrowserRequirement,
+    ConnectorRegistry,
+    DiscoveryOptions,
+    GenericPagesOptions,
     NitroSellOptions,
-    PageCommerceConnector,
-    PageCrawlOptions,
-    PrestaShopConnector,
     PrestaShopOptions,
-    ShopifyConnector,
     ShopifyOptions,
-    ShopwareConnector,
     ShopwareOptions,
-    StarwebConnector,
     StarwebOptions,
-    SumUpConnector,
     SumUpOptions,
-    WixConnector,
     WixOptions,
-    WooCommerceConnector,
     WooCommerceOptions,
 )
-from mb_ceramics_catalogue.connectors.prestashop import declared_partition_keys
-from mb_ceramics_catalogue.pipeline.budget import RequestBudget
+from pydantic import BaseModel
+
+from mb_ceramics_catalogue.config.sources import SourceConfig
+
+from .commerce_scraper_axner import AxnerFactory, AxnerOptions
+from .commerce_scraper_ceramicolours import CeramicoloursFactory, CeramicoloursOptions
+from .commerce_scraper_keramik_kraft import KeramikKraftFactory, KeramikKraftOptions
 
 
-class BigCommerceFetcherTransport:
-    def __init__(self, fetcher: Any) -> None:
-        self.fetcher = fetcher
+@dataclass(frozen=True, slots=True)
+class LibraryCanaryRoute:
+    """Application approval for one connector's native migration route."""
 
-    async def document(self, url: str, *, rendered: bool = False) -> str:
-        if rendered:
-            return str(await self.fetcher.render(url, wait_ms=2500))
-        return str(await self.fetcher.text(url, browser_user_agent=True))
+    connector: str
+    request_partitions: tuple[str, ...] = ()
+    dynamic_partitions: bool = False
+    uses_browser_transport: bool = False
 
-    async def request_json(
-        self, url: str, *, headers: dict[str, str], body: dict[str, Any],
-        browser_context_url: str | None = None,
-    ) -> Any:
-        if browser_context_url is not None:
-            return await self.fetcher.request_json_in_browser(
-                browser_context_url, url, headers=headers, body=body
+    def __post_init__(self) -> None:
+        if not self.connector or self.connector != self.connector.strip().lower():
+            raise ValueError(
+                "library canary connector must be a normalized non-empty name"
             )
-        response = await self.fetcher.response(
-            url, method="POST", json_body=body, headers=headers, browser_user_agent=True
-        )
-        return response.json()
-
-
-class WixFetcherTransport:
-    def __init__(self, fetcher: Any) -> None:
-        self.fetcher = fetcher
-
-    async def advertised_sitemaps(self, base_url: str) -> tuple[str, ...]:
-        _, sitemaps = await self.fetcher.robots(base_url)
-        return tuple(sitemaps)
-
-    async def document(
-        self, url: str, *, rendered: bool = False, accept: str | None = None
-    ) -> str:
-        if rendered:
-            return str(await self.fetcher.render(url))
-        if accept is not None:
-            response = await self.fetcher.response(url, accept=accept)
-            body = bytes(response.content)
-            if body[:2] == b"\x1f\x8b":
-                body = gzip.decompress(body)
-            return body.decode(response.encoding or "utf-8", errors="replace")
-        return str(await self.fetcher.text(url, browser_user_agent=True))
-
-
-class PageFetcherTransport(WixFetcherTransport):
-    def __init__(self, fetcher: Any, config: SourceConfig) -> None:
-        super().__init__(fetcher)
-        self.config = config
-
-    async def allowed(self, url: str) -> bool:
-        return bool(await self.fetcher.may_fetch(
-            url, self.config.ignore_robots, self.config.obey_robots
-        ))
-
-
-class InteractiveFetcherTransport(PageFetcherTransport):
-    async def evaluate(
-        self, url: str, script: str, *, wait_for: str | None = None
-    ) -> Any:
-        return await self.fetcher.evaluate_in_browser(url, script, wait_for=wait_for)
+        if any(not value or value != value.strip() for value in self.request_partitions):
+            raise ValueError(
+                "library canary partitions must be normalized non-empty strings"
+            )
+        if len(set(self.request_partitions)) != len(self.request_partitions):
+            raise ValueError("library canary partitions must be unique")
+        if self.dynamic_partitions and not self.request_partitions:
+            raise ValueError(
+                "dynamic library canary partitions require configured partitions"
+            )
 
 
 @dataclass(frozen=True)
 class ConnectorRuntimePlan:
-    name: str
-    connector_version: str
-    options: dict[str, Any]
-    partitions: tuple[str, ...]
-    build: Callable[[Any, RequestBudget | None], CommerceConnector]
+    """Data-only application projection for one stable source scraper family."""
+
+    connector: str
+    connector_options: dict[str, Any]
     extraction_method: str
     source_detail_level: str
-    legacy_scraper_adapter: str
     ceramics_projection: dict[str, Any] = field(default_factory=dict)
     categories: tuple[str, ...] = ()
     collections: tuple[str, ...] = ()
-
-    @property
-    def dynamic_partitions(self) -> bool:
-        """Whether discovery must register its exact partition keys durably."""
-        return not self.partitions
+    library_canary: LibraryCanaryRoute | None = None
 
 
 RuntimeProjector = Callable[[SourceConfig], ConnectorRuntimePlan]
 RUNTIME_ADAPTERS: dict[str, RuntimeProjector] = {}
+
+
+def application_connector_registry() -> ConnectorRegistry:
+    """Compose library built-ins with explicitly approved application plugins."""
+    registry = ConnectorRegistry.with_builtins()
+    registry.register(AxnerFactory())
+    registry.register(CeramicoloursFactory())
+    registry.register(KeramikKraftFactory())
+    return registry
+
+
+def _library_canary(
+    connector: str,
+    options: BaseModel,
+    config: SourceConfig,
+    *,
+    request_partitions: tuple[str, ...] = (),
+) -> LibraryCanaryRoute:
+    plan = application_connector_registry().plan(
+        connector,
+        options=options.model_dump(mode="json"),
+        base_url=config.url,
+        request_partitions=request_partitions,
+    )
+    return LibraryCanaryRoute(
+        connector=connector,
+        request_partitions=plan.partitions,
+        dynamic_partitions=plan.dynamic_partitions,
+        uses_browser_transport=plan.browser is not BrowserRequirement.NEVER,
+    )
 
 
 def register_runtime_adapter(name: str, projector: RuntimeProjector) -> None:
@@ -151,6 +122,19 @@ def runtime_plan(config: SourceConfig) -> ConnectorRuntimePlan:
         ) from None
 
 
+def library_canary_route(
+    plan: ConnectorRuntimePlan,
+    projected_connector: str,
+) -> LibraryCanaryRoute | None:
+    """Return explicitly approved native metadata, rejecting projection drift."""
+    route = plan.library_canary
+    if route is not None and route.connector != projected_connector:
+        raise ValueError(
+            "library canary route does not match the projected source connector"
+        )
+    return route
+
+
 def _shopify(config: SourceConfig) -> ConnectorRuntimePlan:
     options = ShopifyOptions(
         currency=config.currency, vat_status=config.vat_status,
@@ -161,11 +145,14 @@ def _shopify(config: SourceConfig) -> ConnectorRuntimePlan:
     )
     collections = tuple(config.collections or ())
     return ConnectorRuntimePlan(
-        "shopify", ShopifyConnector.version, options.model_dump(mode="json"),
-        collections or ("main",),
-        lambda fetcher, budget: ShopifyConnector(fetcher, options, budget=budget),
-        "api_json", "api", "shopify_connector",
+        connector="shopify",
+        connector_options=options.model_dump(mode="json"),
+        extraction_method="api_json",
+        source_detail_level="api",
         collections=collections,
+        library_canary=_library_canary(
+            "shopify", options, config, request_partitions=collections
+        ),
     )
 
 
@@ -182,25 +169,27 @@ def _woocommerce(config: SourceConfig) -> ConnectorRuntimePlan:
     )
     categories = tuple(config.store_categories or ())
     return ConnectorRuntimePlan(
-        "woocommerce", WooCommerceConnector.version, options.model_dump(mode="json"),
-        categories or ("main",),
-        lambda fetcher, budget: WooCommerceConnector(fetcher, options, budget=budget),
-        "api_json", "api", "woocommerce_connector",
+        connector="woocommerce",
+        connector_options=options.model_dump(mode="json"),
+        extraction_method="api_json",
+        source_detail_level="api",
         categories=categories,
+        library_canary=_library_canary("woocommerce", options, config),
     )
 
 
 def _bigcommerce(config: SourceConfig) -> ConnectorRuntimePlan:
     options = BigCommerceOptions(
         token_page=config.category_url, page_limit=config.page_limit or 200,
+        allow_rendered_token_fallback=config.render is not False,
         vat_status=config.vat_status,
     )
     return ConnectorRuntimePlan(
-        "bigcommerce", BigCommerceConnector.version, options.model_dump(mode="json"), ("main",),
-        lambda fetcher, budget: BigCommerceConnector(
-            BigCommerceFetcherTransport(fetcher), options, budget=budget
-        ),
-        "graphql", "api", "bigcommerce_connector",
+        connector="bigcommerce",
+        connector_options=options.model_dump(mode="json"),
+        extraction_method="graphql",
+        source_detail_level="api",
+        library_canary=_library_canary("bigcommerce", options, config),
     )
 
 
@@ -213,16 +202,12 @@ def _wix(config: SourceConfig) -> ConnectorRuntimePlan:
         brand=config.brand, vat_status=config.vat_status, render=config.render,
     )
     return ConnectorRuntimePlan(
-        "wix", WixConnector.version, options.model_dump(mode="json"), ("main",),
-        lambda fetcher, budget: WixConnector(
-            WixFetcherTransport(fetcher), options, budget=budget
-        ),
-        "dom", "product_page", "wix_connector",
+        connector="wix",
+        connector_options=options.model_dump(mode="json"),
+        extraction_method="dom",
+        source_detail_level="product_page",
+        library_canary=_library_canary("wix", options, config),
     )
-
-
-def _page_partitions(config: SourceConfig, *, sitemaps: tuple[str, ...]) -> tuple[str, ...]:
-    return ("sitemap",) if sitemaps or config.use_advertised_sitemaps is not False else ("category",)
 
 
 def _specialized_options(
@@ -230,14 +215,20 @@ def _specialized_options(
     config: SourceConfig,
 ) -> ShopwareOptions | StarwebOptions | NitroSellOptions:
     return model(
-        sitemaps=tuple(config.sitemaps or ()),
-        use_advertised_sitemaps=(True if config.use_advertised_sitemaps is None else config.use_advertised_sitemaps),
-        category_urls=tuple(config.category_urls or ()),
-        product_pattern=config.product_pattern,
-        pagination_patterns=tuple(config.pagination_patterns or ()),
-        card_links_only=bool(config.card_links_only),
+        discovery=DiscoveryOptions(
+            sitemaps=tuple(config.sitemaps or ()),
+            use_advertised_sitemaps=(
+                True
+                if config.use_advertised_sitemaps is None
+                else config.use_advertised_sitemaps
+            ),
+            category_urls=tuple(config.category_urls or ()),
+            product_pattern=config.product_pattern,
+            pagination_patterns=tuple(config.pagination_patterns or ()),
+            card_links_only=bool(config.card_links_only),
+            category_page_limit=config.category_page_limit or 120,
+        ),
         page_limit=config.page_limit or 500,
-        category_page_limit=config.category_page_limit or 120,
         render=config.render, brand=config.brand, currency=config.currency,
         vat_status=config.vat_status,
         vat_rate=Decimal(str(config.vat_rate)) if config.vat_rate is not None else None,
@@ -248,21 +239,19 @@ def _specialized_options(
 
 
 def _specialized(config: SourceConfig, name: str) -> ConnectorRuntimePlan:
-    definitions: dict[str, tuple[Any, Any, str]] = {
-        "shopware": (ShopwareConnector, ShopwareOptions, "dom"),
-        "starweb": (StarwebConnector, StarwebOptions, "dom"),
-        "nitrosell": (NitroSellConnector, NitroSellOptions, "opengraph"),
+    definitions: dict[str, tuple[Any, str]] = {
+        "shopware": (ShopwareOptions, "dom"),
+        "starweb": (StarwebOptions, "dom"),
+        "nitrosell": (NitroSellOptions, "opengraph"),
     }
-    connector_type, options_type, method = definitions[name]
+    options_type, method = definitions[name]
     options = _specialized_options(options_type, config)
-    sitemaps = tuple(options.sitemaps)
     return ConnectorRuntimePlan(
-        name, connector_type.version, options.model_dump(mode="json"),
-        _page_partitions(config, sitemaps=sitemaps),
-        lambda fetcher, budget: connector_type(
-            WixFetcherTransport(fetcher), options, budget=budget
-        ),
-        method, "product_page", f"{name}_connector",
+        connector=name,
+        connector_options=options.model_dump(mode="json"),
+        extraction_method=method,
+        source_detail_level="product_page",
+        library_canary=_library_canary(name, options, config),
     )
 
 
@@ -270,18 +259,22 @@ def _sumup(config: SourceConfig) -> ConnectorRuntimePlan:
     origin = f"{urlparse(config.url).scheme}://{urlparse(config.url).netloc}"
     sitemaps = tuple(config.sitemaps or (f"{origin}/sitemap.products.xml",))
     options = SumUpOptions(
-        sitemaps=sitemaps, use_advertised_sitemaps=False,
-        product_pattern=config.product_pattern, page_limit=config.page_limit or 500,
+        discovery=DiscoveryOptions(
+            sitemaps=sitemaps,
+            use_advertised_sitemaps=False,
+            product_pattern=config.product_pattern,
+        ),
+        page_limit=config.page_limit or 500,
         render=config.render, brand=config.brand, currency=config.currency,
         vat_status=config.vat_status,
         vat_rate=Decimal(str(config.vat_rate)) if config.vat_rate is not None else None,
     )
     return ConnectorRuntimePlan(
-        "sumup", SumUpConnector.version, options.model_dump(mode="json"), ("sitemap",),
-        lambda fetcher, budget: SumUpConnector(
-            WixFetcherTransport(fetcher), options, budget=budget
-        ),
-        "dom", "product_page", "sumup_connector",
+        connector="sumup",
+        connector_options=options.model_dump(mode="json"),
+        extraction_method="dom",
+        source_detail_level="product_page",
+        library_canary=_library_canary("sumup", options, config),
     )
 
 
@@ -300,74 +293,110 @@ def _prestashop(config: SourceConfig, *, sio2: bool = False) -> ConnectorRuntime
         category_page_limit=config.category_page_limit or 120,
     )
     return ConnectorRuntimePlan(
-        "prestashop", PrestaShopConnector.version, options.model_dump(mode="json"),
-        declared_partition_keys(options, config.url),
-        lambda fetcher, budget: PrestaShopConnector(
-            PageFetcherTransport(fetcher, config), options, budget=budget
-        ),
-        "dom", "product_page", "sio2_connector" if sio2 else "prestashop_connector",
+        connector="prestashop",
+        connector_options=options.model_dump(mode="json"),
+        extraction_method="dom",
+        source_detail_level="product_page",
         ceramics_projection={"source_policy": "sio2"} if sio2 else {},
+        library_canary=_library_canary("prestashop", options, config),
     )
 
 
 def _pagecommerce(config: SourceConfig) -> ConnectorRuntimePlan:
-    options = PageCrawlOptions(
-        sitemaps=tuple(config.sitemaps or ()), category_urls=tuple(config.category_urls or ()),
-        use_advertised_sitemaps=(True if config.use_advertised_sitemaps is None
-                                else config.use_advertised_sitemaps),
+    discovery = DiscoveryOptions(
+        sitemaps=tuple(config.sitemaps or ()),
+        category_urls=tuple(config.category_urls or ()),
+        use_advertised_sitemaps=(
+            True
+            if config.use_advertised_sitemaps is None
+            else config.use_advertised_sitemaps
+        ),
         product_pattern=config.product_pattern,
         pagination_patterns=tuple(config.pagination_patterns or ()),
-        card_links_only=bool(config.card_links_only), page_limit=config.page_limit or 500,
-        category_page_limit=config.category_page_limit or 120, render=config.render,
+        card_links_only=bool(config.card_links_only),
+        category_page_limit=config.category_page_limit or 120,
+        sitemap_limit=100,
+    )
+    options = GenericPagesOptions(
+        discovery=discovery,
+        page_limit=config.page_limit or 500,
+        render=config.render,
         brand=config.brand, currency=config.currency, vat_status=config.vat_status,
         vat_rate=Decimal(str(config.vat_rate)) if config.vat_rate is not None else None,
         stock_from_quantity_maximum=bool(config.stock_from_quantity_maximum),
+        parsers=("jsonld", "microdata", "opengraph"),
+        browser_zero_gain_limit=10,
     )
     return ConnectorRuntimePlan(
-        "pagecommerce", PageCommerceConnector.version, options.model_dump(mode="json"),
-        _page_partitions(config, sitemaps=tuple(options.sitemaps)),
-        lambda fetcher, budget: PageCommerceConnector(
-            PageFetcherTransport(fetcher, config), options, budget=budget
-        ),
-        "structured", "product_page", "pagecrawl_connector",
+        connector="generic-pages",
+        connector_options=options.model_dump(mode="json"),
+        extraction_method="structured",
+        source_detail_level="product_page",
+        library_canary=_library_canary("generic-pages", options, config),
     )
 
 
-def _bespoke(config: SourceConfig, name: str) -> ConnectorRuntimePlan:
-    options: Any
-    connector_type: Any
-    transport_type: Any
-    if name == "axner":
-        options = AxnerOptions(
-            category_url=config.category_url, category_page_limit=config.category_page_limit or 400,
-            page_limit=config.page_limit or 500, brand=config.brand, currency=config.currency or "USD",
-            vat_status=config.vat_status,
-            vat_rate=Decimal(str(config.vat_rate)) if config.vat_rate is not None else None,
-            render=config.render,
-        )
-        connector_type, transport_type = AxnerConnector, PageFetcherTransport
-    elif name == "ceramicolours":
-        options = CeramicoloursOptions(
-            category_ids=tuple(str(value) for value in (config.category_ids or ())),
-            category_page_limit=config.category_page_limit or 25, page_limit=config.page_limit or 500,
-            brand=config.brand, vat_status=config.vat_status or "inclusive", render=config.render,
-        )
-        connector_type, transport_type = CeramicoloursConnector, InteractiveFetcherTransport
-    else:
-        options = KeramikKraftOptions(
-            category_paths=tuple(config.category_paths or ()),
-            category_page_limit=config.category_page_limit or 150, page_limit=config.page_limit or 500,
-            brand=config.brand,
-            vat_rate=Decimal(str(config.vat_rate)) if config.vat_rate is not None else None,
-            render=config.render,
-        )
-        connector_type, transport_type = KeramikKraftConnector, PageFetcherTransport
-    return ConnectorRuntimePlan(
-        name, connector_type.version, options.model_dump(mode="json"), ("main",),
-        lambda fetcher, budget: connector_type(
-            transport_type(fetcher, config), options, budget=budget
+def _axner(config: SourceConfig) -> ConnectorRuntimePlan:
+    options = AxnerOptions(
+        category_url=config.category_url,
+        category_page_limit=config.category_page_limit or 400,
+        page_limit=config.page_limit or 500,
+        brand=config.brand,
+        currency=config.currency or "USD",
+        vat_status=config.vat_status,
+        vat_rate=(
+            Decimal(str(config.vat_rate))
+            if config.vat_rate is not None
+            else None
         ),
-        "dom", "product_page", f"{name}_connector",
+        render=config.render,
+    )
+    return ConnectorRuntimePlan(
+        connector="axner",
+        connector_options=options.model_dump(mode="json"),
+        extraction_method="dom",
+        source_detail_level="product_page",
+        library_canary=_library_canary("axner", options, config),
+    )
+
+
+def _ceramicolours(config: SourceConfig) -> ConnectorRuntimePlan:
+    options = CeramicoloursOptions(
+        category_ids=tuple(str(value) for value in (config.category_ids or ())),
+        category_page_limit=config.category_page_limit or 25,
+        page_limit=config.page_limit or 500,
+        brand=config.brand,
+        vat_status=config.vat_status or "inclusive",
+        render=config.render,
+    )
+    return ConnectorRuntimePlan(
+        connector="ceramicolours",
+        connector_options=options.model_dump(mode="json"),
+        extraction_method="dom",
+        source_detail_level="product_page",
+        library_canary=_library_canary("ceramicolours", options, config),
+    )
+
+
+def _keramik_kraft(config: SourceConfig) -> ConnectorRuntimePlan:
+    options = KeramikKraftOptions(
+        category_paths=tuple(config.category_paths or ()),
+        category_page_limit=config.category_page_limit or 150,
+        page_limit=config.page_limit or 500,
+        brand=config.brand,
+        vat_rate=(
+            Decimal(str(config.vat_rate))
+            if config.vat_rate is not None
+            else None
+        ),
+        render=config.render,
+    )
+    return ConnectorRuntimePlan(
+        connector="keramik-kraft",
+        connector_options=options.model_dump(mode="json"),
+        extraction_method="dom",
+        source_detail_level="product_page",
+        library_canary=_library_canary("keramik-kraft", options, config),
     )
 
 
@@ -383,8 +412,8 @@ for _name, _projector in {
     "prestashop": _prestashop,
     "sio2": lambda config: _prestashop(config, sio2=True),
     "pagecrawl": _pagecommerce,
-    "axner": lambda config: _bespoke(config, "axner"),
-    "ceramicolours": lambda config: _bespoke(config, "ceramicolours"),
-    "keramik_kraft": lambda config: _bespoke(config, "keramik_kraft"),
+    "axner": _axner,
+    "ceramicolours": _ceramicolours,
+    "keramik_kraft": _keramik_kraft,
 }.items():
     register_runtime_adapter(_name, _projector)

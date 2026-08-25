@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
@@ -10,6 +11,19 @@ from typing import Any, Literal, Protocol
 from urllib.parse import urljoin, urlparse
 
 import httpx
+from mb_commerce_scraper.models import (
+    Availability,
+    CategoryRef,
+    CommerceOffer,
+    CommerceProductSnapshot,
+    CommerceVariant,
+    DocumentRef,
+    Evidence,
+    MediaRef,
+    Money,
+    StockQuantityKind,
+    StockState,
+)
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from .base import (
@@ -32,19 +46,6 @@ from .budget import (
     RequestBudgetProtocol,
     RequestCost,
     RequestPriority,
-)
-from .commerce import (
-    Availability,
-    CategoryRef,
-    CommerceOffer,
-    CommerceProductSnapshot,
-    CommerceVariant,
-    DocumentRef,
-    Evidence,
-    MediaRef,
-    Money,
-    StockQuantityKind,
-    StockState,
 )
 
 PAGE_SIZE = 250
@@ -537,7 +538,18 @@ class ShopifyConnector(CommerceConnector):
             canonical_url=product_url,
             title=title,
             observed_at=observed_at,
-            description=str(product.get("body_html") or "") or None,
+            description=(
+                " ".join(
+                    html.unescape(
+                        re.sub(
+                            r"<[^>]+>",
+                            " ",
+                            str(product.get("body_html") or ""),
+                        )
+                    ).split()
+                )
+                or None
+            ),
             vendor=str(product.get("vendor") or "") or None,
             categories=categories,
             images=images,

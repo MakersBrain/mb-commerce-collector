@@ -672,6 +672,7 @@ source = { editable = "." }
 dependencies = [
     { name = "croniter" },
     { name = "httpx", extra = ["socks"] },
+    { name = "mb-commerce-scraper" },
     { name = "nats-py" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -732,6 +733,7 @@ requires-dist = [
     { name = "curl-cffi", marker = "extra == 'impersonate'", specifier = ">=0.7,<1" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.27,<1" },
     { name = "mb-ceramics-catalogue", extras = ["tui", "postgres", "browser", "impersonate", "otel"], marker = "extra == 'all'" },
+    { name = "mb-commerce-scraper", editable = "../commerce-scraper" },
     { name = "nats-py", specifier = ">=2.11,<3" },
     { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.27" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = ">=1.27" },
@@ -755,6 +757,27 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "ruff", specifier = ">=0.8" },
 ]
+
+[[package]]
+name = "mb-commerce-scraper"
+version = "0.1.0"
+source = { editable = "../commerce-scraper" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
+    { name = "httpx", extras = ["socks"], marker = "extra == 'dev'", specifier = ">=0.27,<1" },
+    { name = "httpx", extras = ["socks"], marker = "extra == 'http'", specifier = ">=0.27,<1" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
+    { name = "pydantic", specifier = ">=2.9,<3" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
+]
+provides-extras = ["http", "dev"]
 
 [[package]]
 name = "mdit-py-plugins"

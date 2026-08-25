@@ -1,125 +1,147 @@
 {
-  "digest": "9611fcf24947e0910d93a8897671a8001567de5bdfb53a952d8168e2aa1665b8",
-  "discovered": 1007,
+  "digest": "cbd96b2a6e459edd26fc4c88d9a182d608191dcd04f7287b22a53f16ceab0613",
+  "discovered": 1006,
   "error_count": 0,
   "errors": [],
   "extraction_method": "dom",
   "field_coverage": {
-    "all_image_urls": 728,
-    "brand": 72,
+    "all_image_urls": 769,
+    "brand": 71,
     "category_path": 0,
-    "claims": 291,
-    "colour": 685,
-    "description": 728,
+    "claims": 316,
+    "colour": 722,
+    "description": 769,
     "documents": 0,
     "effects": 7,
-    "family": 728,
-    "firing": 457,
+    "family": 769,
+    "firing": 483,
     "form": 3,
     "gtin": 0,
     "manufacturer_sku": 16,
-    "package_size": 399,
+    "package_size": 427,
     "stock_quantity": 162,
-    "supplier_reference": 722,
-    "surface": 71,
-    "unit_price": 399,
-    "vat_status": 728
+    "supplier_reference": 763,
+    "surface": 75,
+    "unit_price": 427,
+    "vat_status": 769
   },
   "notes": [
-    "1007 product URLs from the sitemap"
+    "1006 product URLs from the sitemap"
   ],
-  "records": 728,
+  "records": 769,
   "rendered_pages": 0,
-  "requests": 1008,
+  "requests": 1007,
   "sample": [
     {
       "all_image_urls": [
-        "https://static.wixstatic.com/media/9ad34d_507ee9b60eda4242ae150aa697ab7966~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg"
+        "https://static.wixstatic.com/media/9ad34d_1db513063d524873bf6ca394b528f922~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg"
       ],
       "application_methods": null,
       "availability": "https://schema.org/InStock",
       "brand": null,
       "brand_basis": null,
       "category_path": null,
-      "claims": null,
+      "claims": [
+        {
+          "basis": "published_text",
+          "claim": true,
+          "evidence": "Gli oggetti in ceramica per uso alimentare sono sottoposti alla direttiva europea/italiana MOCA VISUALIZZA LA PAGINA DEDICATA ALLA DIRETTIVA",
+          "type": "food_contact_suitability"
+        }
+      ],
       "coats": null,
       "colour": {
         "basis": "product_name",
-        "name": "Pigmento Blu Cobalto"
+        "name": "Calzedon Kristall"
       },
       "currency": "EUR",
-      "description": "Pigmento colorante ossido blu cobalto. Temperatura massima consigliata: 1250 °C Il confezionamento è: barattolo di plastica da 100 grammi bottiglia di plastica da 1 kg",
+      "description": "Temperatura di cottura di 1200-1260°C Smalto verde satinato con una sfumatura brunastra. Lo smalto è in polvere e per l'utilizzo necessita la diluizione in acqua. 5 kg corrispondono a 5 sacchetti da 1 kg ad un prezzo minore. Gli oggetti in ceramica per uso alimentare sono sottoposti alla direttiva europea/italiana MOCA VISUALIZZA LA PAGINA DEDICATA ALLA DIRETTIVA",
       "documents": null,
       "effects": null,
-      "external_id": "e-cibas:https://www.e-cibas.com/product-page/pigmento-blu-cobalto#f4eb3c28-14bc-4b29-8416-6de0f1cb54a4",
+      "external_id": "e-cibas:https://www.e-cibas.com/product-page/calzedon-kristall#898a162f-cadc-468c-816a-268bcd83a014",
       "extraction_method": "dom",
-      "family": "stain",
+      "family": "glaze",
       "fetched_at": "<volatile>",
       "firing": {
         "basis": "published_text",
-        "evidence": "1250 °C",
-        "max_celsius": 1250,
-        "min_celsius": 1250
+        "evidence": "1200-1260°C",
+        "max_celsius": 1260,
+        "min_celsius": 1200
       },
       "form": null,
       "format": "ceramics.catalogue_item.v2",
       "gtin": null,
-      "image_url": "https://static.wixstatic.com/media/9ad34d_507ee9b60eda4242ae150aa697ab7966~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg",
+      "image_url": "https://static.wixstatic.com/media/9ad34d_1db513063d524873bf6ca394b528f922~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg",
       "list_price": null,
       "manufacturer_sku": null,
       "manufacturer_sku_basis": null,
       "min_order_quantity": null,
-      "name": "Pigmento Blu Cobalto",
+      "name": "Calzedon Kristall",
       "name_parsed_from": null,
-      "name_raw": "Pigmento Blu Cobalto",
+      "name_raw": "Calzedon Kristall",
       "package_size": {
         "dimension": "weight",
-        "evidence": "1 kg",
-        "grams": 1000.0,
+        "evidence": "5 kg",
+        "grams": 5000.0,
         "unit": "kg",
-        "value": 1.0
+        "value": 5.0
       },
-      "parent_external_id": "e-cibas:https://www.e-cibas.com/product-page/pigmento-blu-cobalto",
-      "price": 23.32,
-      "price_text": "23,32€",
-      "product_name": "Pigmento Blu Cobalto",
-      "product_url": "https://www.e-cibas.com/product-page/pigmento-blu-cobalto",
+      "parent_external_id": "e-cibas:https://www.e-cibas.com/product-page/calzedon-kristall",
+      "price": 12.61,
+      "price_text": "12,61€",
+      "product_name": "Calzedon Kristall",
+      "product_url": "https://www.e-cibas.com/product-page/calzedon-kristall",
       "raw": {
         "product": {
           "additionalInfo": [
             {
-              "description": "<p>I pigmenti sono ossidi coloranti sintetici che vengono prodotti attraverso calcinazione di ossidi primari. Questa lavorazione conferisce una grande stabilità cromatica e termica al pigmento.</p> \n<p>I pigmenti possono essere usati in percentuale (1% - 5%, massimo 10%)&nbsp;per colorare cristalline,&nbsp;smalti bianchi, impasti e ingobbi.</p>",
-              "id": "923d194f-2a96-4585-a471-6391a65c8850",
+              "description": "<p>La confezione dello smalto è&nbsp;un sacchetto di carta contenente 1 kg di prodotto. Eventualmente per ordini maggiori,&nbsp;si forniscono sacchi da 25 kg previa ordinazione.</p>",
+              "id": "3b62d9f3-7baf-418a-9355-06a82c37f2ba",
               "index": 1,
-              "title": "Descrizione Pigmenti Coloranti"
+              "title": "Confezionamento"
+            },
+            {
+              "description": "<p>Cottura serie di smalti 1200 - 1260°C.</p> \n<p>Sono smalti ad effetto. Per ottenere migliori risultati, si consiglia<br> una temperatura di cottura di 1230-1250°C.</p>",
+              "id": "f13dfede-d50b-41fb-bf87-8822491fd5e1",
+              "index": 2,
+              "title": "Indicazioni sul prodotto e la cottura"
+            },
+            {
+              "description": "<p>La produzione di oggetti in ceramica per uso alimentare potrebbe essere sottoposta alla direttiva europea/italiana MOCA</p> \n<p><a href=\"https://www.e-cibas.com/tossicita-alimentare\" target=\"_blank\"><strong>VISUALIZZA LA PAGINA DEDICATA ALLA DIRETTIVA</strong></a></p>",
+              "id": "03d612ee-1e07-4c69-8aa0-b4f1d7082cff",
+              "index": 3,
+              "title": "Direttiva MOCA"
             }
           ],
           "brand": null,
           "breadcrumbs": null,
           "categories": [],
           "categoryIds": [
-            "dc14ed5a-ed51-468e-9e2d-a4e6e396a3ff",
             "16f7fd5a-3c78-466f-82d7-098f58668e43",
-            "3e0942a7-e560-48a4-a871-4ba3a6d344fa",
+            "168e695a-f63d-422c-86aa-6a792e8a3647",
+            "67507238-88a8-4df8-8e29-3f55f6b7f605",
+            "0e5a37fc-c3af-4473-8ec9-86a89bc459b5",
+            "6adab55f-77ae-4672-91a9-54c93fe27334",
+            "89267e0c-328a-481d-8e2d-aa0ad0894afb",
             "3ae2edc3-2c5b-4ccf-962b-5644277847ae",
-            "afa060b1-7f01-4e9f-a1b7-728d99c865bb"
+            "c4523a0e-f316-4540-bdbc-de7ca5e2327e"
           ],
           "comparePrice": 0,
-          "createVersion": 1751293069836492,
+          "createVersion": 1751293017056575,
           "currency": "EUR",
           "customTextFields": [],
-          "description": "<p>Pigmento colorante ossido blu cobalto.</p><p>&nbsp;</p><p>Temperatura massima consigliata: 1250 °C</p><p><br>Il confezionamento è:</p><p>barattolo di plastica da 100 grammi<br>bottiglia di plastica&nbsp;da 1 kg</p>",
+          "description": "<p><strong>Temperatura di cottura di 1200-1260°C</strong></p><p>&nbsp;</p><p>Smalto verde satinato con una sfumatura brunastra.<br>Lo smalto è in polvere e per l'utilizzo necessita la diluizione in acqua.</p><p>&nbsp;</p><p><u>5 kg corrispondono a 5 sacchetti&nbsp;da 1 kg ad un prezzo minore.</u></p><p>&nbsp;</p><p><strong>Gli oggetti in ceramica per uso alimentare&nbsp;sono sottoposti alla direttiva&nbsp;europea/italiana MOCA</strong></p><p><a href=\"https://www.e-cibas.com/tossicita-alimentare\"><strong>VISUALIZZA LA PAGINA DEDICATA ALLA DIRETTIVA</strong></a></p>",
           "digitalProductFileItems": [],
           "discount": {
             "mode": "PERCENT",
             "value": 0
           },
-          "discountedPrice": 23.32,
+          "discountedPrice": 12.61,
           "formattedComparePrice": "",
-          "formattedDiscountedPrice": "23,32€",
-          "formattedPrice": "23,32€",
+          "formattedDiscountedPrice": "12,61€",
+          "formattedPrice": "12,61€",
           "formattedPricePerUnit": null,
-          "id": "85bac9b0-20b7-4e69-840a-017c0b551211",
+          "id": "d2068a3d-09d9-4374-a115-d38a35b08fd9",
           "inventory": {
             "availableForPreOrder": false,
             "preOrderInfoView": {
@@ -139,51 +161,51 @@
           "media": [
             {
               "altText": null,
-              "fullUrl": "https://static.wixstatic.com/media/9ad34d_507ee9b60eda4242ae150aa697ab7966~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg",
-              "height": 960,
-              "id": "9ad34d_507ee9b60eda4242ae150aa697ab7966~mv2.jpg",
+              "fullUrl": "https://static.wixstatic.com/media/9ad34d_1db513063d524873bf6ca394b528f922~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg",
+              "height": 972,
+              "id": "9ad34d_1db513063d524873bf6ca394b528f922~mv2.jpg",
               "index": 0,
               "mediaType": "PHOTO",
-              "thumbnailFullUrl": "https://static.wixstatic.com/media/9ad34d_507ee9b60eda4242ae150aa697ab7966~mv2.jpg/v1/fit/w_50,h_50,q_90/file.jpg",
+              "thumbnailFullUrl": "https://static.wixstatic.com/media/9ad34d_1db513063d524873bf6ca394b528f922~mv2.jpg/v1/fit/w_50,h_50,q_90/file.jpg",
               "title": "",
-              "url": "9ad34d_507ee9b60eda4242ae150aa697ab7966~mv2.jpg",
+              "url": "9ad34d_1db513063d524873bf6ca394b528f922~mv2.jpg",
               "videoFiles": [],
               "videoType": null,
-              "width": 960
+              "width": 972
             }
           ],
-          "name": "Pigmento Blu Cobalto",
+          "name": "Calzedon Kristall",
           "nextOptionsSelectionId": 3,
           "options": [
             {
-              "id": "e0c589ea-9eca-4337-a05d-0e041c88b9b5",
-              "key": "Confezione",
+              "id": "f6750a05-8429-48b9-9665-24add21f1403",
+              "key": "Scaglioni di peso",
               "optionType": "DROP_DOWN",
               "selections": [
                 {
-                  "description": "100 g",
-                  "id": 1,
-                  "key": "100 g",
-                  "linkedMediaItems": null,
-                  "value": "100 g"
-                },
-                {
                   "description": "1 kg",
-                  "id": 2,
+                  "id": 1,
                   "key": "1 kg",
                   "linkedMediaItems": null,
                   "value": "1 kg"
+                },
+                {
+                  "description": "5 kg",
+                  "id": 2,
+                  "key": "5 kg",
+                  "linkedMediaItems": null,
+                  "value": "5 kg"
                 }
               ],
-              "title": "Confezione"
+              "title": "Scaglioni di peso"
             }
           ],
-          "price": 23.32,
+          "price": 12.61,
           "pricePerUnit": null,
           "pricePerUnitData": null,
           "priceRange": {
-            "fromPrice": 23.32,
-            "fromPriceFormatted": "23,32€"
+            "fromPrice": 12.61,
+            "fromPriceFormatted": "12,61€"
           },
           "productItemsPreOrderAvailability": "no_variants",
           "productType": "physical",
@@ -196,17 +218,17 @@
             "list": [],
             "oneTimePurchase": null
           },
-          "urlPart": "pigmento-blu-cobalto",
+          "urlPart": "calzedon-kristall",
           "weight": 0
         },
         "variant": {
           "comparePrice": 0,
-          "formattedPrice": "23,32€",
-          "id": "f4eb3c28-14bc-4b29-8416-6de0f1cb54a4",
+          "formattedPrice": "12,61€",
+          "id": "898a162f-cadc-468c-816a-268bcd83a014",
           "in_stock": true,
           "options": null,
-          "price": 23.32,
-          "sku": "40000851",
+          "price": 12.61,
+          "sku": "40001982-01K",
           "stock_quantity": null,
           "title": null
         }
@@ -215,13 +237,13 @@
       "source_detail_level": "product_page",
       "source_updated_at": null,
       "stock_quantity": null,
-      "supplier_reference": "40000851",
-      "surface": null,
+      "supplier_reference": "40001982-01K",
+      "surface": "crystalline",
       "technical_attributes": null,
       "unit_price": {
         "currency": "EUR",
         "per": "kg",
-        "value": 23.32
+        "value": 2.522
       },
       "variant_title": null,
       "vat_rate": null,
@@ -229,92 +251,114 @@
     },
     {
       "all_image_urls": [
-        "https://static.wixstatic.com/media/9ad34d_507ee9b60eda4242ae150aa697ab7966~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg"
+        "https://static.wixstatic.com/media/9ad34d_1db513063d524873bf6ca394b528f922~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg"
       ],
       "application_methods": null,
       "availability": "https://schema.org/InStock",
       "brand": null,
       "brand_basis": null,
       "category_path": null,
-      "claims": null,
+      "claims": [
+        {
+          "basis": "published_text",
+          "claim": true,
+          "evidence": "Gli oggetti in ceramica per uso alimentare sono sottoposti alla direttiva europea/italiana MOCA VISUALIZZA LA PAGINA DEDICATA ALLA DIRETTIVA",
+          "type": "food_contact_suitability"
+        }
+      ],
       "coats": null,
       "colour": {
         "basis": "product_name",
-        "name": "Pigmento Blu Cobalto"
+        "name": "Calzedon Kristall"
       },
       "currency": "EUR",
-      "description": "Pigmento colorante ossido blu cobalto. Temperatura massima consigliata: 1250 °C Il confezionamento è: barattolo di plastica da 100 grammi bottiglia di plastica da 1 kg",
+      "description": "Temperatura di cottura di 1200-1260°C Smalto verde satinato con una sfumatura brunastra. Lo smalto è in polvere e per l'utilizzo necessita la diluizione in acqua. 5 kg corrispondono a 5 sacchetti da 1 kg ad un prezzo minore. Gli oggetti in ceramica per uso alimentare sono sottoposti alla direttiva europea/italiana MOCA VISUALIZZA LA PAGINA DEDICATA ALLA DIRETTIVA",
       "documents": null,
       "effects": null,
-      "external_id": "e-cibas:https://www.e-cibas.com/product-page/pigmento-blu-cobalto#a94486cc-4930-4bc2-8850-e48cd8a1e95b",
+      "external_id": "e-cibas:https://www.e-cibas.com/product-page/calzedon-kristall#ac124ddb-6f43-45bc-895d-3e3f8492da2a",
       "extraction_method": "dom",
-      "family": "stain",
+      "family": "glaze",
       "fetched_at": "<volatile>",
       "firing": {
         "basis": "published_text",
-        "evidence": "1250 °C",
-        "max_celsius": 1250,
-        "min_celsius": 1250
+        "evidence": "1200-1260°C",
+        "max_celsius": 1260,
+        "min_celsius": 1200
       },
       "form": null,
       "format": "ceramics.catalogue_item.v2",
       "gtin": null,
-      "image_url": "https://static.wixstatic.com/media/9ad34d_507ee9b60eda4242ae150aa697ab7966~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg",
+      "image_url": "https://static.wixstatic.com/media/9ad34d_1db513063d524873bf6ca394b528f922~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg",
       "list_price": null,
       "manufacturer_sku": null,
       "manufacturer_sku_basis": null,
       "min_order_quantity": null,
-      "name": "Pigmento Blu Cobalto",
+      "name": "Calzedon Kristall",
       "name_parsed_from": null,
-      "name_raw": "Pigmento Blu Cobalto",
+      "name_raw": "Calzedon Kristall",
       "package_size": {
         "dimension": "weight",
-        "evidence": "1 kg",
-        "grams": 1000.0,
+        "evidence": "5 kg",
+        "grams": 5000.0,
         "unit": "kg",
-        "value": 1.0
+        "value": 5.0
       },
-      "parent_external_id": "e-cibas:https://www.e-cibas.com/product-page/pigmento-blu-cobalto",
-      "price": 132.66,
-      "price_text": "132,66€",
-      "product_name": "Pigmento Blu Cobalto",
-      "product_url": "https://www.e-cibas.com/product-page/pigmento-blu-cobalto",
+      "parent_external_id": "e-cibas:https://www.e-cibas.com/product-page/calzedon-kristall",
+      "price": 56.79,
+      "price_text": "56,79€",
+      "product_name": "Calzedon Kristall",
+      "product_url": "https://www.e-cibas.com/product-page/calzedon-kristall",
       "raw": {
         "product": {
           "additionalInfo": [
             {
-              "description": "<p>I pigmenti sono ossidi coloranti sintetici che vengono prodotti attraverso calcinazione di ossidi primari. Questa lavorazione conferisce una grande stabilità cromatica e termica al pigmento.</p> \n<p>I pigmenti possono essere usati in percentuale (1% - 5%, massimo 10%)&nbsp;per colorare cristalline,&nbsp;smalti bianchi, impasti e ingobbi.</p>",
-              "id": "923d194f-2a96-4585-a471-6391a65c8850",
+              "description": "<p>La confezione dello smalto è&nbsp;un sacchetto di carta contenente 1 kg di prodotto. Eventualmente per ordini maggiori,&nbsp;si forniscono sacchi da 25 kg previa ordinazione.</p>",
+              "id": "3b62d9f3-7baf-418a-9355-06a82c37f2ba",
               "index": 1,
-              "title": "Descrizione Pigmenti Coloranti"
+              "title": "Confezionamento"
+            },
+            {
+              "description": "<p>Cottura serie di smalti 1200 - 1260°C.</p> \n<p>Sono smalti ad effetto. Per ottenere migliori risultati, si consiglia<br> una temperatura di cottura di 1230-1250°C.</p>",
+              "id": "f13dfede-d50b-41fb-bf87-8822491fd5e1",
+              "index": 2,
+              "title": "Indicazioni sul prodotto e la cottura"
+            },
+            {
+              "description": "<p>La produzione di oggetti in ceramica per uso alimentare potrebbe essere sottoposta alla direttiva europea/italiana MOCA</p> \n<p><a href=\"https://www.e-cibas.com/tossicita-alimentare\" target=\"_blank\"><strong>VISUALIZZA LA PAGINA DEDICATA ALLA DIRETTIVA</strong></a></p>",
+              "id": "03d612ee-1e07-4c69-8aa0-b4f1d7082cff",
+              "index": 3,
+              "title": "Direttiva MOCA"
             }
           ],
           "brand": null,
           "breadcrumbs": null,
           "categories": [],
           "categoryIds": [
-            "dc14ed5a-ed51-468e-9e2d-a4e6e396a3ff",
             "16f7fd5a-3c78-466f-82d7-098f58668e43",
-            "3e0942a7-e560-48a4-a871-4ba3a6d344fa",
+            "168e695a-f63d-422c-86aa-6a792e8a3647",
+            "67507238-88a8-4df8-8e29-3f55f6b7f605",
+            "0e5a37fc-c3af-4473-8ec9-86a89bc459b5",
+            "6adab55f-77ae-4672-91a9-54c93fe27334",
+            "89267e0c-328a-481d-8e2d-aa0ad0894afb",
             "3ae2edc3-2c5b-4ccf-962b-5644277847ae",
-            "afa060b1-7f01-4e9f-a1b7-728d99c865bb"
+            "c4523a0e-f316-4540-bdbc-de7ca5e2327e"
           ],
           "comparePrice": 0,
-          "createVersion": 1751293069836492,
+          "createVersion": 1751293017056575,
           "currency": "EUR",
           "customTextFields": [],
-          "description": "<p>Pigmento colorante ossido blu cobalto.</p><p>&nbsp;</p><p>Temperatura massima consigliata: 1250 °C</p><p><br>Il confezionamento è:</p><p>barattolo di plastica da 100 grammi<br>bottiglia di plastica&nbsp;da 1 kg</p>",
+          "description": "<p><strong>Temperatura di cottura di 1200-1260°C</strong></p><p>&nbsp;</p><p>Smalto verde satinato con una sfumatura brunastra.<br>Lo smalto è in polvere e per l'utilizzo necessita la diluizione in acqua.</p><p>&nbsp;</p><p><u>5 kg corrispondono a 5 sacchetti&nbsp;da 1 kg ad un prezzo minore.</u></p><p>&nbsp;</p><p><strong>Gli oggetti in ceramica per uso alimentare&nbsp;sono sottoposti alla direttiva&nbsp;europea/italiana MOCA</strong></p><p><a href=\"https://www.e-cibas.com/tossicita-alimentare\"><strong>VISUALIZZA LA PAGINA DEDICATA ALLA DIRETTIVA</strong></a></p>",
           "digitalProductFileItems": [],
           "discount": {
             "mode": "PERCENT",
             "value": 0
           },
-          "discountedPrice": 23.32,
+          "discountedPrice": 12.61,
           "formattedComparePrice": "",
-          "formattedDiscountedPrice": "23,32€",
-          "formattedPrice": "23,32€",
+          "formattedDiscountedPrice": "12,61€",
+          "formattedPrice": "12,61€",
           "formattedPricePerUnit": null,
-          "id": "85bac9b0-20b7-4e69-840a-017c0b551211",
+          "id": "d2068a3d-09d9-4374-a115-d38a35b08fd9",
           "inventory": {
             "availableForPreOrder": false,
             "preOrderInfoView": {
@@ -334,51 +378,51 @@
           "media": [
             {
               "altText": null,
-              "fullUrl": "https://static.wixstatic.com/media/9ad34d_507ee9b60eda4242ae150aa697ab7966~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg",
-              "height": 960,
-              "id": "9ad34d_507ee9b60eda4242ae150aa697ab7966~mv2.jpg",
+              "fullUrl": "https://static.wixstatic.com/media/9ad34d_1db513063d524873bf6ca394b528f922~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg",
+              "height": 972,
+              "id": "9ad34d_1db513063d524873bf6ca394b528f922~mv2.jpg",
               "index": 0,
               "mediaType": "PHOTO",
-              "thumbnailFullUrl": "https://static.wixstatic.com/media/9ad34d_507ee9b60eda4242ae150aa697ab7966~mv2.jpg/v1/fit/w_50,h_50,q_90/file.jpg",
+              "thumbnailFullUrl": "https://static.wixstatic.com/media/9ad34d_1db513063d524873bf6ca394b528f922~mv2.jpg/v1/fit/w_50,h_50,q_90/file.jpg",
               "title": "",
-              "url": "9ad34d_507ee9b60eda4242ae150aa697ab7966~mv2.jpg",
+              "url": "9ad34d_1db513063d524873bf6ca394b528f922~mv2.jpg",
               "videoFiles": [],
               "videoType": null,
-              "width": 960
+              "width": 972
             }
           ],
-          "name": "Pigmento Blu Cobalto",
+          "name": "Calzedon Kristall",
           "nextOptionsSelectionId": 3,
           "options": [
             {
-              "id": "e0c589ea-9eca-4337-a05d-0e041c88b9b5",
-              "key": "Confezione",
+              "id": "f6750a05-8429-48b9-9665-24add21f1403",
+              "key": "Scaglioni di peso",
               "optionType": "DROP_DOWN",
               "selections": [
                 {
-                  "description": "100 g",
-                  "id": 1,
-                  "key": "100 g",
-                  "linkedMediaItems": null,
-                  "value": "100 g"
-                },
-                {
                   "description": "1 kg",
-                  "id": 2,
+                  "id": 1,
                   "key": "1 kg",
                   "linkedMediaItems": null,
                   "value": "1 kg"
+                },
+                {
+                  "description": "5 kg",
+                  "id": 2,
+                  "key": "5 kg",
+                  "linkedMediaItems": null,
+                  "value": "5 kg"
                 }
               ],
-              "title": "Confezione"
+              "title": "Scaglioni di peso"
             }
           ],
-          "price": 23.32,
+          "price": 12.61,
           "pricePerUnit": null,
           "pricePerUnitData": null,
           "priceRange": {
-            "fromPrice": 23.32,
-            "fromPriceFormatted": "23,32€"
+            "fromPrice": 12.61,
+            "fromPriceFormatted": "12,61€"
           },
           "productItemsPreOrderAvailability": "no_variants",
           "productType": "physical",
@@ -391,17 +435,17 @@
             "list": [],
             "oneTimePurchase": null
           },
-          "urlPart": "pigmento-blu-cobalto",
+          "urlPart": "calzedon-kristall",
           "weight": 0
         },
         "variant": {
           "comparePrice": 0,
-          "formattedPrice": "132,66€",
-          "id": "a94486cc-4930-4bc2-8850-e48cd8a1e95b",
+          "formattedPrice": "56,79€",
+          "id": "ac124ddb-6f43-45bc-895d-3e3f8492da2a",
           "in_stock": true,
           "options": null,
-          "price": 132.66,
-          "sku": "40004667",
+          "price": 56.79,
+          "sku": "40001982-05K",
           "stock_quantity": null,
           "title": null
         }
@@ -410,13 +454,13 @@
       "source_detail_level": "product_page",
       "source_updated_at": null,
       "stock_quantity": null,
-      "supplier_reference": "40004667",
-      "surface": null,
+      "supplier_reference": "40001982-05K",
+      "surface": "crystalline",
       "technical_attributes": null,
       "unit_price": {
         "currency": "EUR",
         "per": "kg",
-        "value": 132.66
+        "value": 11.358
       },
       "variant_title": null,
       "vat_rate": null,
@@ -424,10 +468,10 @@
     },
     {
       "all_image_urls": [
-        "https://static.wixstatic.com/media/c8ccec_16eabfaa89ec49e38ce8634d849fc32d~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg"
+        "https://static.wixstatic.com/media/c8ccec_5eac22797c9b417aaedf80df1ac20957~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg"
       ],
       "application_methods": null,
-      "availability": "https://schema.org/OutOfStock",
+      "availability": "https://schema.org/InStock",
       "brand": "Laguna",
       "brand_basis": "published",
       "category_path": null,
@@ -435,65 +479,65 @@
       "coats": null,
       "colour": {
         "basis": "product_name",
-        "name": "9544 Baroque"
+        "name": "9375 French Blue"
       },
       "currency": "EUR",
-      "description": "Smalto oro rosa satinato, liquido e pronto all'uso per una facile applicazione. Range di cottura: 1020-1100°C. Non superare la temperatura massima indicata. Le immagini dei colori possono differire dai colori reali a causa della cottura e dell'applicazione.",
+      "description": "Smalto lucido blu chiaro, liquido e pronto all'uso per una facile applicazione. Range di cottura: 1020-1060°C . Non superare la temperatura massima indicata. Le immagini dei colori possono differire dai colori reali a causa della cottura e dell'applicazione.",
       "documents": null,
       "effects": null,
-      "external_id": "e-cibas:https://www.e-cibas.com/product-page/9544-baroque",
+      "external_id": "e-cibas:https://www.e-cibas.com/product-page/9375-french-blue",
       "extraction_method": "dom",
       "family": "glaze",
       "fetched_at": "<volatile>",
       "firing": {
         "basis": "published_text",
-        "evidence": "1020-1100°C",
-        "max_celsius": 1100,
+        "evidence": "1020-1060°C",
+        "max_celsius": 1060,
         "min_celsius": 1020
       },
       "form": null,
       "format": "ceramics.catalogue_item.v2",
       "gtin": null,
-      "image_url": "https://static.wixstatic.com/media/c8ccec_16eabfaa89ec49e38ce8634d849fc32d~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg",
+      "image_url": "https://static.wixstatic.com/media/c8ccec_5eac22797c9b417aaedf80df1ac20957~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg",
       "list_price": null,
       "manufacturer_sku": null,
       "manufacturer_sku_basis": null,
       "min_order_quantity": null,
-      "name": "Baroque",
+      "name": "French Blue",
       "name_parsed_from": [
-        "9544"
+        "9375"
       ],
-      "name_raw": "9544 Baroque",
+      "name_raw": "9375 French Blue",
       "package_size": null,
-      "parent_external_id": "e-cibas:https://www.e-cibas.com/product-page/9544-baroque",
+      "parent_external_id": "e-cibas:https://www.e-cibas.com/product-page/9375-french-blue",
       "price": 13.73,
       "price_text": "13,73€",
-      "product_name": "9544 Baroque",
-      "product_url": "https://www.e-cibas.com/product-page/9544-baroque",
+      "product_name": "9375 French Blue",
+      "product_url": "https://www.e-cibas.com/product-page/9375-french-blue",
       "raw": {
         "product": {
           "additionalInfo": [
             {
               "description": "<p>La confezione è un barattolo di plastica contenente 200 ml di smalto.</p>\n",
-              "id": "97bb74eb-bbc8-4b23-8cee-f5c2bbe32a8b",
+              "id": "3762de29-eca9-439f-8901-67c4c8ac4d03",
               "index": 1,
               "title": "Confezionamento"
             },
             {
-              "description": "<p>Cottura serie di smalti: 1020-1100°C.</p> \n<p>Non superare la temperatura massima indicata.</p> \n<p>Consigliamo di testare gli smalti prima dell'uso finale o per la produzione.</p>",
-              "id": "a0a6ac88-0769-4344-b94b-39f740051e5d",
+              "description": "<p>Cottura serie di smalti: 1020-1060°C.</p> \n<p>Non superare la temperatura massima indicata.</p> \n<p>Consigliamo di testare gli smalti prima dell'uso finale o per la produzione.</p>",
+              "id": "12b7f903-b854-43f9-8ce8-dea472c47b88",
               "index": 2,
               "title": "Indicazioni sulla cottura"
             },
             {
               "description": "<p>La produzione di oggetti in ceramica per uso alimentare potrebbe essere sottoposta alla direttiva europea/italiana MOCA</p> \n<p><a href=\"https://www.e-cibas.com/tossicita-alimentare\" target=\"_blank\"><strong>VISUALIZZA LA PAGINA DEDICATA ALLA DIRETTIVA</strong></a></p>",
-              "id": "ee2a7551-99a8-4935-a332-448ae38fc381",
+              "id": "5f72e9e1-05e0-4d8a-b1cb-6e15f236e8e7",
               "index": 3,
               "title": "Direttiva MOCA"
             },
             {
               "description": "<p>Questi smalti per&nbsp;bassa&nbsp;temperatura presentano un risultato metallico dal lucido al satinato.&nbsp;&nbsp;</p> \n<p>Applicare 2 -3 mani.</p> \n<p>Prestare attenzione a non superare le temperature massime indicate, perché questi smalti tendono a colare.</p>",
-              "id": "5ac3a164-2daf-49cc-9520-350dc89d5625",
+              "id": "ecf3a76e-b87d-4948-aeb0-d537d815fcf8",
               "index": 4,
               "title": "Smalti Botz"
             }
@@ -506,14 +550,14 @@
             "47561337-aeec-4984-aad5-bfcbde875d58",
             "360fcca5-81a1-418c-8357-e14996ad931e",
             "3ae2edc3-2c5b-4ccf-962b-5644277847ae",
-            "cbf85440-fa95-41ba-9fbd-b0a9a97531ce",
-            "b47daf50-8914-44fd-9784-7e811942822b"
+            "afa060b1-7f01-4e9f-a1b7-728d99c865bb",
+            "cbf85440-fa95-41ba-9fbd-b0a9a97531ce"
           ],
           "comparePrice": 0,
-          "createVersion": 1751293856462457,
+          "createVersion": 1751293874852553,
           "currency": "EUR",
           "customTextFields": [],
-          "description": "<p>Smalto oro rosa satinato, liquido e pronto all'uso per una facile applicazione.</p><p>&nbsp;</p><p>Range di cottura: 1020-1100°C.&nbsp;Non superare la temperatura massima indicata.</p><p>&nbsp;</p><p><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span><span>Le immagini dei colori possono differire dai colori reali a causa della cottura e dell'applicazione.</span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></p>",
+          "description": "<p>Smalto lucido blu chiaro, liquido e pronto all'uso per una facile applicazione.</p><p>&nbsp;</p><p><strong>Range di cottura: 1020-1060°C</strong>.&nbsp;Non superare la temperatura massima indicata.</p><p>&nbsp;</p><p>Le immagini dei colori possono differire dai colori reali a causa della cottura e dell'applicazione.</p>",
           "digitalProductFileItems": [],
           "discount": {
             "mode": "PERCENT",
@@ -524,7 +568,7 @@
           "formattedDiscountedPrice": "13,73€",
           "formattedPrice": "13,73€",
           "formattedPricePerUnit": null,
-          "id": "36b22f97-8b4e-4e11-a8b4-d34f498e3165",
+          "id": "be62c451-a058-4078-a5b4-1dca04025778",
           "inventory": {
             "availableForPreOrder": false,
             "preOrderInfoView": {
@@ -532,32 +576,32 @@
               "message": null,
               "preOrder": false
             },
-            "quantity": 0,
-            "status": "out_of_stock"
+            "quantity": 5,
+            "status": "in_stock"
           },
-          "isInStock": false,
+          "isInStock": true,
           "isManageProductItems": false,
-          "isTrackingInventory": false,
+          "isTrackingInventory": true,
           "isVisible": true,
           "itemDiscount": null,
           "mainCategoryId": null,
           "media": [
             {
               "altText": null,
-              "fullUrl": "https://static.wixstatic.com/media/c8ccec_16eabfaa89ec49e38ce8634d849fc32d~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg",
+              "fullUrl": "https://static.wixstatic.com/media/c8ccec_5eac22797c9b417aaedf80df1ac20957~mv2.jpg/v1/fit/w_500,h_500,q_90/file.jpg",
               "height": 972,
-              "id": "c8ccec_16eabfaa89ec49e38ce8634d849fc32d~mv2.jpg",
+              "id": "c8ccec_5eac22797c9b417aaedf80df1ac20957~mv2.jpg",
               "index": 0,
               "mediaType": "PHOTO",
-              "thumbnailFullUrl": "https://static.wixstatic.com/media/c8ccec_16eabfaa89ec49e38ce8634d849fc32d~mv2.jpg/v1/fit/w_50,h_50,q_90/file.jpg",
+              "thumbnailFullUrl": "https://static.wixstatic.com/media/c8ccec_5eac22797c9b417aaedf80df1ac20957~mv2.jpg/v1/fit/w_50,h_50,q_90/file.jpg",
               "title": "",
-              "url": "c8ccec_16eabfaa89ec49e38ce8634d849fc32d~mv2.jpg",
+              "url": "c8ccec_5eac22797c9b417aaedf80df1ac20957~mv2.jpg",
               "videoFiles": [],
               "videoType": null,
               "width": 972
             }
           ],
-          "name": "9544 Baroque",
+          "name": "9375 French Blue",
           "nextOptionsSelectionId": 1,
           "options": [],
           "price": 13.73,
@@ -570,31 +614,31 @@
           "seoDescription": null,
           "seoJson": null,
           "seoTitle": null,
-          "sku": "40004966",
+          "sku": "40005133",
           "subscriptionPlans": {
             "list": [],
             "oneTimePurchase": null
           },
-          "urlPart": "9544-baroque",
+          "urlPart": "9375-french-blue",
           "weight": 0.33
         },
         "variant": {
           "comparePrice": 0,
           "formattedPrice": "13,73€",
           "id": null,
-          "in_stock": false,
+          "in_stock": true,
           "options": null,
           "price": 13.73,
-          "sku": "40004966",
-          "stock_quantity": 0,
+          "sku": "40005133",
+          "stock_quantity": 5,
           "title": null
         }
       },
       "source": "e-cibas",
       "source_detail_level": "product_page",
       "source_updated_at": null,
-      "stock_quantity": 0,
-      "supplier_reference": "40004966",
+      "stock_quantity": 5,
+      "supplier_reference": "40005133",
       "surface": null,
       "technical_attributes": null,
       "unit_price": null,

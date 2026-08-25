@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from .base import ProviderError, ProxyProvider
@@ -62,6 +63,15 @@ class ProviderSpec:
     #: into it, and `create_subuser` refuses rather than creating something
     #: whose password the caller believes it set.
     can_provision_subusers: bool = True
+
+    #: Provider-supported dimensions used for durable usage reconciliation.
+    #: An empty tuple means the provider cannot answer a windowed usage query
+    #: and must remain fail-closed for application billing.
+    reconciliation_groupings: tuple[str, ...] = ()
+
+    #: Maximum cycle window the provider can reconcile. ``None`` means the
+    #: provider has not documented a narrower limit than the subscription.
+    max_reconciliation_window: timedelta | None = None
 
     def confirmation(self, action: str) -> str:
         """The phrase an operator types to confirm a cycle transition.
@@ -129,6 +139,7 @@ REGISTRY: dict[str, ProviderSpec] = {
         proposes_cycles=True,
         probe_url="https://ip.decodo.com/json",
         has_subuser_status=True,
+        reconciliation_groupings=("day", "target"),
     ),
     "iproyal": ProviderSpec(
         name="iproyal",
@@ -141,6 +152,7 @@ REGISTRY: dict[str, ProviderSpec] = {
         # probe spends paid traffic. Configure one explicitly to enable probes.
         probe_url=None,
         has_subuser_status=False,
+        reconciliation_groupings=("day",),
     ),
     "webshare": ProviderSpec(
         name="webshare",
@@ -153,6 +165,8 @@ REGISTRY: dict[str, ProviderSpec] = {
         has_subuser_status=False,
         # Sub-user credentials are issued by Webshare, not chosen here.
         can_provision_subusers=False,
+        reconciliation_groupings=("total",),
+        max_reconciliation_window=timedelta(days=90),
     ),
     "proxyscrape": ProviderSpec(
         name="proxyscrape",
