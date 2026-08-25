@@ -5,6 +5,7 @@ import httpx
 import pytest
 from pydantic import JsonValue, ValidationError
 
+import mb_commerce_scraper.transports.cache as cache_module
 from mb_commerce_scraper.models import BrowserPolicy
 from mb_commerce_scraper.testing import FakeTransport
 from mb_commerce_scraper.transports import (
@@ -141,8 +142,23 @@ class StaleCache:
         del request
         return self.response
 
+    async def get_with_stale(self, request: TransportRequest) -> "StaleCacheLookup":
+        return StaleCacheLookup(self, request)
+
     async def put(self, request: TransportRequest, response: TransportResponse) -> None:
         self.writes.append((request, response))
+
+
+class StaleCacheLookup:
+    fresh: TransportResponse | None = None
+
+    def __init__(self, cache: StaleCache, request: TransportRequest) -> None:
+        self.stale = cache.response
+        self._cache = cache
+        self._request = request
+
+    async def put(self, response: TransportResponse) -> None:
+        await self._cache.put(self._request, response)
 
 
 class BlockingTransport(FakeTransport):
@@ -818,6 +834,34 @@ async def test_cache_hit_skips_budget_rate_limit_and_network() -> None:
         "cache.hit",
     ]
     assert telemetry.events[0][1]["request_id"] == telemetry.events[1][1]["request_id"]
+
+
+async def test_memory_cache_miss_and_write_compute_identity_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity_calls = 0
+    original_identity = cache_module._request_cache_identity
+
+    def counted_identity(request: TransportRequest) -> object:
+        nonlocal identity_calls
+        identity_calls += 1
+        return original_identity(request)
+
+    monkeypatch.setattr(cache_module, "_request_cache_identity", counted_identity)
+    backend = FakeTransport()
+    backend.add("https://shop.test/data", body="fresh")
+    cache = MemoryResponseCache()
+
+    response = await MiddlewareTransport(backend, cache=cache, retries=0).request(
+        TransportRequest(
+            url="https://shop.test/data",
+            purpose=RequestPurpose.ENTITY,
+            priority=RequestPriority.IDENTITY,
+        )
+    )
+
+    assert response.text() == "fresh"
+    assert identity_calls == 1
 
 
 async def test_stale_cache_validator_reuses_body_after_304() -> None:

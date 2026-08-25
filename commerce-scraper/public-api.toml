@@ -140,7 +140,7 @@ symbols = [
   "NullTelemetry", "PerOriginRateLimiter", "ProxyBrowserRoutingUnsupported",
   "RateLimitedTransport", "RequestBudget", "RequestObservation",
   "RequestObservationPhase", "RequestObserver", "RequestPriority", "RequestPurpose",
-  "ResponseBodyTooLarge", "ResponseCache", "ResponseDecodeFailure", "RobotsDenied",
+  "ResponseBodyTooLarge", "ResponseCache", "ResponseCacheLookup", "ResponseDecodeFailure", "RobotsDenied",
   "RobotsFetchFailurePolicy", "RotationReason", "RouteMetadata", "SafeTelemetry",
   "StaleResponseCache", "TelemetryHooks", "TransportAccounting", "TransportFailure",
   "TransportRequest", "TransportResponse", "URLPolicy",

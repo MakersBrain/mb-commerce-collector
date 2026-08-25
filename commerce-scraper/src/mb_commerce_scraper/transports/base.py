@@ -377,11 +377,20 @@ class ResponseCache(Protocol):
     async def put(self, request: TransportRequest, response: TransportResponse) -> None: ...
 
 
+class ResponseCacheLookup(Protocol):
+    """One classified cache read retaining its request-specific write identity."""
+
+    fresh: TransportResponse | None
+    stale: TransportResponse | None
+
+    async def put(self, response: TransportResponse) -> None: ...
+
+
 @runtime_checkable
 class StaleResponseCache(ResponseCache, Protocol):
     """Optional cache extension for validators and explicit stale fallback."""
 
-    async def stale(self, request: TransportRequest) -> TransportResponse | None: ...
+    async def get_with_stale(self, request: TransportRequest) -> ResponseCacheLookup: ...
 
 
 class RobotsChecker(Protocol):

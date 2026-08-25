@@ -19,6 +19,7 @@ from .base import (
     RequestScopedIdentityRotation,
     ResponseBodyTooLarge,
     ResponseCache,
+    ResponseCacheLookup,
     RobotsChecker,
     RotationReason,
     RouteMetadata,
@@ -74,6 +75,7 @@ class MiddlewareTransport(CommerceTransport):
 
     async def request(self, request: TransportRequest) -> TransportResponse:
         cache_request = request
+        cache_lookup: ResponseCacheLookup | None = None
         stale: TransportResponse | None = None
         request_id = request.trace_request_id or (uuid4().hex if self._telemetry is not None else None)
         common: dict[str, JsonValue] = {
@@ -98,7 +100,12 @@ class MiddlewareTransport(CommerceTransport):
             self._emit("robots.denied", {**common, "level": "warning"})
             raise RobotsDenied("robots policy denies request")
         if self._cache is not None and request.cache.value == "default":
-            cached = await self._cache.get(request)
+            if isinstance(self._cache, StaleResponseCache):
+                cache_lookup = await self._cache.get_with_stale(request)
+                cached = cache_lookup.fresh
+                stale = cache_lookup.stale
+            else:
+                cached = await self._cache.get(request)
             if cached is not None:
                 cached = self._enforce_cached_body(
                     cached,
@@ -108,15 +115,13 @@ class MiddlewareTransport(CommerceTransport):
                 self._emit("cache.hit", {**common, "level": "debug", "route": "cache"})
                 return cached.model_copy(update={"from_cache": True})
             self._emit("cache.miss", {**common, "level": "debug"})
-            if isinstance(self._cache, StaleResponseCache):
-                stale = await self._cache.stale(cache_request)
-                if stale is not None:
-                    stale = self._enforce_cached_body(
-                        stale,
-                        common=common,
-                        reason="stale_response_body_too_large",
-                    )
-                    request = self._conditional_request(request, stale)
+            if stale is not None:
+                stale = self._enforce_cached_body(
+                    stale,
+                    common=common,
+                    reason="stale_response_body_too_large",
+                )
+                request = self._conditional_request(request, stale)
         for attempt in range(self._retries + 1):
             attempt_number = attempt + 1
             attempt_request = (
@@ -318,6 +323,7 @@ class MiddlewareTransport(CommerceTransport):
                     await self._cache_put(
                         cache_request,
                         revalidated,
+                        lookup=cache_lookup,
                         common=common,
                         accounting=accounting,
                         attempt=attempt_number,
@@ -346,6 +352,7 @@ class MiddlewareTransport(CommerceTransport):
                     await self._cache_put(
                         cache_request,
                         response,
+                        lookup=cache_lookup,
                         common=common,
                         accounting=accounting,
                         attempt=attempt_number,
@@ -440,6 +447,7 @@ class MiddlewareTransport(CommerceTransport):
         request: TransportRequest,
         response: TransportResponse,
         *,
+        lookup: ResponseCacheLookup | None,
         common: dict[str, JsonValue],
         accounting: TransportAccounting,
         attempt: int,
@@ -447,7 +455,10 @@ class MiddlewareTransport(CommerceTransport):
     ) -> None:
         assert self._cache is not None
         try:
-            await self._cache.put(request, response)
+            if lookup is None:
+                await self._cache.put(request, response)
+            else:
+                await lookup.put(response)
         except BaseException as error:
             self._emit_attempt_failure(
                 common,

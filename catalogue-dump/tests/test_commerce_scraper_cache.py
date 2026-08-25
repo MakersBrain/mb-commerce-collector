@@ -221,6 +221,7 @@ async def test_native_cache_exposes_expired_entry_for_revalidation(tmp_path) -> 
 
 async def test_catalogue_cache_and_middleware_revalidate_the_legacy_archive(
     tmp_path,
+    monkeypatch,
 ) -> None:
     attempted = request().model_copy(
         update={"method": "GET", "query": {}, "json_body": None}
@@ -246,10 +247,28 @@ async def test_catalogue_cache_and_middleware_revalidate_the_legacy_archive(
     )
     backend = FakeTransport()
     backend.add(attempted.url, status=304, headers={"etag": '"v2"'})
+    cache = CatalogueResponseCache(legacy)
+    key_calls = 0
+    read_calls = 0
+    original_key = cache._key
+    original_read = legacy.read_with_stale
+
+    def counted_key(request):
+        nonlocal key_calls
+        key_calls += 1
+        return original_key(request)
+
+    def counted_read(key, url=""):
+        nonlocal read_calls
+        read_calls += 1
+        return original_read(key, url)
+
+    monkeypatch.setattr(cache, "_key", counted_key)
+    monkeypatch.setattr(legacy, "read_with_stale", counted_read)
 
     response = await MiddlewareTransport(
         backend,
-        cache=CatalogueResponseCache(legacy),
+        cache=cache,
         retries=0,
     ).request(attempted)
 
@@ -257,6 +276,8 @@ async def test_catalogue_cache_and_middleware_revalidate_the_legacy_archive(
     assert response.status == 200
     assert response.text() == "previous"
     assert response.from_cache
+    assert key_calls == 1
+    assert read_calls == 1
     refreshed = legacy.read(key, attempted.url)
     assert refreshed is not None
     assert refreshed.headers["etag"] == '"v2"'

@@ -64,6 +64,13 @@ or other resource requiring an async close. A cache instance passed to
 `CommerceScraper` or `build_http_scraper` is borrowed; leaving the scraper
 context neither closes it nor removes its persistent entries.
 
+Caches supporting validators implement `StaleResponseCache.get_with_stale()`.
+Its `ResponseCacheLookup` result classifies one read as fresh or stale and
+retains the request-specific write identity for revalidation or replacement;
+middleware therefore neither reopens an expired artifact nor recomputes its
+identity before writing the result. The original `get`, `stale`, and `put`
+methods remain available on `FileResponseCache` for direct cache operations.
+
 Entries and decompressed reads are bounded, and requests carrying credential
 headers, credential query fields, or URL user information bypass both standard
 caches to prevent cross-identity reuse. The directory can still contain raw

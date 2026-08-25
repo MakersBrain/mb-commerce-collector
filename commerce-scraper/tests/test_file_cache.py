@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+import mb_commerce_scraper.transports.cache as cache_module
 from mb_commerce_scraper.testing import FakeTransport
 from mb_commerce_scraper.transports import (
     BrowserEvaluation,
@@ -302,3 +303,51 @@ async def test_middleware_cache_hit_skips_backend_and_budget(tmp_path: Path) -> 
     assert replayed.route.kind == "cache"
     assert backend.requests == []
     assert budget.requests == 0
+
+
+@pytest.mark.asyncio
+async def test_middleware_stale_revalidation_identifies_and_reads_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [1_000.0]
+    cache = FileResponseCache(
+        tmp_path,
+        maximum_age_seconds=60,
+        clock=lambda: now[0],
+    )
+    attempted = request()
+    await cache.put(
+        attempted,
+        response(b"previous", headers={"etag": '"v1"'}),
+    )
+    now[0] += 61
+
+    identity_calls = 0
+    read_calls = 0
+    original_identity = cache_module._request_cache_identity
+    original_read = cache._read
+
+    def counted_identity(request: TransportRequest) -> Any:
+        nonlocal identity_calls
+        identity_calls += 1
+        return original_identity(request)
+
+    def counted_read(key: str) -> tuple[TransportResponse, float] | None:
+        nonlocal read_calls
+        read_calls += 1
+        return original_read(key)
+
+    monkeypatch.setattr(cache_module, "_request_cache_identity", counted_identity)
+    monkeypatch.setattr(cache, "_read", counted_read)
+    backend = FakeTransport()
+    backend.add(attempted.url, status=304, headers={"etag": '"v2"'})
+
+    replayed = await MiddlewareTransport(backend, cache=cache, retries=0).request(
+        attempted
+    )
+
+    assert replayed.content == b"previous"
+    assert replayed.headers["etag"] == '"v2"'
+    assert identity_calls == 1
+    assert read_calls == 1

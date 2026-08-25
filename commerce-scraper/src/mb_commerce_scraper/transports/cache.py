@@ -23,7 +23,7 @@ from mb_commerce_scraper.models.sanitization import sanitize_url
 from .base import (
     DEFAULT_MAXIMUM_RESPONSE_BYTES,
     CachePolicy,
-    ResponseCache,
+    ResponseCacheLookup,
     RouteMetadata,
     StaleResponseCache,
     TransportRequest,
@@ -68,6 +68,32 @@ _MAXIMUM_CLOCK_SKEW_SECONDS = 300
 class _RequestCacheIdentity:
     key: str
     eligible: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _FileCacheLookup(ResponseCacheLookup):
+    fresh: TransportResponse | None
+    stale: TransportResponse | None
+    _cache: FileResponseCache
+    _identity: _RequestCacheIdentity
+    _writable: bool
+
+    async def put(self, response: TransportResponse) -> None:
+        if self._writable:
+            await self._cache._put(self._identity, response)
+
+
+@dataclass(frozen=True, slots=True)
+class _MemoryCacheLookup(ResponseCacheLookup):
+    fresh: TransportResponse | None
+    stale: TransportResponse | None
+    _cache: MemoryResponseCache
+    _identity: _RequestCacheIdentity
+    _writable: bool
+
+    async def put(self, response: TransportResponse) -> None:
+        if self._writable:
+            self._cache._put(self._identity, response)
 
 
 def _normalized_name(value: str) -> str:
@@ -167,7 +193,7 @@ def _request_cache_identity(request: TransportRequest) -> _RequestCacheIdentity:
     )
 
 
-class MemoryResponseCache(ResponseCache):
+class MemoryResponseCache(StaleResponseCache):
     """Bounded-process cache useful for embedding and deterministic tests."""
 
     def __init__(
@@ -185,13 +211,22 @@ class MemoryResponseCache(ResponseCache):
         self._entries: dict[str, TransportResponse] = {}
 
     async def get(self, request: TransportRequest) -> TransportResponse | None:
+        return (await self.get_with_stale(request)).fresh
+
+    async def get_with_stale(self, request: TransportRequest) -> ResponseCacheLookup:
         identity = _request_cache_identity(request)
         if not identity.eligible or request.cache is not CachePolicy.DEFAULT:
-            return None
+            return _MemoryCacheLookup(
+                None,
+                None,
+                self,
+                identity,
+                identity.eligible and request.cache is not CachePolicy.BYPASS,
+            )
         response = self._entries.get(identity.key)
         if response is None:
-            return None
-        return response.model_copy(
+            return _MemoryCacheLookup(None, None, self, identity, True)
+        fresh = response.model_copy(
             update={
                 "route": RouteMetadata(kind="cache"),
                 "from_cache": True,
@@ -199,11 +234,19 @@ class MemoryResponseCache(ResponseCache):
                 "accounting": None,
             }
         )
+        return _MemoryCacheLookup(fresh, None, self, identity, True)
 
     async def put(self, request: TransportRequest, response: TransportResponse) -> None:
         identity = _request_cache_identity(request)
         if not identity.eligible or request.cache is CachePolicy.BYPASS:
             return
+        self._put(identity, response)
+
+    def _put(
+        self,
+        identity: _RequestCacheIdentity,
+        response: TransportResponse,
+    ) -> None:
         enforce_response_body_limit(response, self.maximum_response_bytes)
         if identity.key not in self._entries and len(self._entries) >= self.maximum_entries:
             self._entries.pop(next(iter(self._entries)))
@@ -243,19 +286,7 @@ class FileResponseCache(StaleResponseCache):
         self._clock = clock
 
     async def get(self, request: TransportRequest) -> TransportResponse | None:
-        identity = _request_cache_identity(request)
-        if not identity.eligible or request.cache is not CachePolicy.DEFAULT:
-            return None
-        stored = await asyncio.to_thread(self._read, identity.key)
-        if stored is None:
-            return None
-        response, stored_at = stored
-        age = self._age(stored_at)
-        if age is None:
-            return None
-        if self.maximum_age_seconds is not None and age > self.maximum_age_seconds:
-            return None
-        return response
+        return (await self.get_with_stale(request)).fresh
 
     async def stale(self, request: TransportRequest) -> TransportResponse | None:
         identity = _request_cache_identity(request)
@@ -266,10 +297,33 @@ class FileResponseCache(StaleResponseCache):
             return None
         return stored[0]
 
+    async def get_with_stale(self, request: TransportRequest) -> ResponseCacheLookup:
+        identity = _request_cache_identity(request)
+        writable = identity.eligible and request.cache is not CachePolicy.BYPASS
+        if not identity.eligible or request.cache is not CachePolicy.DEFAULT:
+            return _FileCacheLookup(None, None, self, identity, writable)
+        stored = await asyncio.to_thread(self._read, identity.key)
+        if stored is None:
+            return _FileCacheLookup(None, None, self, identity, writable)
+        response, stored_at = stored
+        age = self._age(stored_at)
+        if age is None:
+            return _FileCacheLookup(None, None, self, identity, writable)
+        if self.maximum_age_seconds is not None and age > self.maximum_age_seconds:
+            return _FileCacheLookup(None, response, self, identity, writable)
+        return _FileCacheLookup(response, None, self, identity, writable)
+
     async def put(self, request: TransportRequest, response: TransportResponse) -> None:
         identity = _request_cache_identity(request)
         if not identity.eligible or request.cache is CachePolicy.BYPASS:
             return
+        await self._put(identity, response)
+
+    async def _put(
+        self,
+        identity: _RequestCacheIdentity,
+        response: TransportResponse,
+    ) -> None:
         enforce_response_body_limit(response, self.maximum_response_bytes)
         stored_at = self._clock()
         if not math.isfinite(stored_at) or stored_at < 0:

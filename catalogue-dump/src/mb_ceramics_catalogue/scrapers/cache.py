@@ -127,6 +127,45 @@ class ResponseCache:
         except (OSError, json.JSONDecodeError, EOFError, TypeError):
             return None
 
+    def read_with_stale(
+        self,
+        key: str,
+        url: str = "",
+    ) -> tuple[CachedResponse | None, CachedResponse | None]:
+        """Classify one artifact read as fresh or stale."""
+        if not self.enabled:
+            return None, None
+        path = self.path(key, url)
+        if not path.exists():
+            if self.mode != "refresh":
+                self.misses += 1
+                metrics.cache("miss")
+            return None, None
+        try:
+            with gzip.open(path, "rt", encoding="utf-8") as handle:
+                stored = json.load(handle)
+        except (OSError, json.JSONDecodeError, EOFError) as error:
+            if self.mode != "refresh":
+                LOGGER.warning("unreadable cache entry %s (%s); refetching", path, error)
+                self.misses += 1
+                metrics.cache("miss")
+            return None, None
+        entry = CachedResponse(**stored)
+        if self.mode == "refresh":
+            return None, entry
+        if self.max_age is not None and time.time() - entry.fetched_at > self.max_age:
+            self.misses += 1
+            metrics.cache("miss")
+            return None, entry
+        self.hits += 1
+        metrics.cache("hit")
+        self.bytes_read += path.stat().st_size
+        try:
+            os.utime(path, None)
+        except OSError:  # pragma: no cover - a read-only replay cache is valid
+            pass
+        return entry, None
+
     def write(self, key: str, entry: CachedResponse) -> None:
         if not self.enabled:
             return

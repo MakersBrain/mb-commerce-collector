@@ -107,10 +107,24 @@ class StaleOnlyCache:
         del request
         return self.response
 
+    async def get_with_stale(self, request: TransportRequest) -> StaleOnlyCacheLookup:
+        del request
+        return StaleOnlyCacheLookup(self.response)
+
     async def put(
         self, request: TransportRequest, response: TransportResponse
     ) -> None:
         del request, response
+
+
+class StaleOnlyCacheLookup:
+    fresh: TransportResponse | None = None
+
+    def __init__(self, stale: TransportResponse) -> None:
+        self.stale = stale
+
+    async def put(self, response: TransportResponse) -> None:
+        del response
 
 
 class RecordingProxyPool:

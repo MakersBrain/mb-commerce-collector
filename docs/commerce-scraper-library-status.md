@@ -148,17 +148,18 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `f2cb149` — remove retired Fetcher telemetry traversal.
 - `7e181b7` — centralize fail-closed Webshare profile quarantine.
 - `e1ffffc` — unify native collection assembly.
+- `519791a` — scan Shopify inventory HTML once per supported encoding.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 76 source and test files.
-  - 334 library tests passed. Version-0 checkpoint compatibility and its
+  - 336 library tests passed. Version-0 checkpoint compatibility and its
     library test suite were removed before the first release.
   - Wheel and source distribution built.
   - 5 dependency-boundary tests passed.
-  - The installed-wheel matrix verified all 226 reviewed public exports across
+  - The installed-wheel matrix verified all 227 reviewed public exports across
     nine modules, metadata/source version parity, typed package data, and
     isolated base, HTTP, and development extras; the base install remained
     free of the optional HTTPX dependency.
@@ -251,6 +252,11 @@ architecture rules in the plan and are not separate scope-expansion goals.
   migration/round-trip tests passed against a throwaway database.
 - [x] Current implementation batch passed the verification gates recorded
   below.
+  - Request-scoped `ResponseCacheLookup` composition now computes standard and
+    catalogue cache identity once, classifies fresh/stale data from one
+    artifact read, and reuses the captured write identity after a miss or 304.
+    Read/identity-count regressions passed alongside the complete scraper gate
+    (336 tests), full catalogue gate, and installed two-wheel composition.
   - Shopify published-theme inventory extraction now precompiles its five
     supported patterns and scans each document exactly once per encoding,
     independent of variant count. Recorded theme-shape samples, precedence,

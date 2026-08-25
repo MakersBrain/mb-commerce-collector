@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from mb_commerce_scraper.transports import (
     BrowserHint,
     CachePolicy,
+    ResponseCacheLookup,
     RouteMetadata,
     TransportFailure,
     TransportRequest,
@@ -43,6 +44,19 @@ class CatalogueCacheStats:
             f"cache mode={mode} hits={self.hits} ({share:.0f}%) "
             f"misses={self.misses} stored={self.writes}"
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _CatalogueCacheLookup(ResponseCacheLookup):
+    fresh: TransportResponse | None
+    stale: TransportResponse | None
+    _cache: CatalogueResponseCache
+    _request: TransportRequest
+    _key: str | None
+
+    async def put(self, response: TransportResponse) -> None:
+        if self._key is not None:
+            await self._cache._put(self._request, response, self._key)
 
 
 class CatalogueResponseCache:
@@ -80,6 +94,26 @@ class CatalogueResponseCache:
         )
         return self._response(entry, request) if entry is not None else None
 
+    async def get_with_stale(self, request: TransportRequest) -> ResponseCacheLookup:
+        """Classify one archive read and retain its key for a later write."""
+        if request.cache is not CachePolicy.DEFAULT:
+            return _CatalogueCacheLookup(None, None, self, request, None)
+        key = self._key(request)
+        fresh, stale = await asyncio.to_thread(
+            self._cache.read_with_stale,
+            key,
+            request.url,
+        )
+        if fresh is None and self._cache.mode == "replay":
+            raise TransportFailure("replay cache entry is unavailable")
+        return _CatalogueCacheLookup(
+            self._response(fresh, request) if fresh is not None else None,
+            self._response(stale, request) if stale is not None else None,
+            self,
+            request,
+            key,
+        )
+
     @staticmethod
     def _response(
         entry: CachedResponse, request: TransportRequest
@@ -98,6 +132,14 @@ class CatalogueResponseCache:
     ) -> None:
         if request.cache is not CachePolicy.DEFAULT:
             return
+        await self._put(request, response, self._key(request))
+
+    async def _put(
+        self,
+        request: TransportRequest,
+        response: TransportResponse,
+        key: str,
+    ) -> None:
         entry = CachedResponse(
             status=response.status,
             url=response.final_url,
@@ -106,7 +148,7 @@ class CatalogueResponseCache:
             fetched_at=time.time(),
             kind=self._kind(request),
         )
-        await asyncio.to_thread(self._cache.write, self._key(request), entry)
+        await asyncio.to_thread(self._cache.write, key, entry)
 
     def _key(self, request: TransportRequest) -> str:
         if request.evaluation is not None:

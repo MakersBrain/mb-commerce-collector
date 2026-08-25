@@ -351,7 +351,7 @@ behavioral consequences and should be scheduled on its own.**
   files, the full fast suite (938 passed, 2 skipped, 187 deselected, 284
   subtests), and installed two-wheel composition also passed.
 
-- [ ] **C2 Compute the cache identity once; read the artifact once.**
+- [x] **C2 Compute the cache identity once; read the artifact once.**
   `_request_cache_identity` runs `urlsplit` + `parse_qsl` + an `idna` encode +
   `json.dumps` + two sha256 digests, and calls `_credential_name` (which
   rebuilds a normalized string per header and per query key). It is invoked
@@ -363,6 +363,24 @@ behavioral consequences and should be scheduled on its own.**
   Compute the identity once in the middleware (or memoize it on the frozen
   `TransportRequest`) and give `StaleResponseCache` a single
   `get_with_stale(request)` that classifies fresh vs stale from one read.
+  **Completed.** `StaleResponseCache.get_with_stale()` now returns a
+  request-scoped `ResponseCacheLookup` that classifies one read and retains the
+  cache's opaque write identity. Middleware uses that lookup for fresh hits,
+  stale validators/fallback, and the eventual response or 304 write. Both
+  standard caches and the catalogue archive adapter implement the contract;
+  direct `get`, `stale`, and `put` operations remain available where they
+  existed. The catalogue archive gained a single-read fresh/stale classifier
+  preserving replay, refresh, age, hit/miss, byte, and access-time semantics.
+  *Verified:* instrumented stale-file 304 revalidation proves exactly one
+  identity computation and one gzip artifact read through the write; an
+  in-memory miss/write proves one identity computation, and the catalogue
+  adapter proves one legacy key computation and one archive read. The focused
+  library cache/transport slice passed 99 tests and the focused catalogue slice
+  passed 22. The complete scraper gate passed with 336 tests, Ruff, mypy over
+  76 files, schemas, package and installed-wheel contracts, custom-connector
+  verification, and release checks. Catalogue Ruff, mypy over 240 files, the
+  full fast suite (938 passed, 2 skipped, 187 deselected, 284 subtests), and
+  installed two-wheel composition passed.
 
 - [ ] **C3 Tokenize the document once per `dom_product`.**
   `select()` builds an f-string pattern and `finditer`s every opening tag,

@@ -62,6 +62,8 @@ based on Keep a Changelog, and releases follow the compatibility policy in
   `discovery`, matching generic-page configuration.
 - Precompiled Shopify inventory extractors and reduced published-theme HTML
   parsing to one scan per supported encoding, independent of variant count.
+- Added request-scoped stale-cache lookups so middleware computes cache
+  identity once and reads an expired artifact once through revalidation.
 
 Before tagging the first release, move these notes under
 `## [0.1.0] - YYYY-MM-DD` and retain an empty `## [Unreleased]` section above
