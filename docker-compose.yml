@@ -568,63 +568,6 @@ services:
       - "127.0.0.1:${CATALOGUE_VMAGENT_PORT:-8429}:8429"
     restart: unless-stopped
 
-  # The alert rules are service knowledge -- they name catalogue sources, jobs
-  # and worker health -- so they stay in this repository next to the code that
-  # emits those series. vmalert holds no TSDB: it queries the plane, which is
-  # where its own vmagent just wrote, and delivers to the plane's Alertmanager.
-  #
-  # -rule.evalDelay is not optional here. Every rule in alerts.yml fires on
-  # missing data (`== 0`, `> 900`, absent sources), and samples arrive by remote
-  # write seconds after the timestamp they carry. Without the delay a late batch
-  # is indistinguishable from an outage. The plane's own vmalert uses 60s for
-  # exactly this reason; see mazenet-infra roles/observe/templates/vmalert.container.j2.
-  #
-  # -remoteWrite/-remoteRead round-trip ALERTS and ALERTS_FOR_STATE so that
-  # restarting this unit does not reset every `for:` timer to zero.
-  vmalert:
-    profiles: ["observability"]
-    image: victoriametrics/vmalert:v1.148.0
-    container_name: catalogue-vmalert
-    depends_on:
-      - vmagent
-    env_file:
-      - path: ./deploy/observability/vmalert.env
-        required: false
-    command:
-      - --envflag.enable
-      - --rule=/etc/vmalert/alerts.yml
-      - --evaluationInterval=30s
-      - --rule.evalDelay=60s
-      - --httpListenAddr=:8880
-    volumes:
-      - ./deploy/observability/alerts.yml:/etc/vmalert/alerts.yml:ro
-    ports:
-      - "127.0.0.1:${CATALOGUE_VMALERT_PORT:-8880}:8880"
-    restart: unless-stopped
-
-  grafana:
-    profiles: ["observability"]
-    image: grafana/grafana:12.1.0
-    container_name: catalogue-grafana
-    depends_on:
-      - vmagent
-    environment:
-      GF_SECURITY_ADMIN_USER: ${CATALOGUE_GRAFANA_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${CATALOGUE_GRAFANA_PASSWORD:-catalogue-local}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      # Expanded by Grafana's provisioning, not by compose: the datasource now
-      # addresses the shared plane and needs the Access token to read it.
-      CATALOGUE_METRICS_QUERY_URL: ${CATALOGUE_METRICS_QUERY_URL:-}
-      CATALOGUE_METRICS_ACCESS_CLIENT_ID: ${CATALOGUE_METRICS_ACCESS_CLIENT_ID:-}
-      CATALOGUE_METRICS_ACCESS_CLIENT_SECRET: ${CATALOGUE_METRICS_ACCESS_CLIENT_SECRET:-}
-    volumes:
-      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana-data:/var/lib/grafana
-    ports:
-      - "127.0.0.1:${CATALOGUE_GRAFANA_PORT:-3001}:3000"
-    restart: unless-stopped
-
 volumes:
   pgdata:
   # JetStream is durable work delivery, not authoritative job state. It still
@@ -647,7 +590,6 @@ volumes:
   operator-secrets:
   # The remote-write buffer only. Nothing here is a metrics store.
   vmagent-queue:
-  grafana-data:
 
 secrets:
   npmrc:

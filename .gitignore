@@ -57,4 +57,3 @@ decodo.env
 
 # Observability credentials (copy the .example files; values from Infisical)
 deploy/observability/vmagent.env
-deploy/observability/vmalert.env
