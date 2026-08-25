@@ -46,6 +46,8 @@ based on Keep a Changelog, and releases follow the compatibility policy in
   breadcrumb projection, JSON-LD entity decoding, and cleaned descriptions.
 - Aligned direct BigCommerce discovery and GraphQL requests with the legacy
   browser profile and stable 50-item query identity used by recorded caches.
+- Aligned direct PrestaShop page requests with the legacy browser profile and
+  excluded consent/tracking tables from published technical specifications.
 - Consolidated runtime and routed-transport proxy configuration on
   `ProxyPolicyConfig`; the unreleased parallel routing model and legacy request
   and byte-cap parameters were removed.

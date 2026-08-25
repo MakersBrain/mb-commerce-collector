@@ -305,6 +305,14 @@ def probable_javascript_shell(document: str) -> bool:
     return len(clean(visible)) < 1000
 
 
+_NON_SPECIFICATION = re.compile(
+    r"cookie|consent|privacy|gdpr|rgpd|datenschutz|expiry|provider purpose"
+    r"|prestashop-#|_ga\b|session|newsletter|shipping cost|delivery time"
+    r"|analytic|tracking|tracker|visitor|advertis|google|facebook|hotjar",
+    re.IGNORECASE,
+)
+
+
 def specification_table(document: str) -> dict[str, str]:
     attributes: dict[str, str] = {}
     pairs = (
@@ -314,7 +322,13 @@ def specification_table(document: str) -> dict[str, str]:
     for pattern in pairs:
         for match in re.finditer(pattern, document, re.IGNORECASE | re.DOTALL):
             name, value = clean(match.group(1)).rstrip(":"), clean(match.group(2))
-            if name and value and len(name) < 100:
+            if (
+                name
+                and value
+                and len(name) < 100
+                and not _NON_SPECIFICATION.search(name)
+                and not _NON_SPECIFICATION.search(value)
+            ):
                 attributes.setdefault(name, value)
     return attributes
 

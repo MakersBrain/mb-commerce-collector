@@ -209,19 +209,20 @@ architecture rules in the plan and are not separate scope-expansion goals.
   - The library gate passed Ruff, mypy over 77 source files, 360 tests, and the
     frozen-schema check.
   - The catalogue gate passed Ruff, mypy over 240 source files, and 945 tests
-    with 2 expected skips, 275 deselections, and 284 subtests.
+    with 2 expected skips, 276 deselections, and 284 subtests.
   - `pytest -q -m golden tests/test_recorded_library_parity.py -rs` replayed
     independent legacy/library paths from 51,579 recovered production-response
-    entries: all 7 preflight, Shopify, Shopware, and BigCommerce cases passed.
+    entries: all 8 preflight, Shopify, Shopware, BigCommerce, and Sio2 cases
+    passed.
   - The recovered volume is newer and broader than the checked-in golden set.
     An archive-wide characterization produced 14 unrelated stale-baseline
     failures, 10 passes, and 67 sources without reviewed goldens; those 67
     provisional outputs were not added. Publishing a versioned archive and
     manifest remains an operational CI task.
   - Cache publication now accepts repeated `push --host` selectors. A local
-    deterministic build of the six reviewed hosts contains 155 files and
-    6,000,640 bytes with SHA-256
-    `3c747eb4abf0736459ca656f02d3e2c1ad83e562d5aa7fb003016846b1f31c45`;
+    deterministic build of the seven reviewed hosts contains 1,019 files and
+    33,843,200 bytes with SHA-256
+    `b1faa6736251a39e134e21290188893195b8b6f9541e4570acd417f26fb45238`;
     it has not been uploaded or written into the checked-in manifest.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
   throwaway PostgreSQL 17 instance, covering concurrent authorization,
@@ -699,6 +700,10 @@ remains a Phase 7 cutover gate rather than a Phase 1 contract-extraction gap.
     goldens, then match 1,008 semantic rows, 1,383 discoveries, 31 direct
     requests, zero renders, and terminal/error semantics. Long raw descriptions
     are compared after the library's public extension-size bound.
+  - Sio2 stable/library replay matches all 787 normalized rows by stable
+    identity, 807 discoveries, 849 direct requests, zero renders, and exact
+    completion/error semantics. The library keeps category partitions explicit,
+    so ordering is intentionally not treated as catalogue identity.
   - CI sets `CATALOGUE_GOLDEN_ARCHIVE_REQUIRED=1` only after the configured
     archive pull succeeds. In that mode, missing manifests, source hosts,
     recordings, or frozen outputs fail before the parity cases can silently
@@ -1226,6 +1231,10 @@ Cross-cutting work:
     Semantic output is exact after preserving the legacy configured-brand
     classification; raw upstream descriptions retain the public extension
     size bound.
+  - The Sio2 recording passes with all 787 rows, 807 discoveries, and 849
+    requests. Complete normalized rows match by stable identity; the library's
+    explicit category partitions produce a different deterministic row order
+    than the legacy crawler's flattened category list.
 - [~] Review request counts and byte estimates.
   - Focused traffic profiles now pin exact logical request order, purpose,
     browser hint, and byte estimate for WooCommerce, PrestaShop/Sio2,
@@ -1508,8 +1517,9 @@ Exit criterion: **not met**.
 5. Run a limited browser-capable BigCommerce canary with the tested
    source-level rollback route; recorded replay and projected-output parity now
    pass for Amaco and Speedball.
-6. Run representative PrestaShop and Sio2 sources through recorded replay,
-   projected output comparison, and limited canaries with independent rollback.
+6. Complete representative PrestaShop recorded parity, then run limited
+   PrestaShop and Sio2 canaries with independent rollback. Sio2 recorded replay
+   and projected-output parity now pass.
 7. Run a real rootless Podman/Quadlet activation/readability smoke, then a
    default-off native worker integration and explicitly approved Webshare
    canary. The recent-admin import/rotation endpoint, durable replay,
@@ -1545,6 +1555,12 @@ After each implementation batch:
   reconstructed legacy raw payload. Recorded parity compares that bounded
   projection while requiring exact equality for identifiers, all semantic
   catalogue fields, discovery, request counts, and terminal behavior.
+
+- Sio2 preserves explicit category partitions in the library connector, so
+  replay row order differs from the legacy crawler's flattened category list.
+  The migration gate compares every complete normalized row by stable
+  `external_id`, while retaining exact counts, coverage, request totals,
+  terminal behavior, and the reviewed legacy golden anchor.
 
 - B1 resolves the previously documented parsing drift in favor of the shared
   helper behavior: specification names may contain up to 99 characters, the

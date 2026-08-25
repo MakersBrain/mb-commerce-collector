@@ -15,6 +15,9 @@ from mb_commerce_scraper.connectors import (
     PrestaShopOptions,
     prestashop_partition_keys,
 )
+from mb_commerce_scraper.connectors._request_profiles import (
+    LEGACY_BROWSER_USER_AGENT,
+)
 from mb_commerce_scraper.proxy import ProxyBudgetExhausted
 from mb_commerce_scraper.testing import FakeTransport, assert_connector_pages
 from mb_commerce_scraper.transports import (
@@ -120,6 +123,12 @@ async def test_sitemap_product_preserves_neutral_snapshot() -> None:
     assert snapshot.variants[0].offers[0].price.amount == 12.50
     assert snapshot.variants[0].stock is not None
     assert snapshot.variants[0].stock.quantity == 4
+    assert transport.requests[0].headers == {
+        "accept": "application/xml,text/xml",
+    }
+    assert transport.requests[1].headers == {
+        "user-agent": LEGACY_BROWSER_USER_AGENT
+    }
     assert [
         (item.url, item.purpose, item.browser, item.estimated_bytes)
         for item in transport.requests

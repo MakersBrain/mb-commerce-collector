@@ -62,6 +62,19 @@ def _bounded_bigcommerce_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     return {**payload, "records": records}
 
 
+def _bounded_prestashop_legacy(payload: dict[str, Any]) -> dict[str, Any]:
+    """Project legacy raw records through the neutral variant extension."""
+    records: list[dict[str, Any]] = []
+    for original in payload["records"]:
+        extension: Any = {"legacy_raw_record": original["raw"]}
+        extension = sanitize_json_value(sanitize_json_value(extension))
+        assert isinstance(extension, dict)
+        bounded_raw = extension["legacy_raw_record"]
+        assert isinstance(bounded_raw, dict)
+        records.append({**original, "raw": bounded_raw})
+    return {**payload, "records": records}
+
+
 def _recorded_shopify_sources() -> list[str]:
     configured = support.sources()
     return [
@@ -104,6 +117,7 @@ RECORDED_BIGCOMMERCE = [
     for name in ("amaco", "speedball")
     for source in _recorded_source_case(name)
 ]
+RECORDED_SIO2 = _recorded_source_case("sio-2")
 
 
 @pytest.mark.golden
@@ -241,5 +255,59 @@ def test_recorded_bigcommerce_responses_have_legacy_library_projection_parity(
         assert library_frozen[field] == legacy_frozen[field]
     assert library_frozen["sample"] == bounded_legacy_frozen["sample"]
     assert library_frozen["digest"] == bounded_legacy_frozen["digest"]
+    assert not legacy["summary"].get("interrupted", False)
+    assert not library["summary"].get("interrupted", False)
+
+
+@pytest.mark.golden
+@pytest.mark.parametrize("source", RECORDED_SIO2)
+def test_recorded_sio2_responses_have_legacy_library_projection_parity(
+    source: str,
+) -> None:
+    legacy = asyncio.run(support.collect(source))
+    library = asyncio.run(
+        support.collect(source, scraper="library_sio2_connector")
+    )
+
+    legacy_frozen = support.freeze(source, legacy)
+    bounded_legacy = _bounded_prestashop_legacy(legacy)
+    library_frozen = support.freeze(source, library)
+    expected = json.loads(support.golden_path(source).read_text(encoding="utf-8"))
+
+    for field in (
+        "records",
+        "discovered",
+        "requests",
+        "rendered_pages",
+        "field_coverage",
+        "sample",
+        "digest",
+        "truncated",
+        "error_count",
+        "errors",
+    ):
+        assert legacy_frozen[field] == expected[field]
+
+    for field in (
+        "records",
+        "discovered",
+        "requests",
+        "rendered_pages",
+        "field_coverage",
+        "truncated",
+        "error_count",
+        "errors",
+    ):
+        assert library_frozen[field] == legacy_frozen[field]
+    # The library retains explicit category partitions while the legacy
+    # crawler flattens them before collection. Row order consequently differs,
+    # but every complete normalized row remains identical by stable identity.
+    assert {
+        row["external_id"]: support.normalise(row)
+        for row in library["records"]
+    } == {
+        row["external_id"]: support.normalise(row)
+        for row in bounded_legacy["records"]
+    }
     assert not legacy["summary"].get("interrupted", False)
     assert not library["summary"].get("interrupted", False)

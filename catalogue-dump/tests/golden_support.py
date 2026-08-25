@@ -45,6 +45,7 @@ REQUIRED_RECORDED_SOURCES = {
     "ceramique-peinture": "shopify",
     "penguin-pottery": "shopify",
     "keramikbedarf-online": "shopware",
+    "sio-2": "sio2",
     "speedball": "bigcommerce",
 }
 CI_ARCHIVE_REQUIRED = "CATALOGUE_GOLDEN_ARCHIVE_REQUIRED"

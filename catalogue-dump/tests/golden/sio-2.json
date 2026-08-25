@@ -1,5 +1,5 @@
 {
-  "digest": "14505cacc73e9ec37768568ad587b0e41d9a0a8884d13950482cae3b3c05280a",
+  "digest": "924ebb6a2705251bf2be868b3279f88e024642670b61e440df1693502a145bb0",
   "discovered": 807,
   "error_count": 0,
   "errors": [],
@@ -19,7 +19,7 @@
     "gtin": 0,
     "manufacturer_sku": 476,
     "package_size": 785,
-    "stock_quantity": 618,
+    "stock_quantity": 612,
     "supplier_reference": 787,
     "surface": 766,
     "unit_price": 785,
@@ -611,8 +611,8 @@
         "price_amount": 6.32,
         "price_tax_exc": 5.22,
         "price_without_reduction": 6.3162,
-        "quantity": 201,
-        "quantity_all_versions": 201,
+        "quantity": 199,
+        "quantity_all_versions": 199,
         "quantity_discounts": [
           {
             "discount": "€4.32",
@@ -685,7 +685,7 @@
       "source": "sio-2",
       "source_detail_level": "product_page",
       "source_updated_at": "2026-07-11 01:44:33",
-      "stock_quantity": 201,
+      "stock_quantity": 199,
       "supplier_reference": "101000130000",
       "surface": "matte",
       "technical_attributes": {
@@ -1161,8 +1161,8 @@
         "price_amount": 7.72,
         "price_tax_exc": 6.38,
         "price_without_reduction": 7.7198,
-        "quantity": 70,
-        "quantity_all_versions": 70,
+        "quantity": 69,
+        "quantity_all_versions": 69,
         "quantity_discounts": [
           {
             "discount": "€4.08",
@@ -1235,7 +1235,7 @@
       "source": "sio-2",
       "source_detail_level": "product_page",
       "source_updated_at": "2026-07-16 01:33:48",
-      "stock_quantity": 70,
+      "stock_quantity": 69,
       "supplier_reference": "101200020000",
       "surface": "matte",
       "technical_attributes": {

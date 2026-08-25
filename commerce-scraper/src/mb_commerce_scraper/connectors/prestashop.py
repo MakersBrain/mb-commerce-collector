@@ -65,6 +65,7 @@ from mb_commerce_scraper.transports import (
     TransportRequest,
 )
 
+from ._request_profiles import LEGACY_BROWSER_USER_AGENT
 from .base import (
     BrowserRequirement,
     CommerceConnector,
@@ -443,7 +444,14 @@ class PrestaShopConnector(CommerceConnector):
         response = await self.transport.request(
             TransportRequest(
                 url=url,
-                headers={"accept": accept} if accept else {},
+                headers={
+                    **({"accept": accept} if accept else {}),
+                    **(
+                        {}
+                        if rendered or accept is not None
+                        else {"user-agent": LEGACY_BROWSER_USER_AGENT}
+                    ),
+                },
                 purpose=purpose
                 or (
                     RequestPurpose.DISCOVERY

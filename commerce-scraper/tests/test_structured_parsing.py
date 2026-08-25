@@ -58,7 +58,10 @@ def test_origin_of_can_enforce_absolute_http_urls() -> None:
 def test_structured_drift_choices_are_explicit() -> None:
     accepted = "a" * 99
     rejected = "b" * 100
-    document = f"<dl><dt>{accepted}</dt><dd>yes</dd><dt>{rejected}</dt><dd>no</dd></dl>"
+    document = (
+        f"<dl><dt>{accepted}</dt><dd>yes</dd><dt>{rejected}</dt><dd>no</dd></dl>"
+        "<table><tr><td>Cookie name</td><td>Provider Purpose Expiry</td></tr></table>"
+    )
     assert specification_table(document) == {accepted: "yes"}
     assert meta("<html></html>", "og:title") == ""
     assert probable_javascript_shell(
