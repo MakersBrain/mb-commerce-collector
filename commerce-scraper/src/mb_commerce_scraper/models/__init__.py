@@ -1,4 +1,9 @@
-from .checkpoints import ConnectorCheckpoint, collection_fingerprint, validate_checkpoint
+from .checkpoints import (
+    ConnectorCheckpoint,
+    build_checkpoint,
+    collection_fingerprint,
+    validate_checkpoint,
+)
 from .collection import CollectionRequest, EntityPage, RefreshMode, SnapshotField, SourceDefinition
 from .commerce import (
     Availability,
@@ -58,6 +63,7 @@ __all__ = [
     "SourceDefinition",
     "StockQuantityKind",
     "StockState",
+    "build_checkpoint",
     "collection_fingerprint",
     "result_limit_diagnostic",
     "sanitize_commerce_snapshot",

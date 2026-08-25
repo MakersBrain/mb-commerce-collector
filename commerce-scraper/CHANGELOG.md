@@ -33,6 +33,8 @@ based on Keep a Changelog, and releases follow the compatibility policy in
 - Typed `RequestObserver` and `RequestObservation` contracts for request spans,
   metrics, status, route, and physical-attempt accounting without reconstructing
   typed values from the general event dictionary.
+- Public `build_checkpoint` construction using the canonical collection
+  fingerprint and schema-v1 checkpoint identity.
 
 ### Changed
 
@@ -42,6 +44,9 @@ based on Keep a Changelog, and releases follow the compatibility policy in
 - Removed version-0 catalogue checkpoint decoding. Commerce-scraper lineages
   now reconstruct schema-v1 checkpoints directly from durable identity;
   older or malformed cursor shapes restart instead of being upgraded.
+- Consolidated built-in request validation, checkpoint construction, and
+  stateless connector factories; options are now validated exactly once by the
+  registry before factory construction.
 
 Before tagging the first release, move these notes under
 `## [0.1.0] - YYYY-MM-DD` and retain an empty `## [Unreleased]` section above

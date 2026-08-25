@@ -16,13 +16,14 @@ from mb_commerce_scraper.models import (
     RefreshMode,
     SnapshotField,
     StockQuantityKind,
-    collection_fingerprint,
+    build_checkpoint,
 )
 from mb_commerce_scraper.parsing import ProductParser
 from mb_commerce_scraper.parsing._structured import DomFieldSelector, VerifiedDomRules
 from mb_commerce_scraper.transports import CommerceTransport
 
 from .base import BrowserRequirement, ConnectorCapabilities, ConnectorContext
+from .factory import validated_options
 from .specialized import SpecializedPageConnector, SpecializedPageOptions
 
 
@@ -220,15 +221,13 @@ class GenericPagesConnector(SpecializedPageConnector):
     def checkpoint(
         self, request: CollectionRequest, lineage: str, resume_after: JsonValue
     ) -> ConnectorCheckpoint:
-        return ConnectorCheckpoint(
+        return build_checkpoint(
             connector=self.name,
             connector_version=self.version,
-            source_id=request.source_id,
+            request=request,
             lineage=lineage,
-            collection_fingerprint=collection_fingerprint(
-                request, self.name, self._checkpoint_options()
-            ),
             resume_after=resume_after,
+            options=self._checkpoint_options(),
         )
 
     def _checkpoint_options(self) -> dict[str, JsonValue]:
@@ -327,7 +326,7 @@ class GenericPagesFactory:
     ) -> GenericPagesConnector:
         return GenericPagesConnector(
             transport,
-            GenericPagesOptions.model_validate(options),
+            validated_options(options, GenericPagesOptions, factory_name=self.name),
             context,
             parser=self._parser,
             discovery=self._discovery,

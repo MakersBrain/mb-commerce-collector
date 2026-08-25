@@ -28,9 +28,8 @@ from mb_commerce_scraper.models import (
     SnapshotField,
     StockQuantityKind,
     StockState,
-    collection_fingerprint,
+    build_checkpoint,
     result_limit_diagnostic,
-    validate_checkpoint,
 )
 from mb_commerce_scraper.parsing._structured import decimal_amount, origin_of
 from mb_commerce_scraper.transports import (
@@ -44,7 +43,14 @@ from mb_commerce_scraper.transports import (
     TransportRequest,
 )
 
-from .base import BrowserRequirement, CommerceConnector, ConnectorCapabilities, ConnectorContext
+from .base import (
+    BrowserRequirement,
+    CommerceConnector,
+    ConnectorCapabilities,
+    ConnectorContext,
+    validate_connector_request,
+)
+from .factory import SimpleConnectorFactory
 
 
 class ShopifyOptions(BaseModel):
@@ -83,14 +89,14 @@ class ShopifyConnector(CommerceConnector):
         request: CollectionRequest,
         checkpoint: ConnectorCheckpoint | None = None,
     ) -> AsyncIterator[EntityPage[CommerceProductSnapshot]]:
-        if not self.capabilities.supports(request.requested_fields, request.refresh_mode):
-            raise ValueError("Shopify does not support the requested contract")
         options = cast(dict[str, JsonValue], self.options.model_dump(mode="json"))
-        validate_checkpoint(
-            checkpoint,
+        validate_connector_request(
+            capabilities=self.capabilities,
+            unsupported_message="Shopify does not support the requested contract",
             connector=self.name,
             connector_version=self.version,
             request=request,
+            checkpoint=checkpoint,
             options=options,
         )
         origin = origin_of(request.base_url)
@@ -556,10 +562,13 @@ class ShopifyConnector(CommerceConnector):
 
     def checkpoint(self, request: CollectionRequest, lineage: str, resume_after: JsonValue) -> ConnectorCheckpoint:
         options = cast(dict[str, JsonValue], self.options.model_dump(mode="json"))
-        return ConnectorCheckpoint(
-            connector=self.name, connector_version=self.version, source_id=request.source_id,
-            lineage=lineage, collection_fingerprint=collection_fingerprint(request, self.name, options),
+        return build_checkpoint(
+            connector=self.name,
+            connector_version=self.version,
+            request=request,
+            lineage=lineage,
             resume_after=resume_after,
+            options=options,
         )
 
     @staticmethod
@@ -698,10 +707,8 @@ class ShopifyConnector(CommerceConnector):
             platform_extensions={"legacy_raw_variant": raw},
         )
 
-class ShopifyFactory:
+class ShopifyFactory(SimpleConnectorFactory[ShopifyOptions, ShopifyConnector]):
     name = "shopify"
     version = ShopifyConnector.version
-    options_model: type[BaseModel] = ShopifyOptions
-
-    def build(self, *, transport: CommerceTransport, options: BaseModel, context: ConnectorContext) -> ShopifyConnector:
-        return ShopifyConnector(transport, ShopifyOptions.model_validate(options), context)
+    options_model = ShopifyOptions
+    connector_type = ShopifyConnector

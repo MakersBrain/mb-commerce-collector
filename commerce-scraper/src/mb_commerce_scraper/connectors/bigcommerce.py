@@ -32,9 +32,8 @@ from mb_commerce_scraper.models import (
     SnapshotField,
     StockQuantityKind,
     StockState,
-    collection_fingerprint,
+    build_checkpoint,
     result_limit_diagnostic,
-    validate_checkpoint,
 )
 from mb_commerce_scraper.parsing._structured import decimal_amount, hashed_page_id, origin_of
 from mb_commerce_scraper.transports import (
@@ -52,7 +51,9 @@ from .base import (
     CommerceConnector,
     ConnectorCapabilities,
     ConnectorContext,
+    validate_connector_request,
 )
+from .factory import SimpleConnectorFactory
 
 TOKEN_PATTERN = re.compile(
     r"(?:storefront_api_token|storefront_token|local_token|storefrontApiToken)"
@@ -473,14 +474,14 @@ class BigCommerceConnector(CommerceConnector):
         )
 
     def _validate_request(self, request: CollectionRequest, checkpoint: ConnectorCheckpoint | None) -> None:
-        if not self.capabilities.supports(request.requested_fields, request.refresh_mode):
-            raise ValueError("BigCommerce connector does not support the requested contract")
         options = cast(dict[str, JsonValue], self.options.model_dump(mode="json"))
-        validate_checkpoint(
-            checkpoint,
+        validate_connector_request(
+            capabilities=self.capabilities,
+            unsupported_message="BigCommerce connector does not support the requested contract",
             connector=self.name,
             connector_version=self.version,
             request=request,
+            checkpoint=checkpoint,
             options=options,
         )
 
@@ -488,13 +489,13 @@ class BigCommerceConnector(CommerceConnector):
         self, request: CollectionRequest, lineage: str, resume_after: JsonValue
     ) -> ConnectorCheckpoint:
         options = cast(dict[str, JsonValue], self.options.model_dump(mode="json"))
-        return ConnectorCheckpoint(
+        return build_checkpoint(
             connector=self.name,
             connector_version=self.version,
-            source_id=request.source_id,
+            request=request,
             lineage=lineage,
-            collection_fingerprint=collection_fingerprint(request, self.name, options),
             resume_after=resume_after,
+            options=options,
         )
 
     @staticmethod
@@ -619,20 +620,8 @@ def _token_allows_origin(token: str, origin: str) -> bool:
     return isinstance(allowed, list) and any(_text(item).rstrip("/") == origin for item in allowed)
 
 
-class BigCommerceFactory:
+class BigCommerceFactory(SimpleConnectorFactory[BigCommerceOptions, BigCommerceConnector]):
     name = "bigcommerce"
     version = BigCommerceConnector.version
-    options_model: type[BaseModel] = BigCommerceOptions
-
-    def build(
-        self,
-        *,
-        transport: CommerceTransport,
-        options: BaseModel,
-        context: ConnectorContext,
-    ) -> BigCommerceConnector:
-        return BigCommerceConnector(
-            transport,
-            BigCommerceOptions.model_validate(options),
-            context,
-        )
+    options_model = BigCommerceOptions
+    connector_type = BigCommerceConnector

@@ -32,9 +32,8 @@ from mb_commerce_scraper.models import (
     SnapshotField,
     StockQuantityKind,
     StockState,
-    collection_fingerprint,
+    build_checkpoint,
     result_limit_diagnostic,
-    validate_checkpoint,
 )
 from mb_commerce_scraper.parsing._structured import (
     breadcrumbs as _breadcrumbs,
@@ -71,7 +70,14 @@ from mb_commerce_scraper.transports import (
     TransportRequest,
 )
 
-from .base import BrowserRequirement, CommerceConnector, ConnectorCapabilities, ConnectorContext
+from .base import (
+    BrowserRequirement,
+    CommerceConnector,
+    ConnectorCapabilities,
+    ConnectorContext,
+    validate_connector_request,
+)
+from .factory import SimpleConnectorFactory
 
 
 class HTTPStatusFailure(RuntimeError):
@@ -517,27 +523,30 @@ class WixConnector(CommerceConnector):
         self, request: CollectionRequest, lineage: str, resume_after: JsonValue
     ) -> ConnectorCheckpoint:
         options = cast(dict[str, JsonValue], self.options.model_dump(mode="json"))
-        return ConnectorCheckpoint(
-            connector=self.name,
-            connector_version=self.version,
-            source_id=request.source_id,
-            lineage=lineage,
-            collection_fingerprint=collection_fingerprint(request, self.name, options),
-            resume_after=resume_after,
-        )
-
-    def _validate_request(self, request: CollectionRequest, checkpoint: ConnectorCheckpoint | None) -> None:
-        if not self.capabilities.supports(request.requested_fields, request.refresh_mode):
-            raise ValueError("Wix connector does not support the requested collection")
-        if request.partitions:
-            raise ValueError("Wix connector does not support server-side filters")
-        options = cast(dict[str, JsonValue], self.options.model_dump(mode="json"))
-        validate_checkpoint(
-            checkpoint,
+        return build_checkpoint(
             connector=self.name,
             connector_version=self.version,
             request=request,
+            lineage=lineage,
+            resume_after=resume_after,
             options=options,
+        )
+
+    def _validate_request(self, request: CollectionRequest, checkpoint: ConnectorCheckpoint | None) -> None:
+        options = cast(dict[str, JsonValue], self.options.model_dump(mode="json"))
+        validate_connector_request(
+            capabilities=self.capabilities,
+            unsupported_message="Wix connector does not support the requested collection",
+            connector=self.name,
+            connector_version=self.version,
+            request=request,
+            checkpoint=checkpoint,
+            options=options,
+            pre_checkpoint_error=(
+                "Wix connector does not support server-side filters"
+                if request.partitions
+                else None
+            ),
         )
 
     @staticmethod
@@ -597,15 +606,11 @@ class WixConnector(CommerceConnector):
         )
 
 
-class WixFactory:
+class WixFactory(SimpleConnectorFactory[WixOptions, WixConnector]):
     name = "wix"
     version = WixConnector.version
-    options_model: type[BaseModel] = WixOptions
-
-    def build(
-        self, *, transport: CommerceTransport, options: BaseModel, context: ConnectorContext
-    ) -> WixConnector:
-        return WixConnector(transport, WixOptions.model_validate(options), context)
+    options_model = WixOptions
+    connector_type = WixConnector
 
 
 def _warmup_product(document: str, url: str) -> dict[str, Any] | None:

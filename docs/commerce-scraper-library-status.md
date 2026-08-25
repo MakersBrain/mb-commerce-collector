@@ -136,17 +136,18 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `0998578` — bypass the retained commerce-model compatibility shim internally.
 - `aabf825` — move structured parsing helpers below the connector layer.
 - `63c745b` — finalize the pre-1.0 public surface and typed telemetry contract.
+- `6ac428f` — consolidate connector parsing helpers.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 75 source and test files.
-  - 307 library tests passed. Version-0 checkpoint compatibility and its
+  - 310 library tests passed. Version-0 checkpoint compatibility and its
     library test suite were removed before the first release.
   - Wheel and source distribution built.
   - 4 dependency-boundary tests passed.
-  - The installed-wheel matrix verified all 222 reviewed public exports across
+  - The installed-wheel matrix verified all 224 reviewed public exports across
     nine modules, metadata/source version parity, typed package data, and
     isolated base, HTTP, and development extras; the base install remained
     free of the optional HTTPX dependency.
@@ -257,6 +258,12 @@ architecture rules in the plan and are not separate scope-expansion goals.
     and release verification. Catalogue Ruff, mypy over 239 files, and the
     fast suite (936 passed, 2 skipped, 187 deselected, 284 subtests) passed.
     Installed two-wheel catalogue composition passed.
+  - Connector plumbing now uses one public checkpoint builder, one shared
+    request-contract validator, and one generic stateless factory. The registry
+    performs the sole options validation and still checks factory/connector
+    version drift. The complete scraper gate passed with 310 tests and 224
+    reviewed exports; the unchanged catalogue fast suite, type/lint gates, and
+    installed two-wheel composition also passed.
   - The provider-neutral durable Webshare composition and existing Decodo and
     Webshare adapter suites passed 29 focused tests.
   - The strict Webshare gateway-secret contract passed 47 focused tests.
@@ -1261,7 +1268,7 @@ legacy defaults until promotion evidence exists.
     tests, structured tracing and credential boundaries, provider authorization,
     replay/shadow/canary evidence, promotion, and configuration-only rollback.
 - [x] Document supported public imports and semantic-versioning policy.
-  - A reviewed manifest fixes 222 exports across nine supported modules. The
+  - A reviewed manifest fixes 224 exports across nine supported modules. The
     policy separates package SemVer from independently versioned serialized
     contracts and records pre-1.0, deprecation, and Python-support rules.
 - [x] Add changelog and release automation.

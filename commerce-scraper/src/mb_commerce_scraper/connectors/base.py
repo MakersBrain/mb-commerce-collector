@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
-from pydantic import model_validator
+from pydantic import JsonValue, model_validator
 
 from mb_commerce_scraper.models import (
     CollectionRequest,
@@ -16,6 +16,7 @@ from mb_commerce_scraper.models import (
     RefreshMode,
     SnapshotField,
     StockQuantityKind,
+    validate_checkpoint,
 )
 from mb_commerce_scraper.transports import NullTelemetry
 from mb_commerce_scraper.transports.base import RequestBudget, TelemetryHooks
@@ -94,3 +95,30 @@ class CommerceConnector(Protocol):
     def collect(
         self, request: CollectionRequest, checkpoint: ConnectorCheckpoint | None = None
     ) -> AsyncIterator[EntityPage[CommerceProductSnapshot]]: ...
+
+
+def validate_connector_request(
+    *,
+    capabilities: ConnectorCapabilities,
+    unsupported_message: str,
+    connector: str,
+    connector_version: str,
+    request: CollectionRequest,
+    checkpoint: ConnectorCheckpoint | None,
+    options: dict[str, JsonValue],
+    pre_checkpoint_error: str | None = None,
+    capabilities_checked: bool = False,
+) -> None:
+    if not capabilities_checked and not capabilities.supports(
+        request.requested_fields, request.refresh_mode
+    ):
+        raise ValueError(unsupported_message)
+    if pre_checkpoint_error is not None:
+        raise ValueError(pre_checkpoint_error)
+    validate_checkpoint(
+        checkpoint,
+        connector=connector,
+        connector_version=connector_version,
+        request=request,
+        options=options,
+    )

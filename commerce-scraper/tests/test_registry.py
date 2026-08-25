@@ -9,6 +9,7 @@ from mb_commerce_scraper.connectors import (
     ConnectorRegistry,
     PluginLoadError,
     ShopifyFactory,
+    ShopifyOptions,
 )
 from mb_commerce_scraper.connectors import registry as registry_module
 from mb_commerce_scraper.testing import FakeTransport
@@ -62,6 +63,42 @@ def test_builtin_factory_metadata_matches_built_connector_versions() -> None:
             context=ConnectorContext(),
         )
         assert registry.connector_version(name) == connector.version
+
+
+def test_registry_validates_options_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = ShopifyOptions.model_validate
+    calls = 0
+
+    def model_validate(value: object) -> ShopifyOptions:
+        nonlocal calls
+        calls += 1
+        return original(value)
+
+    monkeypatch.setattr(ShopifyOptions, "model_validate", model_validate)
+
+    connector = ConnectorRegistry.with_builtins().build(
+        "shopify",
+        transport=FakeTransport(),
+        options={},
+        context=ConnectorContext(),
+    )
+
+    assert connector.name == "shopify"
+    assert calls == 1
+
+
+def test_simple_factory_requires_registry_validated_options() -> None:
+    class WrongOptions(BaseModel):
+        pass
+
+    with pytest.raises(TypeError, match="requires validated ShopifyOptions"):
+        ShopifyFactory().build(
+            transport=FakeTransport(),
+            options=WrongOptions(),
+            context=ConnectorContext(),
+        )
 
 
 def test_factory_version_is_required_and_checked_against_built_connector() -> None:

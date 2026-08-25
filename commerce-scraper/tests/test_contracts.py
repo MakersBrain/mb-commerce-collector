@@ -17,6 +17,7 @@ from mb_commerce_scraper import (
     RefreshMode,
     ShopifyConnector,
     SnapshotField,
+    build_checkpoint,
     collection_fingerprint,
 )
 from mb_commerce_scraper.testing import assert_connector_pages
@@ -48,6 +49,23 @@ def test_checkpoint_is_versioned_and_cursor_required() -> None:
     assert checkpoint.checkpoint_schema_version == 1
     with pytest.raises(ValidationError):
         ConnectorCheckpoint(connector="shopify", connector_version="1", source_id="shop", lineage="run-1", collection_fingerprint=fingerprint, resume_after=None)
+
+
+def test_checkpoint_builder_uses_the_canonical_collection_identity() -> None:
+    checkpoint = build_checkpoint(
+        connector="shopify",
+        connector_version="1",
+        request=request(),
+        lineage="run-1",
+        resume_after={"page": 2},
+        options={"currency": "EUR"},
+    )
+
+    assert checkpoint.source_id == "shop"
+    assert checkpoint.resume_after == {"page": 2}
+    assert checkpoint.collection_fingerprint == collection_fingerprint(
+        request(), "shopify", {"currency": "EUR"}
+    )
 
 
 def test_checkpoint_rejects_credentials_without_retaining_the_value() -> None:

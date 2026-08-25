@@ -34,9 +34,8 @@ from mb_commerce_scraper.models import (
     SnapshotField,
     StockQuantityKind,
     StockState,
-    collection_fingerprint,
+    build_checkpoint,
     result_limit_diagnostic,
-    validate_checkpoint,
 )
 from mb_commerce_scraper.parsing._structured import (
     breadcrumbs,
@@ -71,7 +70,9 @@ from .base import (
     CommerceConnector,
     ConnectorCapabilities,
     ConnectorContext,
+    validate_connector_request,
 )
+from .factory import SimpleConnectorFactory
 
 
 class PrestaShopOptions(BaseModel):
@@ -789,14 +790,14 @@ class PrestaShopConnector(CommerceConnector):
     def _validate_request(
         self, request: CollectionRequest, checkpoint: ConnectorCheckpoint | None
     ) -> None:
-        if not self.capabilities.supports(request.requested_fields, request.refresh_mode):
-            raise ValueError("PrestaShop connector does not support the requested contract")
         options = cast(dict[str, JsonValue], self.options.model_dump(mode="json"))
-        validate_checkpoint(
-            checkpoint,
+        validate_connector_request(
+            capabilities=self.capabilities,
+            unsupported_message="PrestaShop connector does not support the requested contract",
             connector=self.name,
             connector_version=self.version,
             request=request,
+            checkpoint=checkpoint,
             options=options,
         )
 
@@ -804,13 +805,13 @@ class PrestaShopConnector(CommerceConnector):
         self, request: CollectionRequest, lineage: str, resume_after: JsonValue
     ) -> ConnectorCheckpoint:
         options = cast(dict[str, JsonValue], self.options.model_dump(mode="json"))
-        return ConnectorCheckpoint(
+        return build_checkpoint(
             connector=self.name,
             connector_version=self.version,
-            source_id=request.source_id,
+            request=request,
             lineage=lineage,
-            collection_fingerprint=collection_fingerprint(request, self.name, options),
             resume_after=resume_after,
+            options=options,
         )
 
     @staticmethod
@@ -1090,20 +1091,8 @@ def _redact_json(value: Any) -> JsonValue:
     return str(value)
 
 
-class PrestaShopFactory:
+class PrestaShopFactory(SimpleConnectorFactory[PrestaShopOptions, PrestaShopConnector]):
     name = "prestashop"
     version = PrestaShopConnector.version
-    options_model: type[BaseModel] = PrestaShopOptions
-
-    def build(
-        self,
-        *,
-        transport: CommerceTransport,
-        options: BaseModel,
-        context: ConnectorContext,
-    ) -> PrestaShopConnector:
-        return PrestaShopConnector(
-            transport,
-            PrestaShopOptions.model_validate(options),
-            context,
-        )
+    options_model = PrestaShopOptions
+    connector_type = PrestaShopConnector

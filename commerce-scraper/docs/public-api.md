@@ -39,6 +39,11 @@ public helpers such as `prestashop_partition_keys` when it must construct a
 partitioned collection request without depending on connector implementation
 modules.
 
+`build_checkpoint` is the supported constructor for connector-authored
+schema-v1 checkpoints. It binds source, connector version, options, and
+collection intent through the same canonical fingerprint used by
+`validate_checkpoint`, avoiding connector-specific checkpoint assembly.
+
 Telemetry sinks may additionally implement `RequestObserver` to receive typed,
 secret-free `RequestObservation` values for physical-attempt accounting,
 metrics, and spans. The general string event channel remains available for

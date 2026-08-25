@@ -199,7 +199,7 @@ Independent of Tracks A, C and D. Safe to parallelize across B1-B5.
   239 files passed; `pytest -q` -> 936 passed, 2 skipped, 187 deselected, and
   284 subtests; installed two-wheel catalogue composition passed.
 
-- [ ] **B2 Collapse the connector plumbing.**
+- [x] **B2 Collapse the connector plumbing.**
   `checkpoint()` is copy-pasted verbatim into seven connectors; four
   `_validate_request` methods share one capability-check + `validate_checkpoint`
   shape; nine `*Factory` classes have the same four-line body that
@@ -215,6 +215,20 @@ Independent of Tracks A, C and D. Safe to parallelize across B1-B5.
   it is tautological for the ten built-ins but earns its keep for third-party
   plugins.
   *Removes:* ~70 lines of ceremony, one redundant validate per connector build.
+  **Completed.** All seven connector checkpoint methods delegate to the public
+  `build_checkpoint` contract beside `collection_fingerprint`. Six built-in
+  request paths share capability and checkpoint validation while preserving
+  connector-specific validation order and cancellation behavior. Nine stateless
+  factories now inherit `SimpleConnectorFactory`; the strategy-bearing Generic
+  Pages factory keeps its custom construction and shares the same strict
+  already-validated-options boundary. A regression test proves the registry is
+  the sole `model_validate` call, and the factory rejects an unvalidated model
+  instead of silently coercing it.
+  *Verified:* `make scraper-check` -> 310 tests, Ruff, mypy over 75 files,
+  schemas, build, 4 boundary tests, installed-wheel/public-API,
+  external-consumer, and release gates passed. Catalogue Ruff and mypy over
+  239 files passed; `pytest -q` -> 936 passed, 2 skipped, 187 deselected, and
+  284 subtests; installed two-wheel catalogue composition passed.
 
 - [ ] **B3 Fold the middleware telemetry copies.**
   `MiddlewareTransport.request` is one 341-line method. Its

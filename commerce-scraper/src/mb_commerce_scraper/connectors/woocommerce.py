@@ -33,9 +33,8 @@ from mb_commerce_scraper.models import (
     SnapshotField,
     StockQuantityKind,
     StockState,
-    collection_fingerprint,
+    build_checkpoint,
     result_limit_diagnostic,
-    validate_checkpoint,
 )
 from mb_commerce_scraper.parsing._structured import origin_of
 from mb_commerce_scraper.transports import (
@@ -45,7 +44,14 @@ from mb_commerce_scraper.transports import (
     TransportRequest,
 )
 
-from .base import BrowserRequirement, CommerceConnector, ConnectorCapabilities, ConnectorContext
+from .base import (
+    BrowserRequirement,
+    CommerceConnector,
+    ConnectorCapabilities,
+    ConnectorContext,
+    validate_connector_request,
+)
+from .factory import SimpleConnectorFactory
 from .planning import BudgetExhausted, ConnectorBudget, budget_diagnostic
 
 PAGE_SIZE = 100
@@ -776,16 +782,20 @@ class WooCommerceConnector(CommerceConnector):
     def _validate_request(
         self, request: CollectionRequest, checkpoint: ConnectorCheckpoint | None,
     ) -> None:
-        if not self.capabilities.supports(request.requested_fields, request.refresh_mode):
-            raise ValueError("WooCommerce connector does not support the requested contract")
-        if self.options.identity_only and SnapshotField.OFFERS in request.requested_fields:
-            raise ValueError("identity-only WooCommerce source cannot supply offers")
-        validate_checkpoint(
-            checkpoint,
+        validate_connector_request(
+            capabilities=self.capabilities,
+            unsupported_message="WooCommerce connector does not support the requested contract",
             connector=self.name,
             connector_version=self.version,
             request=request,
+            checkpoint=checkpoint,
             options=cast(dict[str, JsonValue], self.options.model_dump(mode="json")),
+            pre_checkpoint_error=(
+                "identity-only WooCommerce source cannot supply offers"
+                if self.options.identity_only
+                and SnapshotField.OFFERS in request.requested_fields
+                else None
+            ),
         )
 
     @staticmethod
@@ -877,28 +887,20 @@ class WooCommerceConnector(CommerceConnector):
         self, request: CollectionRequest, lineage: str, resume_after: JsonValue
     ) -> ConnectorCheckpoint:
         options = cast(dict[str, JsonValue], self.options.model_dump(mode="json"))
-        return ConnectorCheckpoint(
+        return build_checkpoint(
             connector=self.name,
             connector_version=self.version,
-            source_id=request.source_id,
+            request=request,
             lineage=lineage,
-            collection_fingerprint=collection_fingerprint(request, self.name, options),
             resume_after=resume_after,
+            options=options,
         )
 
 
-class WooCommerceFactory:
+class WooCommerceFactory(
+    SimpleConnectorFactory[WooCommerceOptions, WooCommerceConnector]
+):
     name = "woocommerce"
     version = WooCommerceConnector.version
-    options_model: type[BaseModel] = WooCommerceOptions
-
-    def build(
-        self,
-        *,
-        transport: CommerceTransport,
-        options: BaseModel,
-        context: ConnectorContext,
-    ) -> WooCommerceConnector:
-        return WooCommerceConnector(
-            transport, WooCommerceOptions.model_validate(options), context
-        )
+    options_model = WooCommerceOptions
+    connector_type = WooCommerceConnector

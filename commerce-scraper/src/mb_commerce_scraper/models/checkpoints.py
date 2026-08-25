@@ -62,6 +62,26 @@ def collection_fingerprint(
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def build_checkpoint(
+    *,
+    connector: str,
+    connector_version: str,
+    request: CollectionRequest,
+    lineage: str,
+    resume_after: JsonValue,
+    options: dict[str, JsonValue],
+) -> ConnectorCheckpoint:
+    """Build a schema-v1 checkpoint with the canonical collection identity."""
+    return ConnectorCheckpoint(
+        connector=connector,
+        connector_version=connector_version,
+        source_id=request.source_id,
+        lineage=lineage,
+        collection_fingerprint=collection_fingerprint(request, connector, options),
+        resume_after=resume_after,
+    )
+
+
 def validate_checkpoint(
     checkpoint: ConnectorCheckpoint | None,
     *,

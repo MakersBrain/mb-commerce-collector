@@ -38,10 +38,9 @@ from mb_commerce_scraper.models import (
     SnapshotField,
     StockQuantityKind,
     StockState,
-    collection_fingerprint,
+    build_checkpoint,
     result_limit_diagnostic,
     sanitize_commerce_snapshot,
-    validate_checkpoint,
 )
 from mb_commerce_scraper.parsing import JsonLdProductParser
 from mb_commerce_scraper.parsing._structured import (
@@ -67,7 +66,14 @@ from mb_commerce_scraper.transports import (
     TransportRequest,
 )
 
-from .base import BrowserRequirement, CommerceConnector, ConnectorCapabilities, ConnectorContext
+from .base import (
+    BrowserRequirement,
+    CommerceConnector,
+    ConnectorCapabilities,
+    ConnectorContext,
+    validate_connector_request,
+)
+from .factory import SimpleConnectorFactory
 
 
 class SpecializedPageOptions(BaseModel):
@@ -165,12 +171,17 @@ class SpecializedPageConnector(CommerceConnector):
         if self.context.cancelled():
             return
         options = self._checkpoint_options()
-        validate_checkpoint(
-            checkpoint,
+        validate_connector_request(
+            capabilities=self.capabilities,
+            unsupported_message=(
+                f"{self.name} does not support the requested collection contract"
+            ),
             connector=self.name,
             connector_version=self.version,
             request=request,
+            checkpoint=checkpoint,
             options=options,
+            capabilities_checked=True,
         )
         try:
             discovered_urls = tuple(
@@ -463,15 +474,13 @@ class SpecializedPageConnector(CommerceConnector):
     def checkpoint(
         self, request: CollectionRequest, lineage: str, resume_after: JsonValue
     ) -> ConnectorCheckpoint:
-        return ConnectorCheckpoint(
+        return build_checkpoint(
             connector=self.name,
             connector_version=self.version,
-            source_id=request.source_id,
+            request=request,
             lineage=lineage,
-            collection_fingerprint=collection_fingerprint(
-                request, self.name, self._checkpoint_options()
-            ),
             resume_after=resume_after,
+            options=self._checkpoint_options(),
         )
 
     def _retag(
@@ -1151,51 +1160,31 @@ class SumUpConnector(SpecializedPageConnector):
         return detailed[0] if len(detailed) == 1 else None
 
 
-class _SpecializedFactory:
-    name: str
-    version: str
-    options_model: type[BaseModel]
-    connector_type: type[SpecializedPageConnector]
-
-    def build(
-        self,
-        *,
-        transport: CommerceTransport,
-        options: BaseModel,
-        context: ConnectorContext,
-    ) -> CommerceConnector:
-        return self.connector_type(
-            transport,
-            cast(SpecializedPageOptions, self.options_model.model_validate(options)),
-            context,
-        )
-
-
-class ShopwareFactory(_SpecializedFactory):
+class ShopwareFactory(SimpleConnectorFactory[ShopwareOptions, ShopwareConnector]):
     name = "shopware"
     version = ShopwareConnector.version
-    options_model: type[BaseModel] = ShopwareOptions
+    options_model = ShopwareOptions
     connector_type = ShopwareConnector
 
 
-class StarwebFactory(_SpecializedFactory):
+class StarwebFactory(SimpleConnectorFactory[StarwebOptions, StarwebConnector]):
     name = "starweb"
     version = StarwebConnector.version
-    options_model: type[BaseModel] = StarwebOptions
+    options_model = StarwebOptions
     connector_type = StarwebConnector
 
 
-class NitroSellFactory(_SpecializedFactory):
+class NitroSellFactory(SimpleConnectorFactory[NitroSellOptions, NitroSellConnector]):
     name = "nitrosell"
     version = NitroSellConnector.version
-    options_model: type[BaseModel] = NitroSellOptions
+    options_model = NitroSellOptions
     connector_type = NitroSellConnector
 
 
-class SumUpFactory(_SpecializedFactory):
+class SumUpFactory(SimpleConnectorFactory[SumUpOptions, SumUpConnector]):
     name = "sumup"
     version = SumUpConnector.version
-    options_model: type[BaseModel] = SumUpOptions
+    options_model = SumUpOptions
     connector_type = SumUpConnector
 
 
