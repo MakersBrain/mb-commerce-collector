@@ -391,6 +391,7 @@ to Cloudflare R2 as an immutable tarball rather than committed.
 
 ```sh
 catalogue-cache-archive push          # tar the local cache, upload, write the manifest
+catalogue-cache-archive push --host shop.example --host other.example
 catalogue-cache-archive pull          # fetch the archive this commit expects
 catalogue-cache-archive verify        # the object is still there and the right size
 ```
@@ -406,6 +407,10 @@ read it, which is all CI is given. Both come from `CATALOGUE_CACHE_BUCKET`,
 `CATALOGUE_CACHE_ENDPOINT` and the standard `AWS_ACCESS_KEY_ID` /
 `AWS_SECRET_ACCESS_KEY`, and never from the command line. Install the extra
 that carries the S3 client with `uv sync --extra archive`.
+
+Repeat `--host` on `push` to publish a reviewed replay subset instead of every
+locally recorded storefront. The manifest records only those hosts, and each
+selected host must exist; omit the option to retain the full-cache behavior.
 
 Pull replaces the local cache rather than merging into it. A cache holding some
 hosts and not others is worse than none at all: `cached_sources()` selects any

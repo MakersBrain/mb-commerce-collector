@@ -218,6 +218,11 @@ architecture rules in the plan and are not separate scope-expansion goals.
     failures, 10 passes, and 67 sources without reviewed goldens; those 67
     provisional outputs were not added. Publishing a versioned archive and
     manifest remains an operational CI task.
+  - Cache publication now accepts repeated `push --host` selectors. A local
+    deterministic build of the four reviewed hosts contains 123 files and
+    5,529,600 bytes with SHA-256
+    `8fecb0edb599c5ed23f98a03639118ffeb0875472d11c82bec9d112a4acf2cb0`;
+    it has not been uploaded or written into the checked-in manifest.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
   throwaway PostgreSQL 17 instance, covering concurrent authorization,
   capacity exclusion, and exactly-once reconciliation.
