@@ -209,20 +209,20 @@ architecture rules in the plan and are not separate scope-expansion goals.
   - The library gate passed Ruff, mypy over 77 source files, 360 tests, and the
     frozen-schema check.
   - The catalogue gate passed Ruff, mypy over 240 source files, and 945 tests
-    with 2 expected skips, 277 deselections, and 284 subtests.
+    with 2 expected skips, 278 deselections, and 284 subtests.
   - `pytest -q -m golden tests/test_recorded_library_parity.py -rs` replayed
     independent legacy/library paths from 51,579 recovered production-response
-    entries: all 9 preflight, Shopify, Shopware, BigCommerce, PrestaShop, and
-    Sio2 cases passed.
+    entries: all 10 preflight, Shopify, Shopware, BigCommerce, PrestaShop,
+    Sio2, and WooCommerce cases passed.
   - The recovered volume is newer and broader than the checked-in golden set.
     An archive-wide characterization produced 14 unrelated stale-baseline
     failures, 10 passes, and 67 sources without reviewed goldens; those 67
     provisional outputs were not added. Publishing a versioned archive and
     manifest remains an operational CI task.
   - Cache publication now accepts repeated `push --host` selectors. A local
-    deterministic build of the eight reviewed hosts contains 3,245 files and
-    174,213,120 bytes with SHA-256
-    `5ad3fbd034febf867b5fe55f952ab9901874a281c80ee8a68bb849aabd91cd78`;
+    deterministic build of the nine reviewed hosts contains 3,266 files and
+    174,776,320 bytes with SHA-256
+    `896ea2a5c0cd8b35408433447e03c06a772275b63884d7ad8f6837de56e6d106`;
     it has not been uploaded or written into the checked-in manifest.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
   throwaway PostgreSQL 17 instance, covering concurrent authorization,
@@ -707,6 +707,9 @@ remains a Phase 7 cutover gate rather than a Phase 1 contract-extraction gap.
   - `1240-design` stable/library PrestaShop replay matches all 1,279 normalized
     rows by stable identity, 1,421 discoveries, 1,975 direct requests, zero
     renders, and exact completion/error semantics.
+  - Mayco stable/library WooCommerce replay matches all 1,266 identity rows,
+    882 discoveries, 21 direct requests, zero renders, and exact
+    completion/error semantics.
   - CI sets `CATALOGUE_GOLDEN_ARCHIVE_REQUIRED=1` only after the configured
     archive pull succeeds. In that mode, missing manifests, source hosts,
     recordings, or frozen outputs fail before the parity cases can silently
@@ -1167,7 +1170,7 @@ they do not reopen the Phase 5 library deliverables.
 
 | Connector | Library implementation | Factory | Synthetic tests/parity | Replay | Canary | Stable source switch |
 |---|---:|---:|---:|---:|---:|---:|
-| WooCommerce | Yes | Yes | Yes | No | No | No |
+| WooCommerce | Yes | Yes | Yes | Yes | No | No |
 | PrestaShop/Sio2 | Yes | Yes | Yes | Yes | No | No |
 | BigCommerce | Yes | Yes | Yes | Yes | No | No |
 | Wix | Yes | Yes | Yes | No | No | No |
@@ -1242,6 +1245,10 @@ Cross-cutting work:
     discoveries, and 1,975 requests. Compatibility fixes retain the legacy
     radio-option boundary, per-variant images, maker-code inputs, and consent
     table exclusion while preserving bounded raw extensions.
+  - The Mayco identity-only WooCommerce recording passes with all 1,266 rows,
+    882 discoveries, and 21 requests. Category slugs, simple-product identity,
+    empty safety claims, currency, maker codes, and product-level images retain
+    exact legacy semantics.
 - [~] Review request counts and byte estimates.
   - Focused traffic profiles now pin exact logical request order, purpose,
     browser hint, and byte estimate for WooCommerce, PrestaShop/Sio2,
@@ -1562,11 +1569,15 @@ After each implementation batch:
   projection while requiring exact equality for identifiers, all semantic
   catalogue fields, discovery, request counts, and terminal behavior.
 
-- Sio2 preserves explicit category partitions in the library connector, so
+- PrestaShop/Sio2 preserves explicit category partitions in the library connector, so
   replay row order differs from the legacy crawler's flattened category list.
   The migration gate compares every complete normalized row by stable
   `external_id`, while retaining exact counts, coverage, request totals,
   terminal behavior, and the reviewed legacy golden anchor.
+
+- WooCommerce raw product and variation payloads retain their public extension
+  bounds. Recorded parity compares the exact wrapped-and-sanitized projection
+  while requiring full normalized-row equality by stable identity.
 
 - B1 resolves the previously documented parsing drift in favor of the shared
   helper behavior: specification names may contain up to 99 characters, the

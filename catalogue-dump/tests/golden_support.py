@@ -46,6 +46,7 @@ REQUIRED_RECORDED_SOURCES = {
     "ceramique-peinture": "shopify",
     "penguin-pottery": "shopify",
     "keramikbedarf-online": "shopware",
+    "mayco": "woocommerce",
     "sio-2": "sio2",
     "speedball": "bigcommerce",
 }

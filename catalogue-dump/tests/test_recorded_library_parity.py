@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -75,6 +76,37 @@ def _bounded_prestashop_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     return {**payload, "records": records}
 
 
+def _bounded_woocommerce_legacy(payload: dict[str, Any]) -> dict[str, Any]:
+    """Project Woo raw values through their neutral extension wrappers."""
+    records: list[dict[str, Any]] = []
+    for original in payload["records"]:
+        raw = original["raw"]
+        if "product" in raw and "variation" in raw:
+            product: Any = {"legacy_raw_product": raw["product"]}
+            variation: Any = {"legacy_raw_variant": raw["variation"]}
+            product = sanitize_json_value(sanitize_json_value(product))
+            variation = sanitize_json_value(sanitize_json_value(variation))
+            assert isinstance(product, dict)
+            assert isinstance(variation, dict)
+            bounded_raw = {
+                "product": product["legacy_raw_product"],
+                "variation": variation["legacy_raw_variant"],
+            }
+        else:
+            slugs = [
+                str(category["slug"])
+                for category in raw.get("categories") or []
+                if isinstance(category, dict) and category.get("slug")
+            ]
+            extension: Any = {"category_slugs": slugs, "raw": raw}
+            extension = sanitize_json_value(sanitize_json_value(extension))
+            assert isinstance(extension, dict)
+            bounded_raw = extension["raw"]
+        assert isinstance(bounded_raw, dict)
+        records.append({**original, "raw": bounded_raw})
+    return {**payload, "records": records}
+
+
 def _recorded_shopify_sources() -> list[str]:
     configured = support.sources()
     return [
@@ -119,6 +151,7 @@ RECORDED_BIGCOMMERCE = [
 ]
 RECORDED_SIO2 = _recorded_source_case("sio-2")
 RECORDED_PRESTASHOP = _recorded_source_case("1240-design")
+RECORDED_WOOCOMMERCE = _recorded_source_case("mayco")
 
 
 @pytest.mark.golden
@@ -260,8 +293,10 @@ def test_recorded_bigcommerce_responses_have_legacy_library_projection_parity(
     assert not library["summary"].get("interrupted", False)
 
 
-def _assert_recorded_prestashop_projection_parity(
-    source: str, library_scraper: str
+def _assert_recorded_keyed_projection_parity(
+    source: str,
+    library_scraper: str,
+    bounder: Callable[[dict[str, Any]], dict[str, Any]],
 ) -> None:
     legacy = asyncio.run(support.collect(source))
     library = asyncio.run(
@@ -269,7 +304,7 @@ def _assert_recorded_prestashop_projection_parity(
     )
 
     legacy_frozen = support.freeze(source, legacy)
-    bounded_legacy = _bounded_prestashop_legacy(legacy)
+    bounded_legacy = bounder(legacy)
     library_frozen = support.freeze(source, library)
     expected = json.loads(support.golden_path(source).read_text(encoding="utf-8"))
 
@@ -298,9 +333,9 @@ def _assert_recorded_prestashop_projection_parity(
         "errors",
     ):
         assert library_frozen[field] == legacy_frozen[field]
-    # The library retains explicit category partitions while the legacy
-    # crawler flattens them before collection. Row order consequently differs,
-    # but every complete normalized row remains identical by stable identity.
+    # Some library paths retain explicit partitions while their legacy crawler
+    # flattens discovery before collection. Order is not catalogue identity;
+    # every complete normalized row must still be identical by stable key.
     assert {
         row["external_id"]: support.normalise(row)
         for row in library["records"]
@@ -317,8 +352,8 @@ def _assert_recorded_prestashop_projection_parity(
 def test_recorded_sio2_responses_have_legacy_library_projection_parity(
     source: str,
 ) -> None:
-    _assert_recorded_prestashop_projection_parity(
-        source, "library_sio2_connector"
+    _assert_recorded_keyed_projection_parity(
+        source, "library_sio2_connector", _bounded_prestashop_legacy
     )
 
 
@@ -327,6 +362,16 @@ def test_recorded_sio2_responses_have_legacy_library_projection_parity(
 def test_recorded_prestashop_responses_have_legacy_library_projection_parity(
     source: str,
 ) -> None:
-    _assert_recorded_prestashop_projection_parity(
-        source, "library_prestashop_connector"
+    _assert_recorded_keyed_projection_parity(
+        source, "library_prestashop_connector", _bounded_prestashop_legacy
+    )
+
+
+@pytest.mark.golden
+@pytest.mark.parametrize("source", RECORDED_WOOCOMMERCE)
+def test_recorded_woocommerce_responses_have_legacy_library_projection_parity(
+    source: str,
+) -> None:
+    _assert_recorded_keyed_projection_parity(
+        source, "library_woocommerce_connector", _bounded_woocommerce_legacy
     )

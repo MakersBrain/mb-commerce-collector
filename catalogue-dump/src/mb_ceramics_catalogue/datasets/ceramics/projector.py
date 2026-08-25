@@ -197,6 +197,7 @@ class _CeramicsProjector:
                     "legacy_raw_variant",
                     "legacy_source_updated_at",
                     "legacy_all_image_urls",
+                    "legacy_currency",
                 }
             }
         )
@@ -211,6 +212,8 @@ class _CeramicsProjector:
         if entity.connector == "prestashop" and isinstance(legacy_variant_images, list):
             images = [str(value) for value in legacy_variant_images if value]
         variant_image = variant.image.url if variant is not None and variant.image is not None else None
+        if entity.connector == "woocommerce":
+            variant_image = None
         documents = domain.documents(
             ((item.url, item.title or item.url) for item in entity.documents), entity.canonical_url
         )
@@ -232,17 +235,26 @@ class _CeramicsProjector:
             raw = {"product": raw_product, "variant": raw_variant}
         manufacturer_sku = _string(attributes.get("manufacturer_sku"))
         if manufacturer_sku is None and variant is not None:
-            manufacturer_name = (
-                entity.title
-                if entity.connector == "prestashop"
-                else variant_title or ""
-            )
-            manufacturer_sku = domain.manufacturer_code(
-                entity.vendor or options.brand,
-                manufacturer_name,
-                variant.sku or "",
-                None if entity.connector == "prestashop" else entity.title,
-            )
+            if entity.connector == "woocommerce":
+                manufacturer_sku = domain.manufacturer_code(
+                    entity.vendor or options.brand,
+                    entity.title,
+                    variant_title or "",
+                    _string(entity.published_attributes.get("supplier_reference")),
+                    variant.sku or "",
+                )
+            else:
+                manufacturer_name = (
+                    entity.title
+                    if entity.connector == "prestashop"
+                    else variant_title or ""
+                )
+                manufacturer_sku = domain.manufacturer_code(
+                    entity.vendor or options.brand,
+                    manufacturer_name,
+                    variant.sku or "",
+                    None if entity.connector == "prestashop" else entity.title,
+                )
 
         # The legacy BigCommerce scraper substitutes its configured source
         # brand before calling record.build(), so that fallback is classified
@@ -272,7 +284,11 @@ class _CeramicsProjector:
             image_url=variant_image or (images[0] if images else None),
             all_image_urls=images,
             price=float(offer.price.amount) if offer is not None else None,
-            currency=offer.price.currency if offer is not None else None,
+            currency=(
+                offer.price.currency
+                if offer is not None
+                else _string(attributes.get("legacy_currency"))
+            ),
             price_text=_string(attributes.get("price_text")),
             list_price=float(list_price) if list_price is not None else None,
             vat=(offer.vat_status if offer is not None and offer.vat_status != "unknown" else None),
@@ -351,7 +367,8 @@ class _CeramicsProjector:
         if variant is not None and variant.is_default and variant_raw is None:
             return product
         if product is not None or variant_raw is not None:
-            return {"product": product, "variant": variant_raw}
+            variant_key = "variation" if entity.connector == "woocommerce" else "variant"
+            return {"product": product, variant_key: variant_raw}
         return None
 
 

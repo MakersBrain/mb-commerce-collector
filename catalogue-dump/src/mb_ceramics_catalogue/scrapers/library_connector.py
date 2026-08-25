@@ -261,8 +261,13 @@ class LibraryConnectorScraper(Scraper):
         extensions = snapshot.platform_extensions
         tags = extensions.get("tags") or []
         tags = tags if isinstance(tags, list) else [tags]
+        category_slugs = extensions.get("category_slugs") or []
+        category_slugs = (
+            category_slugs if isinstance(category_slugs, list) else [category_slugs]
+        )
         return self.category_allows(
             *(category.name for category in snapshot.categories),
             *(str(tag) for tag in tags),
+            *(str(slug) for slug in category_slugs),
             extensions.get("handle") or "",
         )

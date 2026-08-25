@@ -50,6 +50,9 @@ based on Keep a Changelog, and releases follow the compatibility policy in
   excluded consent/tracking tables from published technical specifications.
 - Preserved the established PrestaShop radio-option boundary and exposed
   per-variant image lists for compatibility projection.
+- Preserved WooCommerce source category slugs, default-variant identity,
+  identity-catalogue currency, empty safety attributes, and product references
+  needed by compatibility projection.
 - Consolidated runtime and routed-transport proxy configuration on
   `ProxyPolicyConfig`; the unreleased parallel routing model and legacy request
   and byte-cap parameters were removed.
