@@ -99,40 +99,22 @@ class MiddlewareTransport(CommerceTransport):
         if self._cache is not None and request.cache.value == "default":
             cached = await self._cache.get(request)
             if cached is not None:
-                try:
-                    cached = enforce_response_body_limit(cached, self._maximum_response_bytes)
-                except ResponseBodyTooLarge as error:
-                    self._emit(
-                        "cache.rejected",
-                        {
-                            **common,
-                            "level": "warning",
-                            "reason": "response_body_too_large",
-                            "received_bytes": error.received_bytes,
-                            "maximum_bytes": error.maximum_bytes,
-                        },
-                    )
-                    raise
+                cached = self._enforce_cached_body(
+                    cached,
+                    common=common,
+                    reason="response_body_too_large",
+                )
                 self._emit("cache.hit", {**common, "level": "debug", "route": "cache"})
                 return cached.model_copy(update={"from_cache": True})
             self._emit("cache.miss", {**common, "level": "debug"})
             if isinstance(self._cache, StaleResponseCache):
                 stale = await self._cache.stale(cache_request)
                 if stale is not None:
-                    try:
-                        stale = enforce_response_body_limit(stale, self._maximum_response_bytes)
-                    except ResponseBodyTooLarge as error:
-                        self._emit(
-                            "cache.rejected",
-                            {
-                                **common,
-                                "level": "warning",
-                                "reason": "stale_response_body_too_large",
-                                "received_bytes": error.received_bytes,
-                                "maximum_bytes": error.maximum_bytes,
-                            },
-                        )
-                        raise
+                    stale = self._enforce_cached_body(
+                        stale,
+                        common=common,
+                        reason="stale_response_body_too_large",
+                    )
                     request = self._conditional_request(request, stale)
         for attempt in range(self._retries + 1):
             attempt_number = attempt + 1
@@ -200,28 +182,19 @@ class MiddlewareTransport(CommerceTransport):
                     transmitted_bytes=estimated_transmitted_bytes(attempt_request),
                     received_bytes=error.received_bytes,
                 )
-                self._emit(
-                    "request.failed",
-                    {
-                        **common,
-                        "level": "warning",
-                        "attempt": attempt_number,
-                        "elapsed_ms": round((monotonic() - started) * 1_000, 3),
-                        "error_type": type(error).__name__,
-                        "retryable": False,
+                self._emit_attempt_failure(
+                    common,
+                    request=attempt_request,
+                    error=error,
+                    accounting=accounting,
+                    attempt=attempt_number,
+                    started=started,
+                    stage="response_body_too_large",
+                    retryable=False,
+                    extra={
                         "received_bytes": error.received_bytes,
-                        "transmitted_bytes": accounting.transmitted_bytes,
-                        "physical_requests": accounting.physical_requests,
                         "maximum_bytes": error.maximum_bytes,
                     },
-                )
-                self._observe_request(
-                    RequestObservationPhase.FAILED,
-                    attempt_request,
-                    attempt=attempt_number,
-                    accounting=accounting,
-                    elapsed_seconds=monotonic() - started,
-                    classification="response_body_too_large",
                 )
                 raise
             except TransportFailure as error:
@@ -231,55 +204,31 @@ class MiddlewareTransport(CommerceTransport):
                 accounting = error.accounting or TransportAccounting(
                     transmitted_bytes=estimated_transmitted_bytes(attempt_request),
                 )
-                self._emit(
-                    "request.failed",
-                    {
-                        **common,
-                        "level": "warning",
-                        "attempt": attempt_number,
-                        "elapsed_ms": round((monotonic() - started) * 1_000, 3),
-                        "error_type": type(error).__name__,
-                        "retryable": True,
-                        "transmitted_bytes": accounting.transmitted_bytes,
-                        "received_bytes": accounting.received_bytes,
-                        "physical_requests": accounting.physical_requests,
-                    },
-                )
-                self._observe_request(
-                    RequestObservationPhase.FAILED,
-                    attempt_request,
-                    attempt=attempt_number,
+                self._emit_attempt_failure(
+                    common,
+                    request=attempt_request,
+                    error=error,
                     accounting=accounting,
-                    elapsed_seconds=monotonic() - started,
-                    classification="transport_failure",
+                    attempt=attempt_number,
+                    started=started,
+                    stage="transport_failure",
+                    retryable=True,
                 )
             except asyncio.CancelledError as error:
                 if dispatched:
                     accounting = getattr(error, "accounting", None) or TransportAccounting(
                         transmitted_bytes=estimated_transmitted_bytes(attempt_request),
                     )
-                    self._emit(
-                        "request.failed",
-                        {
-                            **common,
-                            "level": "warning",
-                            "attempt": attempt_number,
-                            "elapsed_ms": round((monotonic() - started) * 1_000, 3),
-                            "error_type": type(error).__name__,
-                            "cancelled": True,
-                            "retryable": False,
-                            "transmitted_bytes": accounting.transmitted_bytes,
-                            "received_bytes": accounting.received_bytes,
-                            "physical_requests": accounting.physical_requests,
-                        },
-                    )
-                    self._observe_request(
-                        RequestObservationPhase.FAILED,
-                        attempt_request,
-                        attempt=attempt_number,
+                    self._emit_attempt_failure(
+                        common,
+                        request=attempt_request,
+                        error=error,
                         accounting=accounting,
-                        elapsed_seconds=monotonic() - started,
-                        classification="cancelled",
+                        attempt=attempt_number,
+                        started=started,
+                        stage="cancelled",
+                        retryable=False,
+                        cancelled=True,
                     )
                 raise
             except Exception as error:
@@ -287,26 +236,14 @@ class MiddlewareTransport(CommerceTransport):
                     accounting = getattr(error, "accounting", None) or TransportAccounting(
                         transmitted_bytes=estimated_transmitted_bytes(attempt_request),
                     )
-                    self._emit(
-                        "request.failed",
-                        {
-                            **common,
-                            "level": "warning",
-                            "attempt": attempt_number,
-                            "elapsed_ms": round((monotonic() - started) * 1_000, 3),
-                            "error_type": type(error).__name__,
-                            "transmitted_bytes": accounting.transmitted_bytes,
-                            "received_bytes": accounting.received_bytes,
-                            "physical_requests": accounting.physical_requests,
-                        },
-                    )
-                    self._observe_request(
-                        RequestObservationPhase.FAILED,
-                        attempt_request,
-                        attempt=attempt_number,
+                    self._emit_attempt_failure(
+                        common,
+                        request=attempt_request,
+                        error=error,
                         accounting=accounting,
-                        elapsed_seconds=monotonic() - started,
-                        classification="backend_failure",
+                        attempt=attempt_number,
+                        started=started,
+                        stage="backend_failure",
                     )
                 raise
             finally:
@@ -337,6 +274,7 @@ class MiddlewareTransport(CommerceTransport):
                             attempt=attempt_number,
                             started=started,
                             stage=cleanup_stage or "cleanup",
+                            retryable=False,
                         )
                     raise cleanup_error
             if transport_failure is not None:
@@ -474,6 +412,28 @@ class MiddlewareTransport(CommerceTransport):
         if self._telemetry is not None:
             self._telemetry.emit(event, fields)
 
+    def _enforce_cached_body(
+        self,
+        response: TransportResponse,
+        *,
+        common: dict[str, JsonValue],
+        reason: str,
+    ) -> TransportResponse:
+        try:
+            return enforce_response_body_limit(response, self._maximum_response_bytes)
+        except ResponseBodyTooLarge as error:
+            self._emit(
+                "cache.rejected",
+                {
+                    **common,
+                    "level": "warning",
+                    "reason": reason,
+                    "received_bytes": error.received_bytes,
+                    "maximum_bytes": error.maximum_bytes,
+                },
+            )
+            raise
+
     async def _cache_put(
         self,
         request: TransportRequest,
@@ -496,6 +456,7 @@ class MiddlewareTransport(CommerceTransport):
                 attempt=attempt,
                 started=started,
                 stage="cache_write",
+                retryable=False,
             )
             raise
 
@@ -509,28 +470,37 @@ class MiddlewareTransport(CommerceTransport):
         attempt: int,
         started: float,
         stage: str,
+        retryable: bool | None = None,
+        cancelled: bool = False,
+        extra: dict[str, JsonValue] | None = None,
     ) -> None:
+        elapsed_seconds = monotonic() - started
+        fields: dict[str, JsonValue] = {
+            **common,
+            "level": "warning",
+            "attempt": attempt,
+            "elapsed_ms": round(elapsed_seconds * 1_000, 3),
+            "error_type": type(error).__name__,
+            "failure_stage": stage,
+            "transmitted_bytes": accounting.transmitted_bytes,
+            "received_bytes": accounting.received_bytes,
+            "physical_requests": accounting.physical_requests,
+            **(extra or {}),
+        }
+        if retryable is not None:
+            fields["retryable"] = retryable
+        if cancelled:
+            fields["cancelled"] = True
         self._emit(
             "request.failed",
-            {
-                **common,
-                "level": "warning",
-                "attempt": attempt,
-                "elapsed_ms": round((monotonic() - started) * 1_000, 3),
-                "error_type": type(error).__name__,
-                "failure_stage": stage,
-                "retryable": False,
-                "transmitted_bytes": accounting.transmitted_bytes,
-                "received_bytes": accounting.received_bytes,
-                "physical_requests": accounting.physical_requests,
-            },
+            fields,
         )
         self._observe_request(
             RequestObservationPhase.FAILED,
             request,
             attempt=attempt,
             accounting=accounting,
-            elapsed_seconds=monotonic() - started,
+            elapsed_seconds=elapsed_seconds,
             classification=stage,
         )
 

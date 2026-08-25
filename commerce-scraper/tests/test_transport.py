@@ -366,6 +366,7 @@ async def test_cancelled_backend_attempt_reconciles_before_next_authorization() 
     assert cancellation["error_type"] == "CancelledError"
     assert cancellation["cancelled"] is True
     assert cancellation["retryable"] is False
+    assert cancellation["failure_stage"] == "cancelled"
     assert cancellation["physical_requests"] == 1
     backend.release.set()
     assert (await transport.request(request)).text() == "ok"
@@ -377,7 +378,10 @@ async def test_unexpected_backend_failure_counts_as_an_attempt() -> None:
     backend = FakeTransport()
     backend.add("https://shop.test/data", error=RuntimeError("backend failed"))
     budget = MemoryRequestBudget(maximum_requests=1, maximum_bytes=6)
-    transport = MiddlewareTransport(backend, budget=budget, retries=0)
+    telemetry = RecordingTelemetry()
+    transport = MiddlewareTransport(
+        backend, budget=budget, telemetry=telemetry, retries=0
+    )
     request = TransportRequest(
         url="https://shop.test/data",
         purpose=RequestPurpose.ENTITY,
@@ -391,6 +395,9 @@ async def test_unexpected_backend_failure_counts_as_an_attempt() -> None:
     assert budget.requests == 1
     assert budget.bytes == 0
     assert not budget.affordable(request)
+    failure = telemetry.events[-1][1]
+    assert failure["failure_stage"] == "backend_failure"
+    assert "retryable" not in failure
 
 
 async def test_typed_transport_failure_is_charged_rotated_and_retried() -> None:
@@ -401,9 +408,11 @@ async def test_typed_transport_failure_is_charged_rotated_and_retried() -> None:
     )
     backend.add("https://shop.test/data", body="ok")
     budget = MemoryRequestBudget(maximum_requests=2)
+    telemetry = RecordingTelemetry()
     transport = MiddlewareTransport(
         backend,
         budget=budget,
+        telemetry=telemetry,
         retries=1,
         backoff=lambda _: 0,
     )
@@ -419,6 +428,9 @@ async def test_typed_transport_failure_is_charged_rotated_and_retried() -> None:
     assert response.text() == "ok"
     assert budget.requests == 2
     assert backend.rotations == [RotationReason.TRANSPORT_FAILURE]
+    failure = next(fields for event, fields in telemetry.events if event == "request.failed")
+    assert failure["failure_stage"] == "transport_failure"
+    assert failure["retryable"] is True
 
 
 async def test_url_policy_rejects_private_and_cross_origin_destinations() -> None:
@@ -964,9 +976,11 @@ async def test_middleware_rejects_an_oversized_generic_backend_response() -> Non
     backend = FakeTransport()
     backend.add("https://shop.test/data", body="123456")
     budget = MemoryRequestBudget(maximum_requests=2, maximum_bytes=100)
+    telemetry = RecordingTelemetry()
     transport = MiddlewareTransport(
         backend,
         budget=budget,
+        telemetry=telemetry,
         retries=1,
         backoff=lambda _: 0,
         maximum_response_bytes=5,
@@ -985,6 +999,10 @@ async def test_middleware_rejects_an_oversized_generic_backend_response() -> Non
     assert backend.rotations == []
     assert budget.requests == 1
     assert budget.bytes == 6
+    failure = telemetry.events[-1][1]
+    assert failure["failure_stage"] == "response_body_too_large"
+    assert failure["received_bytes"] == 6
+    assert failure["maximum_bytes"] == 5
 
 
 def test_json_decode_failure_does_not_retain_response_body() -> None:
@@ -1012,11 +1030,13 @@ async def test_oversized_cache_entry_is_rejected_before_paid_layers() -> None:
     )
     await cache.put(request, _response("123456"))
     budget = MemoryRequestBudget(maximum_requests=0)
+    telemetry = RecordingTelemetry()
     transport = MiddlewareTransport(
         backend,
         cache=cache,
         budget=budget,
         rate_limiter=Limiter(events),
+        telemetry=telemetry,
         maximum_response_bytes=5,
     )
 
@@ -1026,6 +1046,33 @@ async def test_oversized_cache_entry_is_rejected_before_paid_layers() -> None:
     assert budget.requests == 0
     assert events == []
     assert backend.requests == []
+    rejection = telemetry.events[-1]
+    assert rejection[0] == "cache.rejected"
+    assert rejection[1]["reason"] == "response_body_too_large"
+    assert rejection[1]["received_bytes"] == 6
+    assert rejection[1]["maximum_bytes"] == 5
+
+
+async def test_oversized_stale_cache_entry_uses_the_stale_rejection_reason() -> None:
+    request = TransportRequest(
+        url="https://shop.test/data",
+        purpose=RequestPurpose.ENTITY,
+        priority=RequestPriority.IDENTITY,
+    )
+    telemetry = RecordingTelemetry()
+    transport = MiddlewareTransport(
+        FakeTransport(),
+        cache=StaleCache(_response("123456")),
+        telemetry=telemetry,
+        maximum_response_bytes=5,
+    )
+
+    with pytest.raises(ResponseBodyTooLarge):
+        await transport.request(request)
+
+    rejection = telemetry.events[-1]
+    assert rejection[0] == "cache.rejected"
+    assert rejection[1]["reason"] == "stale_response_body_too_large"
 
 
 async def test_memory_cache_refuses_to_retain_oversized_response() -> None:

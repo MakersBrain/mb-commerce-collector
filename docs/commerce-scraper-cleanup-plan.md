@@ -230,7 +230,7 @@ Independent of Tracks A, C and D. Safe to parallelize across B1-B5.
   239 files passed; `pytest -q` -> 936 passed, 2 skipped, 187 deselected, and
   284 subtests; installed two-wheel catalogue composition passed.
 
-- [ ] **B3 Fold the middleware telemetry copies.**
+- [x] **B3 Fold the middleware telemetry copies.**
   `MiddlewareTransport.request` is one 341-line method. Its
   `ResponseBodyTooLarge`, `TransportFailure`, `CancelledError` and bare
   `Exception` handlers each build the same failure payload inline — with the
@@ -242,6 +242,19 @@ Independent of Tracks A, C and D. Safe to parallelize across B1-B5.
   `_enforce_cached_body(response, reason)`.
   *Note:* folding in the helper adds a `failure_stage` key to those four events.
   *Removes:* ~55 lines.
+  **Completed.** Fresh and stale cached responses share one bounded-body helper
+  while retaining their distinct rejection reasons. Response-size failures,
+  transport failures, cancellation, unexpected backend failures, cache-write
+  failures, and post-dispatch cleanup failures now flow through one terminal
+  event/typed-observation helper. Existing retryability, cancellation, byte,
+  physical-request, and classification fields are preserved; all dispatched
+  failures now carry `failure_stage` and use one elapsed-time measurement.
+  *Verified:* the focused transport suite passed 56 tests. `make
+  scraper-check` -> 311 tests, Ruff, mypy over 75 files, schemas, build, 4
+  boundary tests, installed-wheel/public-API, external-consumer, and release
+  gates passed. Catalogue Ruff and mypy over 239 files passed; `pytest -q` ->
+  936 passed, 2 skipped, 187 deselected, and 284 subtests; installed two-wheel
+  catalogue composition passed.
 
 - [ ] **B4 Make optional transport capabilities explicit.**
   Two capabilities propagate by duck-typed `getattr`:

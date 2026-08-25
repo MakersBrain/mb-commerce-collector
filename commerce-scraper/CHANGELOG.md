@@ -47,6 +47,9 @@ based on Keep a Changelog, and releases follow the compatibility policy in
 - Consolidated built-in request validation, checkpoint construction, and
   stateless connector factories; options are now validated exactly once by the
   registry before factory construction.
+- Unified middleware cache-limit rejection and terminal attempt-failure
+  telemetry, including a consistent failure stage across response limits,
+  transport errors, cancellation, backend errors, cache writes, and cleanup.
 
 Before tagging the first release, move these notes under
 `## [0.1.0] - YYYY-MM-DD` and retain an empty `## [Unreleased]` section above
