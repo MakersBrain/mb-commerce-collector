@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from collections.abc import AsyncIterator
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from html import unescape
-from typing import Any
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urljoin, urlparse
 
 from mb_commerce_scraper.connectors import (
     BrowserRequirement,
@@ -27,7 +25,6 @@ from mb_commerce_scraper.models import (
     CommerceOffer,
     CommerceProductSnapshot,
     CommerceVariant,
-    Evidence,
     MediaRef,
     Money,
     RefreshMode,
@@ -36,17 +33,35 @@ from mb_commerce_scraper.models import (
     StockState,
 )
 from mb_commerce_scraper.transports import (
-    BrowserHint,
     CommerceTransport,
-    RequestPriority,
     RequestPurpose,
-    ResponseBodyTooLarge,
     RotationReason,
-    TransportFailure,
     TransportRequest,
     TransportResponse,
 )
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
+
+from .commerce_scraper_plugin_support import (
+    canonical_url as _canonical,
+)
+from .commerce_scraper_plugin_support import (
+    clean as _clean,
+)
+from .commerce_scraper_plugin_support import (
+    decimal as _decimal,
+)
+from .commerce_scraper_plugin_support import (
+    discovery_response,
+)
+from .commerce_scraper_plugin_support import (
+    evidence as _evidence,
+)
+from .commerce_scraper_plugin_support import (
+    match_text as _match_text,
+)
+from .commerce_scraper_plugin_support import (
+    url_id as _url_id,
+)
 
 
 class KeramikKraftOptions(BaseModel):
@@ -220,32 +235,12 @@ class _KeramikKraftDiscovery:
                     queue.append(candidate)
 
     async def _document(self, url: str) -> TransportResponse:
-        required = self.options.render is True
-        try:
-            return await self._request(url, browser=required)
-        except ResponseBodyTooLarge:
-            raise
-        except (DiscoveryFailure, TransportFailure):
-            if self.options.render is not None:
-                raise
-        return await self._request(url, browser=True)
-
-    async def _request(self, url: str, *, browser: bool) -> TransportResponse:
-        response = await self.transport.request(
-            TransportRequest(
-                url=url,
-                purpose=RequestPurpose.DISCOVERY,
-                priority=RequestPriority.DISCOVERY,
-                estimated_bytes=1_000_000 if browser else 500_000,
-                browser=BrowserHint.REQUIRED if browser else BrowserHint.NEVER,
-            )
+        return await discovery_response(
+            self.transport,
+            url,
+            render=self.options.render,
+            label="Keramik-Kraft",
         )
-        if response.status >= 400:
-            raise DiscoveryFailure(
-                f"Keramik-Kraft discovery request failed with status {response.status}",
-                retryable=response.status >= 500,
-            )
-        return response
 
 
 class _KeramikKraftParser:
@@ -305,13 +300,7 @@ class _KeramikKraftParser:
             image = re.search(r'<img[^>]+src="([^"]+)"', card, re.IGNORECASE)
             image_url = urljoin(url, unescape(image.group(1))) if image else None
             external_id = code or _url_id(product_url)
-            evidence = Evidence(
-                method="html",
-                source_url=url,
-                source_field="keramik_kraft_listing_card",
-                observed_at=observed_at,
-                confidence="published",
-            )
+            evidence = _evidence(url, observed_at, "keramik_kraft_listing_card")
             attributes: dict[str, JsonValue] = {
                 "price_text": _clean(price_match.group(0)) or None,
             }
@@ -364,19 +353,6 @@ class _KeramikKraftParser:
                 )
             )
         return tuple(snapshots)
-
-
-def _canonical(url: str) -> str:
-    parsed = urlparse(url)
-    query = (
-        ""
-        if re.search(
-            r"(?:^|&)(?:order|tag|id_currency|search_query|back|q|sort)=",
-            parsed.query,
-        )
-        else parsed.query
-    )
-    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, ""))
 
 
 def _usable_card(card: str) -> bool:
@@ -437,32 +413,3 @@ def _brand(name: str) -> str | None:
         if re.search(rf"\b{maker}\b", name, re.IGNORECASE):
             return maker
     return None
-
-
-def _decimal(value: Any) -> Decimal | None:
-    if value is None or isinstance(value, bool):
-        return None
-    number = re.sub(r"[^0-9.,-]", "", _clean(value))
-    number = re.sub(r"[.,](?=\d{3}(?:\D|$))", "", number).replace(",", ".")
-    try:
-        result = Decimal(number)
-    except InvalidOperation:
-        return None
-    return result if result.is_finite() and result >= 0 else None
-
-
-def _match_text(document: str, pattern: str) -> str:
-    match = re.search(pattern, document, re.IGNORECASE | re.DOTALL)
-    return _clean(match.group(1)) if match else ""
-
-
-def _url_id(url: str) -> str:
-    return hashlib.sha256(_canonical(url).encode()).hexdigest()[:24]
-
-
-def _clean(value: Any) -> str:
-    if value is None:
-        return ""
-    return " ".join(
-        unescape(re.sub(r"<[^>]+>", " ", str(value))).split()
-    )

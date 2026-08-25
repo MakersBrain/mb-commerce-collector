@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import re
 from collections.abc import AsyncIterator
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Literal, cast
 from urllib.parse import parse_qs, urljoin, urlparse, urlunparse
 
@@ -55,6 +55,19 @@ from mb_commerce_scraper.transports import (
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from mb_ceramics_catalogue.transports.browser import BrowserUnavailable
+
+from .commerce_scraper_plugin_support import (
+    decimal as _decimal,
+)
+from .commerce_scraper_plugin_support import (
+    discovery_response,
+)
+from .commerce_scraper_plugin_support import (
+    evidence as _evidence,
+)
+from .commerce_scraper_plugin_support import (
+    match_text as _match_text,
+)
 
 PACK_PRICE_SCRIPT = """
 async () => {
@@ -314,31 +327,12 @@ class _CeramicoloursDiscovery:
                 )
 
     async def _document(self, url: str) -> str:
-        required = self.options.render is True
-        try:
-            return await self._request(url, browser=required)
-        except ResponseBodyTooLarge:
-            raise
-        except (DiscoveryFailure, TransportFailure):
-            if self.options.render is not None:
-                raise
-        return await self._request(url, browser=True)
-
-    async def _request(self, url: str, *, browser: bool) -> str:
-        response = await self.transport.request(
-            TransportRequest(
-                url=url,
-                purpose=RequestPurpose.DISCOVERY,
-                priority=RequestPriority.DISCOVERY,
-                estimated_bytes=1_000_000 if browser else 500_000,
-                browser=BrowserHint.REQUIRED if browser else BrowserHint.NEVER,
-            )
+        response = await discovery_response(
+            self.transport,
+            url,
+            render=self.options.render,
+            label="Ceramicolours",
         )
-        if response.status >= 400:
-            raise DiscoveryFailure(
-                f"Ceramicolours discovery request failed with status {response.status}",
-                retryable=response.status >= 500,
-            )
         return response.text()
 
 
@@ -367,13 +361,7 @@ class _CeramicoloursParser:
         observed_at = self.context.clock()
         code = _clean(parse_qs(urlparse(url).query).get("cod", [""])[0])
         temperature = _match_text(document, r"Temp\.\s*</span>\s*(.*?)</p>")
-        evidence = Evidence(
-            method="html",
-            source_url=url,
-            source_field="ceramicolours_product",
-            observed_at=observed_at,
-            confidence="published",
-        )
+        evidence = _evidence(url, observed_at, "ceramicolours_product")
         variants = self._pack_variants(
             document, url, code, temperature, observed_at, evidence
         )
@@ -527,23 +515,6 @@ def _clean(value: Any) -> str:
     if value is None:
         return ""
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", str(value)))).strip()
-
-
-def _match_text(document: str, pattern: str) -> str:
-    match = re.search(pattern, document, re.I | re.S)
-    return _clean(match.group(1)) if match else ""
-
-
-def _decimal(value: Any) -> Decimal | None:
-    if value is None or isinstance(value, bool):
-        return None
-    number = re.sub(r"[^0-9.,-]", "", _clean(value))
-    number = re.sub(r"[.,](?=\d{3}(?:\D|$))", "", number).replace(",", ".")
-    try:
-        result = Decimal(number)
-    except InvalidOperation:
-        return None
-    return result if result.is_finite() and result >= 0 else None
 
 
 def _price(value: Any) -> Decimal | None:

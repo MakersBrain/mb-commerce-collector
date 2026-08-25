@@ -1,6 +1,6 @@
 # Commerce Scraper Cleanup and Refactoring Plan
 
-Last reviewed: 2026-08-24
+Last reviewed: 2026-08-25
 Branch: `feat/commerce-scraper-library`
 
 ## What this plan is
@@ -465,7 +465,7 @@ the paid-traffic path and depend on Track 0.1.
   and mypy over 239 files passed; `pytest -q` -> 937 passed, 2 skipped, 187
   deselected, and 284 subtests; installed two-wheel composition passed.
 
-- [ ] **D4 One support module for the site plugins.**
+- [x] **D4 One support module for the site plugins.**
   `commerce_scraper_axner.py`, `commerce_scraper_keramik_kraft.py` and
   `commerce_scraper_ceramicolours.py` are three-way copy-paste: the
   `_document`/`_request` browser-fallback pair is 28 lines duplicated across
@@ -480,6 +480,19 @@ the paid-traffic path and depend on Track 0.1.
   `_pdf_links` → `_structured.pdf_links`.
   Keep Ceramicolours' deliberately different `_canonical`/`_clean`/`_url_id`
   local. *Removes:* ~110 lines.
+  **Completed.** One application-owned support module now owns the shared
+  discovery request and browser fallback, traversal canonicalization, stable
+  URL identity, localized decimal parsing, captured-text cleanup, and HTML
+  evidence construction. Axner and Keramik Kraft import the common helpers;
+  Ceramicolours retains its query-preserving canonical URL, whitespace cleaner,
+  and path-derived identity. Axner now imports the existing catalogue JSON-LD
+  metadata and PDF-link readers rather than carrying private copies. The three
+  plugins shed 230 local lines while keeping their distinct response shapes,
+  labels, caching handoff, and browser-evaluation behavior.
+  *Verified:* all 14 focused plugin tests and 5 import-boundary tests passed.
+  Catalogue Ruff and mypy over 240 files passed; `pytest -q` -> 937 passed, 2
+  skipped, 187 deselected, and 284 subtests; installed two-wheel composition
+  passed.
 
 - [ ] **D5 Delete the retired fetcher traversal.**
   `fetcher_transport_totals` walks a `LegacyFetcher` chain production never

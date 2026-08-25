@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from collections.abc import AsyncIterator
 from decimal import Decimal, InvalidOperation
 from html import unescape
 from typing import Any, Literal, cast
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urljoin, urlparse
 
 from mb_commerce_scraper.connectors import (
     BrowserRequirement,
@@ -27,7 +26,6 @@ from mb_commerce_scraper.models import (
     CommerceProductSnapshot,
     CommerceVariant,
     DocumentRef,
-    Evidence,
     MediaRef,
     Money,
     RefreshMode,
@@ -35,16 +33,30 @@ from mb_commerce_scraper.models import (
     StockQuantityKind,
     StockState,
 )
-from mb_commerce_scraper.transports import (
-    BrowserHint,
-    CommerceTransport,
-    RequestPriority,
-    RequestPurpose,
-    ResponseBodyTooLarge,
-    TransportFailure,
-    TransportRequest,
-)
+from mb_commerce_scraper.transports import CommerceTransport
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
+
+from mb_ceramics_catalogue.scrapers.jsonld import meta as _meta
+from mb_ceramics_catalogue.scrapers.jsonld import pdf_links as _pdf_links
+
+from .commerce_scraper_plugin_support import (
+    canonical_url as _canonical,
+)
+from .commerce_scraper_plugin_support import (
+    clean as _clean,
+)
+from .commerce_scraper_plugin_support import (
+    discovery_response,
+)
+from .commerce_scraper_plugin_support import (
+    evidence as _evidence,
+)
+from .commerce_scraper_plugin_support import (
+    match_text as _match_text,
+)
+from .commerce_scraper_plugin_support import (
+    url_id as _url_id,
+)
 
 
 class AxnerOptions(BaseModel):
@@ -204,31 +216,12 @@ class _AxnerDiscovery:
                     queue.append(page)
 
     async def _document(self, url: str) -> str:
-        required = self.options.render is True
-        try:
-            return await self._request(url, browser=required)
-        except ResponseBodyTooLarge:
-            raise
-        except (DiscoveryFailure, TransportFailure):
-            if self.options.render is not None:
-                raise
-        return await self._request(url, browser=True)
-
-    async def _request(self, url: str, *, browser: bool) -> str:
-        response = await self.transport.request(
-            TransportRequest(
-                url=url,
-                purpose=RequestPurpose.DISCOVERY,
-                priority=RequestPriority.DISCOVERY,
-                estimated_bytes=1_000_000 if browser else 500_000,
-                browser=BrowserHint.REQUIRED if browser else BrowserHint.NEVER,
-            )
+        response = await discovery_response(
+            self.transport,
+            url,
+            render=self.options.render,
+            label="Axner",
         )
-        if response.status >= 400:
-            raise DiscoveryFailure(
-                f"Axner discovery request failed with status {response.status}",
-                retryable=response.status >= 500,
-            )
         return response.text()
 
 
@@ -343,36 +336,6 @@ class _AxnerParser:
         return (snapshot,)
 
 
-def _canonical(url: str) -> str:
-    parsed = urlparse(url)
-    query = (
-        ""
-        if re.search(
-            r"(?:^|&)(?:order|tag|id_currency|search_query|back|q|sort)=",
-            parsed.query,
-        )
-        else parsed.query
-    )
-    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, ""))
-
-
-def _match_text(document: str, pattern: str) -> str:
-    match = re.search(pattern, document, re.IGNORECASE | re.DOTALL)
-    return _clean(match.group(1)) if match else ""
-
-
-def _meta(document: str, key: str) -> str:
-    escaped = re.escape(key)
-    for pattern in (
-        rf'<meta[^>]+(?:property|name)=["\']{escaped}["\'][^>]+content=["\']([^"\']*)',
-        rf'<meta[^>]+content=["\']([^"\']*)["\'][^>]+(?:property|name)=["\']{escaped}["\']',
-    ):
-        match = re.search(pattern, document, re.IGNORECASE)
-        if match:
-            return unescape(match.group(1)).strip()
-    return ""
-
-
 def _price(value: Any) -> tuple[Decimal | None, str | None]:
     if value is None or isinstance(value, bool):
         return None, None
@@ -392,36 +355,3 @@ def _price(value: Any) -> tuple[Decimal | None, str | None]:
     except InvalidOperation:
         return None, currency
     return (result, currency) if result.is_finite() and result >= 0 else (None, currency)
-
-
-def _evidence(url: str, observed_at: Any, source_field: str) -> Evidence:
-    return Evidence(
-        method="html",
-        source_url=url,
-        source_field=source_field,
-        observed_at=observed_at,
-        confidence="published",
-    )
-
-
-def _url_id(url: str) -> str:
-    return hashlib.sha256(_canonical(url).encode()).hexdigest()[:24]
-
-
-def _clean(value: Any) -> str:
-    if value is None:
-        return ""
-    return " ".join(
-        unescape(re.sub(r"<[^>]+>", " ", str(value))).split()
-    )
-
-
-def _pdf_links(document: str, page_url: str) -> tuple[tuple[str, str], ...]:
-    return tuple(
-        (urljoin(page_url, unescape(match.group(1))), _clean(match.group(2)))
-        for match in re.finditer(
-            r'<a[^>]+href=["\']([^"\']+\.pdf[^"\']*)["\'][^>]*>(.*?)</a>',
-            document,
-            re.IGNORECASE | re.DOTALL,
-        )
-    )

@@ -143,6 +143,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `edcc179` — extract the shared page engine and nested options model.
 - `ad8f399` — derive canary routes from connector factory plans.
 - `9d5ba26` — centralize static process environment in deployment roles.
+- `a362166` — share browser session request dispatch.
 
 ### Verification at last review
 
@@ -304,6 +305,13 @@ architecture rules in the plan and are not separate scope-expansion goals.
     accounting, response-limit, cancellation, and error-mapping policy. All 15
     focused browser tests and the full 937-test catalogue suite passed with
     Ruff, mypy, and installed two-wheel composition.
+  - Axner, Keramik Kraft, and Ceramicolours now share one application plugin
+    support module for discovery browser fallback, localized decimals, text
+    extraction, and evidence. Axner and Keramik Kraft additionally share
+    traversal canonicalization and URL identity; Ceramicolours retains its
+    intentionally different URL rules. All 19 focused plugin and import-boundary
+    tests and the full 937-test catalogue suite passed with Ruff, mypy, and
+    installed two-wheel composition.
   - The provider-neutral durable Webshare composition and existing Decodo and
     Webshare adapter suites passed 29 focused tests.
   - The strict Webshare gateway-secret contract passed 47 focused tests.
