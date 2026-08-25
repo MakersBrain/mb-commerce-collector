@@ -16,7 +16,7 @@ from mb_commerce_scraper.models import (
     Money,
     StockState,
 )
-from mb_commerce_scraper.parsing._structured import jsonld_products
+from mb_commerce_scraper.parsing._structured import jsonld_images, jsonld_products
 
 
 class JsonLdProductParser:
@@ -62,9 +62,7 @@ class JsonLdProductParser:
                         evidence=(evidence,), availability=availability,
                         availability_evidence=(evidence,),
                     ))
-            image_raw = raw.get("image")
-            image_values = image_raw if isinstance(image_raw, list) else [image_raw]
-            images = tuple(MediaRef(url=urljoin(url, str(value))) for value in image_values if isinstance(value, str) and value)
+            images = tuple(MediaRef(url=value) for value in jsonld_images(raw, url))
             products.append(CommerceProductSnapshot(
                 connector="generic-pages", source_id=source_id, external_id=identifier,
                 canonical_url=canonical_url, title=name, observed_at=observed,

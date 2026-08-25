@@ -209,20 +209,20 @@ architecture rules in the plan and are not separate scope-expansion goals.
   - The library gate passed Ruff, mypy over 77 source files, 360 tests, and the
     frozen-schema check.
   - The catalogue gate passed Ruff, mypy over 240 source files, and 945 tests
-    with 2 expected skips, 279 deselections, and 284 subtests.
+    with 2 expected skips, 280 deselections, and 284 subtests.
   - `pytest -q -m golden tests/test_recorded_library_parity.py -rs` replayed
     independent legacy/library paths from 51,579 recovered production-response
-    entries: all 11 preflight, Shopify, Shopware, BigCommerce, PrestaShop,
-    Sio2, WooCommerce, and Wix cases passed.
+    entries: all 12 preflight, Shopify, Shopware, BigCommerce, PrestaShop,
+    Sio2, WooCommerce, Wix, and Starweb cases passed.
   - The recovered volume is newer and broader than the checked-in golden set.
     An archive-wide characterization produced 14 unrelated stale-baseline
     failures, 10 passes, and 67 sources without reviewed goldens; those 67
     provisional outputs were not added. Publishing a versioned archive and
     manifest remains an operational CI task.
   - Cache publication now accepts repeated `push --host` selectors. A local
-    deterministic build of the ten reviewed hosts contains 4,301 files and
-    546,969,600 bytes with SHA-256
-    `a3b8f47a574ab2e7a94ed2814a5aa0f28bd8242c40b38e8959c11c7e9c9f7daf`;
+    deterministic build of the eleven reviewed hosts contains 6,593 files and
+    587,253,760 bytes with SHA-256
+    `695e25d5ddd938ca1becbb841bfa9d0202b0f1544a0f4edd562dfcf21b268055`;
     it has not been uploaded or written into the checked-in manifest.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
   throwaway PostgreSQL 17 instance, covering concurrent authorization,
@@ -1175,7 +1175,7 @@ they do not reopen the Phase 5 library deliverables.
 | BigCommerce | Yes | Yes | Yes | Yes | No | No |
 | Wix | Yes | Yes | Yes | Yes | No | No |
 | Shopware | Yes | Yes | Yes | No | No | No |
-| Starweb | Yes | Yes | Yes | No | No | No |
+| Starweb | Yes | Yes | Yes | Yes | No | No |
 | NitroSell | Yes | Yes | Yes | No | No | No |
 | SumUp | Yes | Yes | Yes | No | No | No |
 
@@ -1252,6 +1252,10 @@ Cross-cutting work:
   - The `e-cibas` Wix recording passes with all 769 rows, 1,006 discoveries,
     and 1,007 direct requests. Complete semantic rows match by stable identity;
     raw warmup product/variant payloads retain the public extension bound.
+  - The Art4Fun Starweb recording passes with 1,713 ordered rows and 2,288
+    requests. Legacy counts 2,238 unique product URLs while the neutral page
+    engine counts 2,675 parsed Product entities; both counters are pinned and
+    the complete sample/digest remains exact.
 - [~] Review request counts and byte estimates.
   - Focused traffic profiles now pin exact logical request order, purpose,
     browser hint, and byte estimate for WooCommerce, PrestaShop/Sio2,
@@ -1584,6 +1588,11 @@ After each implementation batch:
 
 - Wix raw warmup product and variant payloads retain the same wrapped public
   extension bounds; semantic rows and terminal/request behavior remain exact.
+
+- Starweb discovery counters describe different layers: legacy reports unique
+  product-page URLs, while the neutral page engine reports parsed Product
+  entities and can observe several on one URL. The recorded gate pins both
+  totals while requiring exact ordered rows, requests, and terminal behavior.
 
 - B1 resolves the previously documented parsing drift in favor of the shared
   helper behavior: specification names may contain up to 99 characters, the

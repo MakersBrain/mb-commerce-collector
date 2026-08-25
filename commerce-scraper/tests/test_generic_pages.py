@@ -404,7 +404,7 @@ async def test_category_and_pagination_discovery_feed_the_shared_engine() -> Non
         "https://shop.test/clay/",
         body=(
             '<div class="product-card"><a href="/products/red">Red</a></div>'
-            '<a class="next" href="/clay/?page=2">Next</a>'
+            '<a class="next" href="/clay/?page=2#products">Next</a>'
             '<a href="https://elsewhere.test/products/noise">Noise</a>'
         ),
     )

@@ -176,6 +176,7 @@ RECORDED_SIO2 = _recorded_source_case("sio-2")
 RECORDED_PRESTASHOP = _recorded_source_case("1240-design")
 RECORDED_WOOCOMMERCE = _recorded_source_case("mayco")
 RECORDED_WIX = _recorded_source_case("e-cibas")
+RECORDED_STARWEB = _recorded_source_case("art4fun")
 
 
 @pytest.mark.golden
@@ -409,3 +410,50 @@ def test_recorded_wix_responses_have_legacy_library_projection_parity(
     _assert_recorded_keyed_projection_parity(
         source, "library_wix_connector", _bounded_wix_legacy
     )
+
+
+@pytest.mark.golden
+@pytest.mark.parametrize("source", RECORDED_STARWEB)
+def test_recorded_starweb_responses_have_legacy_library_projection_parity(
+    source: str,
+) -> None:
+    legacy = asyncio.run(support.collect(source))
+    library = asyncio.run(
+        support.collect(source, scraper="library_starweb_connector")
+    )
+
+    legacy_frozen = support.freeze(source, legacy)
+    library_frozen = support.freeze(source, library)
+    expected = json.loads(support.golden_path(source).read_text(encoding="utf-8"))
+
+    for field in (
+        "records",
+        "discovered",
+        "requests",
+        "rendered_pages",
+        "field_coverage",
+        "sample",
+        "digest",
+        "truncated",
+        "error_count",
+        "errors",
+    ):
+        assert legacy_frozen[field] == expected[field]
+
+    for field in (
+        "records",
+        "requests",
+        "rendered_pages",
+        "field_coverage",
+        "sample",
+        "digest",
+        "truncated",
+        "error_count",
+        "errors",
+    ):
+        assert library_frozen[field] == legacy_frozen[field]
+    # Legacy counts unique discovered product URLs. The neutral page engine
+    # counts every parsed Product entity, including multiple JSON-LD products
+    # on one URL; characterize both without weakening complete row equality.
+    assert legacy_frozen["discovered"] == 2238
+    assert library_frozen["discovered"] == 2675

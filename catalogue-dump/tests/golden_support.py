@@ -42,6 +42,7 @@ ARCHIVE_MANIFEST = ROOT / "cache-archive.json"
 REQUIRED_RECORDED_SOURCES = {
     "1240-design": "prestashop",
     "amaco": "bigcommerce",
+    "art4fun": "starweb",
     "ceradel": "shopify",
     "ceramique-peinture": "shopify",
     "e-cibas": "wix",

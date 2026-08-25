@@ -55,6 +55,8 @@ based on Keep a Changelog, and releases follow the compatibility policy in
   needed by compatibility projection.
 - Aligned direct Wix product-page requests with the legacy browser profile used
   by recorded caches.
+- Canonicalized discovered page links by dropping fragments and deduplicated
+  JSON-LD image lists before neutral snapshot construction.
 - Consolidated runtime and routed-transport proxy configuration on
   `ProxyPolicyConfig`; the unreleased parallel routing model and legacy request
   and byte-cap parameters were removed.

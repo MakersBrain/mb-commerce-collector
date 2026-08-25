@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from decimal import Decimal
 from html import unescape
 from typing import Any, Literal, cast
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urldefrag, urljoin, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
@@ -204,7 +204,7 @@ def _links(document: str, page_url: str, *, cards_only: bool) -> tuple[str, ...]
         scope = "".join((*cards, *pagination)) or document
     found: list[str] = []
     for match in re.finditer(r'href=["\']([^"\']+)["\']', scope, re.IGNORECASE):
-        candidate = urljoin(page_url, unescape(match.group(1)))
+        candidate = urldefrag(urljoin(page_url, unescape(match.group(1)))).url
         if urlparse(candidate).netloc == origin and candidate not in found:
             found.append(candidate)
     return tuple(found)
