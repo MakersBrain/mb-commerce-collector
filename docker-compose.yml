@@ -532,24 +532,54 @@ services:
       start_period: 10s
       retries: 3
 
-  # Optional, bounded operational metrics. Prometheus discovers every scaled
-  # worker by Docker DNS; scraping a load-balanced worker name as one target
-  # would mix process-local counters across replicas.
-  prometheus:
+  # Optional, bounded operational metrics. VictoriaMetrics scrapes every target
+  # itself: `-promscrape.config` reads the same Prometheus config format, so the
+  # Docker DNS discovery below is unchanged. Scraping a load-balanced worker name
+  # as one target would mix process-local counters across replicas.
+  #
+  # It also accepts OTLP metrics at /opentelemetry/v1/metrics with no enabling
+  # flag, which is the fan-in point for albumfete and the makersbrain line.
+  victoriametrics:
     profiles: ["observability"]
-    image: prom/prometheus:v3.5.0
-    container_name: catalogue-prometheus
+    image: victoriametrics/victoria-metrics:v1.147.0
+    container_name: catalogue-victoriametrics
     command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=14d
-      - --storage.tsdb.retention.size=2GB
+      - --promscrape.config=/etc/victoriametrics/scrape.yml
+      - --promscrape.dnsSDCheckInterval=15s
+      - --storageDataPath=/victoria-metrics-data
+      - --retentionPeriod=14d
+      - --httpListenAddr=:8428
     volumes:
-      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./deploy/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
-      - prometheus-data:/prometheus
+      - ./deploy/observability/scrape.yml:/etc/victoriametrics/scrape.yml:ro
+      - victoriametrics-data:/victoria-metrics-data
     ports:
-      - "127.0.0.1:${CATALOGUE_PROMETHEUS_PORT:-9090}:9090"
+      - "127.0.0.1:${CATALOGUE_METRICS_PORT:-8428}:8428"
+    restart: unless-stopped
+
+  # VictoriaMetrics stores; it does not evaluate rules. vmalert owns the alert
+  # rules Prometheus used to run, querying and writing alert state back to VM.
+  # -notifier.blackhole: there is no Alertmanager here, and vmalert refuses to
+  # start with alerting rules unless a notifier mode is chosen explicitly.
+  # Alerts stay visible on vmalert's own UI and are delivered nowhere, which is
+  # what the Prometheus setup did too.
+  vmalert:
+    profiles: ["observability"]
+    image: victoriametrics/vmalert:v1.147.0
+    container_name: catalogue-vmalert
+    depends_on:
+      - victoriametrics
+    command:
+      - --rule=/etc/vmalert/alerts.yml
+      - --datasource.url=http://victoriametrics:8428
+      - --remoteWrite.url=http://victoriametrics:8428
+      - --remoteRead.url=http://victoriametrics:8428
+      - --evaluationInterval=15s
+      - --notifier.blackhole
+      - --httpListenAddr=:8880
+    volumes:
+      - ./deploy/observability/alerts.yml:/etc/vmalert/alerts.yml:ro
+    ports:
+      - "127.0.0.1:${CATALOGUE_VMALERT_PORT:-8880}:8880"
     restart: unless-stopped
 
   grafana:
@@ -557,7 +587,7 @@ services:
     image: grafana/grafana:12.1.0
     container_name: catalogue-grafana
     depends_on:
-      - prometheus
+      - victoriametrics
     environment:
       GF_SECURITY_ADMIN_USER: ${CATALOGUE_GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${CATALOGUE_GRAFANA_PASSWORD:-catalogue-local}
@@ -590,8 +620,8 @@ volumes:
   # Explorer-only copy of the assertion signing key. The one-shot initializer
   # preserves the host key's 0600 mode while assigning it to the container UID.
   operator-secrets:
-  # Bounded by Prometheus' 14-day/2GB retention flags above.
-  prometheus-data:
+  # Bounded by the 14-day -retentionPeriod above.
+  victoriametrics-data:
   grafana-data:
 
 secrets:

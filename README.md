@@ -47,7 +47,7 @@ cp .env.example .env          # then set CATALOGUE_CONTROL_TOKEN
 make install
 docker compose up -d
 docker compose --profile ui up -d     # the explorer on http://127.0.0.1:5175
-docker compose --profile observability up -d  # Grafana :3001, Prometheus :9090
+docker compose --profile observability up -d  # Grafana :3001, VictoriaMetrics :8428
 ```
 
 `make` on its own lists every target. `make check` is what a change has to pass.

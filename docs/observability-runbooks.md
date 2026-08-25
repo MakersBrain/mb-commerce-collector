@@ -1,10 +1,12 @@
 # Catalogue observability runbooks
 
 The optional stack starts with `docker compose --profile observability up -d`.
-Grafana is on `http://127.0.0.1:3001` and Prometheus on
-`http://127.0.0.1:9090` by default. The dashboard links back to the catalogue
+Grafana is on `http://127.0.0.1:3001`, VictoriaMetrics on
+`http://127.0.0.1:8428`, and vmalert on `http://127.0.0.1:8880` by default.
+VictoriaMetrics both scrapes and stores; vmalert evaluates the alert rules and
+is where firing alerts are listed. The dashboard links back to the catalogue
 operator pages; request, job, run, and trace IDs remain log search keys and are
-never Prometheus labels.
+never metric labels.
 
 ## SourceNeverSucceeded
 
@@ -51,7 +53,8 @@ partial catalogue data even when some records were loaded.
 
 ## MetricsTargetDown
 
-Open Prometheus **Status → Targets** and identify the exact job and instance.
+Open VictoriaMetrics **Targets** (`http://127.0.0.1:8428/targets`) and identify
+the exact job and instance.
 For control/service, check the container health and `/metrics`; for workers,
 confirm Docker DNS returns every replica and port 9109 is listening. A missing
 worker target also makes worker-local rates incomplete, so restore collection
