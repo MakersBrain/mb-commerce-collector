@@ -49,6 +49,7 @@ REQUIRED_RECORDED_SOURCES = {
     "penguin-pottery": "shopify",
     "keramikbedarf-online": "shopware",
     "mayco": "woocommerce",
+    "the-ceramic-shop": "nitrosell",
     "sio-2": "sio2",
     "speedball": "bigcommerce",
 }

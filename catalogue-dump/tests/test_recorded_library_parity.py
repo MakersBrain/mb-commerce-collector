@@ -177,6 +177,7 @@ RECORDED_PRESTASHOP = _recorded_source_case("1240-design")
 RECORDED_WOOCOMMERCE = _recorded_source_case("mayco")
 RECORDED_WIX = _recorded_source_case("e-cibas")
 RECORDED_STARWEB = _recorded_source_case("art4fun")
+RECORDED_NITROSELL = _recorded_source_case("the-ceramic-shop")
 
 
 @pytest.mark.golden
@@ -457,3 +458,13 @@ def test_recorded_starweb_responses_have_legacy_library_projection_parity(
     # on one URL; characterize both without weakening complete row equality.
     assert legacy_frozen["discovered"] == 2238
     assert library_frozen["discovered"] == 2675
+
+
+@pytest.mark.golden
+@pytest.mark.parametrize("source", RECORDED_NITROSELL)
+def test_recorded_nitrosell_responses_have_legacy_library_projection_parity(
+    source: str,
+) -> None:
+    _assert_recorded_keyed_projection_parity(
+        source, "library_nitrosell_connector", lambda payload: payload
+    )

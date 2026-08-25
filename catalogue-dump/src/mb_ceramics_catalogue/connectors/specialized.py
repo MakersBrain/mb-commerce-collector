@@ -7,6 +7,7 @@ import json
 import re
 from datetime import datetime
 from decimal import Decimal
+from html import unescape as html_unescape
 from typing import Any, Literal
 from urllib.parse import unquote, urljoin, urlparse
 
@@ -135,6 +136,17 @@ class NitroSellConnector(PageCommerceConnector):
     platform = "nitrosell"
     version = "1"
 
+    @staticmethod
+    def _legacy_meta(document: str, key: str) -> str | None:
+        escaped = re.escape(key)
+        for pattern in (
+            rf'<meta[^>]+(?:property|name)=["\']{escaped}["\'][^>]+content=["\']([^"\']*)',
+            rf'<meta[^>]+content=["\']([^"\']*)["\'][^>]+(?:property|name)=["\']{escaped}["\']',
+        ):
+            if match := re.search(pattern, document, re.I):
+                return html_unescape(match.group(1)).strip() or None
+        return None
+
     def parse(self, document: str, url: str, source_id: str, observed_at: datetime) -> PageParseOutcome:
         outcome = super().parse(document, url, source_id, observed_at)
         if not outcome.snapshots:
@@ -162,12 +174,18 @@ class NitroSellConnector(PageCommerceConnector):
         for variant in snapshot.variants:
             offers = list(variant.offers)
             if list_match and offers:
-                parsed = re.search(r"(\d+(?:[.,]\d+)?)", clean(list_match.group(1)).replace(",", "."))
+                parsed = re.search(r"(\d+(?:[.,]\d+)?)", clean(list_match.group(1)))
                 if parsed:
+                    token = parsed.group(1)
+                    amount = Decimal(
+                        token.replace(".", "").replace(",", "")
+                        if re.fullmatch(r"\d+[.,]\d{3}", token)
+                        else token.replace(",", ".")
+                    )
                     sale = offers[0].model_copy(update={"role": "sale"})
                     regular = offers[0].model_copy(update={
                         "role": "regular",
-                        "price": Money(amount=Decimal(parsed.group(1)), currency=offers[0].price.currency),
+                        "price": Money(amount=amount, currency=offers[0].price.currency),
                     })
                     offers = [sale, regular]
             variants.append(variant.model_copy(update={"offers": tuple(offers)}))
@@ -175,6 +193,22 @@ class NitroSellConnector(PageCommerceConnector):
             "description": clean(description_match.group(1)) if description_match else snapshot.description,
             "categories": tuple(categories) if categories else snapshot.categories,
             "images": tuple(images), "variants": tuple(variants),
+            "platform_extensions": {
+                **snapshot.platform_extensions,
+                "raw": {
+                    "og": {
+                        key: self._legacy_meta(document, key)
+                        for key in (
+                            "og:title",
+                            "og:brand",
+                            "og:upc",
+                            "og:availability",
+                            "product:price:amount",
+                            "product:price:currency",
+                        )
+                    }
+                },
+            },
         })
         return outcome.model_copy(update={"snapshots": (snapshot,)})
 

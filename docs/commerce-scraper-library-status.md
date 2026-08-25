@@ -209,20 +209,20 @@ architecture rules in the plan and are not separate scope-expansion goals.
   - The library gate passed Ruff, mypy over 77 source files, 360 tests, and the
     frozen-schema check.
   - The catalogue gate passed Ruff, mypy over 240 source files, and 945 tests
-    with 2 expected skips, 280 deselections, and 284 subtests.
+    with 2 expected skips, 281 deselections, and 284 subtests.
   - `pytest -q -m golden tests/test_recorded_library_parity.py -rs` replayed
     independent legacy/library paths from 51,579 recovered production-response
-    entries: all 12 preflight, Shopify, Shopware, BigCommerce, PrestaShop,
-    Sio2, WooCommerce, Wix, and Starweb cases passed.
+    entries: all 13 preflight, Shopify, Shopware, BigCommerce, PrestaShop,
+    Sio2, WooCommerce, Wix, Starweb, and NitroSell cases passed.
   - The recovered volume is newer and broader than the checked-in golden set.
     An archive-wide characterization produced 14 unrelated stale-baseline
     failures, 10 passes, and 67 sources without reviewed goldens; those 67
     provisional outputs were not added. Publishing a versioned archive and
     manifest remains an operational CI task.
   - Cache publication now accepts repeated `push --host` selectors. A local
-    deterministic build of the eleven reviewed hosts contains 6,593 files and
-    587,253,760 bytes with SHA-256
-    `695e25d5ddd938ca1becbb841bfa9d0202b0f1544a0f4edd562dfcf21b268055`;
+    deterministic build of the twelve reviewed hosts contains 7,934 files and
+    640,768,000 bytes with SHA-256
+    `dfd1f5650477968c3d34bbd2ef99cea78ad782b01183396cb54304eca2b85e83`;
     it has not been uploaded or written into the checked-in manifest.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
   throwaway PostgreSQL 17 instance, covering concurrent authorization,
@@ -1176,7 +1176,7 @@ they do not reopen the Phase 5 library deliverables.
 | Wix | Yes | Yes | Yes | Yes | No | No |
 | Shopware | Yes | Yes | Yes | No | No | No |
 | Starweb | Yes | Yes | Yes | Yes | No | No |
-| NitroSell | Yes | Yes | Yes | No | No | No |
+| NitroSell | Yes | Yes | Yes | Yes | No | No |
 | SumUp | Yes | Yes | Yes | No | No | No |
 
 Cross-cutting work:
@@ -1256,6 +1256,9 @@ Cross-cutting work:
     requests. Legacy counts 2,238 unique product URLs while the neutral page
     engine counts 2,675 parsed Product entities; both counters are pinned and
     the complete sample/digest remains exact.
+  - The Ceramic Shop NitroSell recording passes with all 245 rows, 288
+    discoveries, and 295 requests. Strike-price grouping semantics and raw
+    OpenGraph evidence match exactly.
 - [~] Review request counts and byte estimates.
   - Focused traffic profiles now pin exact logical request order, purpose,
     browser hint, and byte estimate for WooCommerce, PrestaShop/Sio2,

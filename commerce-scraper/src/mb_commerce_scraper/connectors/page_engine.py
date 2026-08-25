@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import AsyncIterator
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from html import unescape
 from typing import Any, Literal, cast
 from urllib.parse import urldefrag, urljoin, urlparse
@@ -208,6 +208,44 @@ def _links(document: str, page_url: str, *, cards_only: bool) -> tuple[str, ...]
         if urlparse(candidate).netloc == origin and candidate not in found:
             found.append(candidate)
     return tuple(found)
+
+
+def _nitrosell_list_price(document: str) -> Decimal | None:
+    match = re.search(
+        r'class=["\']text-pricestrike["\'][^>]*>([^<]+)<',
+        document,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    value = re.search(r"\d+(?:[.,]\d+)?", unescape(match.group(1)))
+    if value is None:
+        return None
+    token = value.group(0)
+    # Preserve the catalogue's established locale heuristic: exactly three
+    # digits after a separator denote grouping (``4.975`` -> ``4975``), while
+    # one or two denote a decimal price.
+    normalized = (
+        token.replace(".", "").replace(",", "")
+        if re.fullmatch(r"\d+[.,]\d{3}", token)
+        else token.replace(",", ".")
+    )
+    try:
+        amount = Decimal(normalized)
+    except (InvalidOperation, ValueError):
+        return None
+    return amount if amount.is_finite() and amount >= 0 else None
+
+
+def _legacy_meta(document: str, key: str) -> str | None:
+    escaped = re.escape(key)
+    for pattern in (
+        rf'<meta[^>]+(?:property|name)=["\']{escaped}["\'][^>]+content=["\']([^"\']*)',
+        rf'<meta[^>]+content=["\']([^"\']*)["\'][^>]+(?:property|name)=["\']{escaped}["\']',
+    ):
+        if match := re.search(pattern, document, re.IGNORECASE):
+            return unescape(match.group(1)).strip()
+    return None
 
 
 class PageEngineConnector(CommerceConnector):
@@ -630,8 +668,21 @@ class PageEngineConnector(CommerceConnector):
         for snapshot in self._retag(snapshots):
             platform_extensions = dict(snapshot.platform_extensions)
             if parser == "opengraph":
-                raw_value = platform_extensions.get("raw")
-                if isinstance(raw_value, dict):
+                if self.platform == "nitrosell":
+                    platform_extensions["raw"] = {
+                        "og": {
+                            key: _legacy_meta(document, key)
+                            for key in (
+                                "og:title",
+                                "og:brand",
+                                "og:upc",
+                                "og:availability",
+                                "product:price:amount",
+                                "product:price:currency",
+                            )
+                        }
+                    }
+                elif isinstance(raw_value := platform_extensions.get("raw"), dict):
                     platform_extensions["raw"] = {
                         **{
                             key: (value if value != "" else None)
@@ -648,6 +699,24 @@ class PageEngineConnector(CommerceConnector):
             )
             variants = []
             for variant in snapshot.variants:
+                source_offers = variant.offers
+                if (
+                    self.platform == "nitrosell"
+                    and parser == "opengraph"
+                    and source_offers
+                    and (list_price := _nitrosell_list_price(document)) is not None
+                    and list_price != source_offers[0].price.amount
+                ):
+                    current = source_offers[0].model_copy(update={"role": "sale"})
+                    regular = source_offers[0].model_copy(
+                        update={
+                            "price": source_offers[0].price.model_copy(
+                                update={"amount": list_price}
+                            ),
+                            "role": "regular",
+                        }
+                    )
+                    source_offers = (current, regular)
                 offers = tuple(
                     offer.model_copy(
                         update={
@@ -659,7 +728,7 @@ class PageEngineConnector(CommerceConnector):
                             ),
                         }
                     )
-                    for offer in variant.offers
+                    for offer in source_offers
                 )
                 stock = (
                     variant.stock.model_copy(update={"evidence": (evidence,)})
