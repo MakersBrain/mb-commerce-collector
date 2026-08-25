@@ -322,7 +322,7 @@ Independent of Tracks A, C and D. Safe to parallelize across B1-B5.
 C1-C4 are contained; C5 is a small addition; **C6 is the one with real
 behavioral consequences and should be scheduled on its own.**
 
-- [ ] **C1 Shopify inventory extraction: compile once, scan once.**
+- [x] **C1 Shopify inventory extraction: compile once, scan once.**
   `_inventory_from_html` builds and compiles a fresh regex *per variant id* and
   rescans the whole document with it. Five of the patterns interpolate
   `re.escape(identifier)` into the pattern text, so each variant produces
@@ -337,6 +337,19 @@ behavioral consequences and should be scheduled on its own.**
   of variant count.
   *Verify against recorded fixtures* — the matching semantics change even
   though the intended result does not.
+  **Completed.** The five supported published-theme encodings now use
+  module-level compiled patterns with variant IDs as capture groups. Each
+  pattern scans the document once into a first-match inventory map, after
+  which variant projection uses the existing shape precedence. Globo gateway
+  policy and quantity assignments are joined independent of assignment order.
+  *Verified:* exact recorded theme-shape samples and first-shape precedence
+  passed, and an instrumented 1,000-variant regression proved exactly one
+  `finditer` call per pattern. The complete scraper gate passed with 334 tests,
+  Ruff, mypy over 76 files, schemas, package and installed-wheel contracts,
+  custom-connector verification, and release checks. Catalogue Shopify
+  adapter/projection parity passed 19 tests; catalogue Ruff, mypy over 240
+  files, the full fast suite (938 passed, 2 skipped, 187 deselected, 284
+  subtests), and installed two-wheel composition also passed.
 
 - [ ] **C2 Compute the cache identity once; read the artifact once.**
   `_request_cache_identity` runs `urlsplit` + `parse_qsl` + an `idna` encode +

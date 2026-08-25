@@ -60,6 +60,8 @@ based on Keep a Changelog, and releases follow the compatibility policy in
   and consolidated generic and specialized connector configuration on one
   nested discovery options model. Vendor discovery fields now live under
   `discovery`, matching generic-page configuration.
+- Precompiled Shopify inventory extractors and reduced published-theme HTML
+  parsing to one scan per supported encoding, independent of variant count.
 
 Before tagging the first release, move these notes under
 `## [0.1.0] - YYYY-MM-DD` and retain an empty `## [Unreleased]` section above

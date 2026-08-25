@@ -1,8 +1,11 @@
+import re
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
+import mb_commerce_scraper.connectors.shopify as shopify_module
 from mb_commerce_scraper import CollectionRequest, RefreshMode, SnapshotField
 from mb_commerce_scraper.connectors import ConnectorContext, ShopifyConnector, ShopifyOptions
 from mb_commerce_scraper.testing import (
@@ -146,6 +149,111 @@ async def test_product_html_inventory_uses_section_and_parses_exact_stock() -> N
     assert page.items[0].variants[0].stock.quantity == 6
     assert transport.requests[1].query == {"section_id": "product-inventory"}
     assert transport.requests[1].estimated_bytes == 1234
+
+
+@pytest.mark.parametrize(
+    ("document", "identifier", "quantity"),
+    (
+        (
+            '{"id":101,"inventory_quantity":12,"inventory_management":"shopify",'
+            '"inventory_policy":"deny"}',
+            "101",
+            12,
+        ),
+        (
+            '<option value="102" data-inventory="14" data-inventory-policy="deny" '
+            'data-inventory-management="shopify">',
+            "102",
+            14,
+        ),
+        (
+            'gwProductInventoryPolicy[103]="deny";'
+            'gwProductInventoryQuantity[103]="6";',
+            "103",
+            6,
+        ),
+        ('{id:105,inventory_management:"shopify",quantity:12}', "105", 12),
+        (
+            '{"inventory":{"106":{"inventory_management":null,'
+            '"inventory_policy":"deny","inventory_quantity":72}}}',
+            "106",
+            72,
+        ),
+    ),
+)
+def test_html_inventory_matches_recorded_theme_shape(
+    document: str,
+    identifier: str,
+    quantity: int,
+) -> None:
+    found = ShopifyConnector._inventory_from_html(document, {identifier})
+
+    assert found[identifier]["inventory_quantity"] == quantity
+
+
+def test_html_inventory_preserves_first_shape_precedence() -> None:
+    document = (
+        '{"id":60,"inventory_quantity":6,"inventory_management":"shopify",'
+        '"inventory_policy":"deny"}'
+        '<option value="60" data-inventory="66" data-inventory-policy="deny">'
+        'gwProductInventoryPolicy[60]="deny";'
+        'gwProductInventoryQuantity[60]="666";'
+    )
+
+    found = ShopifyConnector._inventory_from_html(document, {"60"})
+
+    assert found["60"]["inventory_quantity"] == 6
+
+
+def test_html_inventory_preserves_first_option_match_semantics() -> None:
+    document = (
+        '<option value="60" data-inventory="6" data-inventory-policy="continue">'
+        '<option value="60" data-inventory="66" data-inventory-policy="deny">'
+        'gwProductInventoryPolicy[60]="deny";'
+        'gwProductInventoryQuantity[60]="666";'
+    )
+
+    found = ShopifyConnector._inventory_from_html(document, {"60"})
+
+    assert found["60"]["inventory_quantity"] == 666
+
+
+def test_html_inventory_scans_each_precompiled_pattern_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class CountingPattern:
+        def __init__(self, name: str, pattern: re.Pattern[str]) -> None:
+            self.name = name
+            self.pattern = pattern
+
+        def finditer(self, document: str) -> Iterator[re.Match[str]]:
+            calls.append(self.name)
+            return self.pattern.finditer(document)
+
+    names = (
+        "_NATIVE_INVENTORY",
+        "_OPTION_INVENTORY",
+        "_GATEWAY_INVENTORY",
+        "_LOCAL_INVENTORY",
+        "_KEYED_INVENTORY",
+    )
+    for name in names:
+        monkeypatch.setattr(
+            shopify_module,
+            name,
+            CountingPattern(name, getattr(shopify_module, name)),
+        )
+
+    found = ShopifyConnector._inventory_from_html(
+        '{"id":500,"inventory_quantity":8,"inventory_management":"shopify",'
+        '"inventory_policy":"deny"}',
+        {str(identifier) for identifier in range(1, 1_001)},
+    )
+
+    assert found["500"]["inventory_quantity"] == 8
+    assert calls == list(names)
 
 
 async def test_inventory_batches_rotate_between_configured_groups() -> None:

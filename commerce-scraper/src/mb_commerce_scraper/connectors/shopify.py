@@ -52,6 +52,49 @@ from .base import (
 )
 from .factory import SimpleConnectorFactory
 
+_NATIVE_INVENTORY = re.compile(
+    r'"id":(?P<identifier>\d+)\b(?:(?!"id":\d).){0,1800}?'
+    r'"inventory_quantity":(?P<quantity>-?\d+)(?:(?!"id":\d).){0,500}?'
+    r'"inventory_management":"shopify"(?:(?!"id":\d).){0,300}?'
+    r'"inventory_policy":"deny"',
+    re.DOTALL,
+)
+_OPTION_INVENTORY = re.compile(
+    r"<option\b"
+    r"(?=[^>]*\bvalue=[\"\'](?P<identifier>\d+)[\"\'])"
+    r"[^>]*>",
+    re.IGNORECASE,
+)
+_OPTION_DENY_POLICY = re.compile(
+    r'data-inventory-policy=["\']deny["\']',
+    re.IGNORECASE,
+)
+_OPTION_QUANTITY = re.compile(
+    r'data-inventory=["\'](?P<quantity>-?\d+)["\']',
+    re.IGNORECASE,
+)
+_GATEWAY_INVENTORY = re.compile(
+    r"gwProductInventory(?P<field>Policy|Quantity)"
+    r"\[(?P<identifier>\d+)\]\s*=\s*"
+    r"[\"\'](?P<value>deny|-?\d+)[\"\']"
+)
+_LOCAL_INVENTORY = re.compile(
+    r"\bid\s*:\s*(?P<identifier>\d+)\b(?:(?!\bid\s*:).){0,700}?"
+    r'inventory_management\s*:\s*["\']shopify["\']'
+    r"(?:(?!\bid\s*:).){0,300}?\bquantity\s*:\s*(?P<quantity>-?\d+)",
+    re.DOTALL,
+)
+_KEYED_INVENTORY = re.compile(
+    r'["\'](?P<identifier>\d+)["\']\s*:\s*\{'
+    r'(?:(?!["\']\d+["\']\s*:).){0,1000}?'
+    r'["\']inventory_management["\']\s*:\s*(?:null|["\']shopify["\'])'
+    r'(?:(?!["\']\d+["\']\s*:).){0,500}?'
+    r'["\']inventory_policy["\']\s*:\s*["\']deny["\']'
+    r'(?:(?!["\']\d+["\']\s*:).){0,500}?'
+    r'["\']inventory_quantity["\']\s*:\s*(?P<quantity>-?\d+)',
+    re.DOTALL,
+)
+
 
 class ShopifyOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -378,72 +421,61 @@ class ShopifyConnector(CommerceConnector):
     def _inventory_from_html(
         document: str, variant_ids: set[str]
     ) -> dict[str, dict[str, Any]]:
+        if not variant_ids:
+            return {}
+
+        native_quantities: dict[str, int] = {}
+        for match in _NATIVE_INVENTORY.finditer(document):
+            identifier = match.group("identifier")
+            if identifier in variant_ids:
+                native_quantities.setdefault(identifier, int(match.group("quantity")))
+
+        option_quantities: dict[str, int] = {}
+        seen_options: set[str] = set()
+        for match in _OPTION_INVENTORY.finditer(document):
+            identifier = match.group("identifier")
+            if identifier not in variant_ids or identifier in seen_options:
+                continue
+            seen_options.add(identifier)
+            option = match.group(0)
+            quantity_match = _OPTION_QUANTITY.search(option)
+            if _OPTION_DENY_POLICY.search(option) and quantity_match:
+                option_quantities[identifier] = int(quantity_match.group("quantity"))
+
+        quantities = [native_quantities, option_quantities]
+
+        gateway_policies: set[str] = set()
+        gateway_quantities: dict[str, int] = {}
+        for match in _GATEWAY_INVENTORY.finditer(document):
+            identifier = match.group("identifier")
+            if identifier not in variant_ids:
+                continue
+            if match.group("field") == "Policy" and match.group("value") == "deny":
+                gateway_policies.add(identifier)
+            elif match.group("field") == "Quantity" and match.group("value") != "deny":
+                gateway_quantities.setdefault(identifier, int(match.group("value")))
+        quantities.append(
+            {
+                identifier: quantity
+                for identifier, quantity in gateway_quantities.items()
+                if identifier in gateway_policies
+            }
+        )
+
+        for pattern in (_LOCAL_INVENTORY, _KEYED_INVENTORY):
+            matches: dict[str, int] = {}
+            for match in pattern.finditer(document):
+                identifier = match.group("identifier")
+                if identifier in variant_ids:
+                    matches.setdefault(identifier, int(match.group("quantity")))
+            quantities.append(matches)
+
         found: dict[str, dict[str, Any]] = {}
         for identifier in variant_ids:
-            escaped = re.escape(identifier)
-            quantity: int | None = None
-            native = re.search(
-                rf'"id":{escaped}\b(?:(?!"id":\d).){{0,1800}}?'
-                rf'"inventory_quantity":(-?\d+)(?:(?!"id":\d).){{0,500}}?'
-                r'"inventory_management":"shopify"(?:(?!"id":\d).){0,300}?'
-                r'"inventory_policy":"deny"',
-                document,
-                re.DOTALL,
+            quantity = next(
+                (values[identifier] for values in quantities if identifier in values),
+                None,
             )
-            if native:
-                quantity = int(native.group(1))
-            if quantity is None:
-                option = re.search(
-                    rf'<option\b[^>]*\bvalue=["\']{escaped}["\'][^>]*>',
-                    document,
-                    re.IGNORECASE,
-                )
-                if option and re.search(
-                    r'data-inventory-policy=["\']deny["\']',
-                    option.group(0),
-                    re.IGNORECASE,
-                ):
-                    match = re.search(
-                        r'data-inventory=["\'](-?\d+)["\']',
-                        option.group(0),
-                        re.IGNORECASE,
-                    )
-                    if match:
-                        quantity = int(match.group(1))
-            if quantity is None and re.search(
-                rf'gwProductInventoryPolicy\[{escaped}\]\s*=\s*["\']deny["\']',
-                document,
-            ):
-                match = re.search(
-                    rf'gwProductInventoryQuantity\[{escaped}\]\s*=\s*["\'](-?\d+)["\']',
-                    document,
-                )
-                if match:
-                    quantity = int(match.group(1))
-            if quantity is None:
-                local = re.search(
-                    rf"\bid\s*:\s*{escaped}\b(?:(?!\bid\s*:).){{0,700}}?"
-                    r'inventory_management\s*:\s*["\']shopify["\']'
-                    r"(?:(?!\bid\s*:).){0,300}?\bquantity\s*:\s*(-?\d+)",
-                    document,
-                    re.DOTALL,
-                )
-                if local:
-                    quantity = int(local.group(1))
-            if quantity is None:
-                inventory = re.search(
-                    rf'["\']{escaped}["\']\s*:\s*\{{'
-                    r'(?:(?!["\']\d+["\']\s*:).){0,1000}?'
-                    r'["\']inventory_management["\']\s*:\s*(?:null|["\']shopify["\'])'
-                    r'(?:(?!["\']\d+["\']\s*:).){0,500}?'
-                    r'["\']inventory_policy["\']\s*:\s*["\']deny["\']'
-                    r'(?:(?!["\']\d+["\']\s*:).){0,500}?'
-                    r'["\']inventory_quantity["\']\s*:\s*(-?\d+)',
-                    document,
-                    re.DOTALL,
-                )
-                if inventory:
-                    quantity = int(inventory.group(1))
             if quantity is not None:
                 found[identifier] = {
                     "id": identifier,

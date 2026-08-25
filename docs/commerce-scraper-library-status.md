@@ -147,13 +147,14 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `fb93b43` — consolidate application site-plugin support.
 - `f2cb149` — remove retired Fetcher telemetry traversal.
 - `7e181b7` — centralize fail-closed Webshare profile quarantine.
+- `e1ffffc` — unify native collection assembly.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 76 source and test files.
-  - 326 library tests passed. Version-0 checkpoint compatibility and its
+  - 334 library tests passed. Version-0 checkpoint compatibility and its
     library test suite were removed before the first release.
   - Wheel and source distribution built.
   - 5 dependency-boundary tests passed.
@@ -189,8 +190,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
     country/provider constraints are checked before secret or database access.
 - [x] Full catalogue verification:
   - Ruff passed.
-  - Mypy passed for 239 source and test files.
-  - 937 tests passed, 2 skipped, 187 deselected, and 284 subtests passed in the
+  - Mypy passed for 240 source and test files.
+  - 938 tests passed, 2 skipped, 187 deselected, and 284 subtests passed in the
     latest fast-suite run; the wider repository fast gate also passed 32
     control-plane tests, 14 service tests, and 2 explorer tests.
   - The lower fast-test count reflects deletion of the obsolete specialized
@@ -250,6 +251,12 @@ architecture rules in the plan and are not separate scope-expansion goals.
   migration/round-trip tests passed against a throwaway database.
 - [x] Current implementation batch passed the verification gates recorded
   below.
+  - Shopify published-theme inventory extraction now precompiles its five
+    supported patterns and scans each document exactly once per encoding,
+    independent of variant count. Recorded theme-shape samples, precedence,
+    and a 1,000-variant scan-count regression passed. The complete scraper
+    release gate passed with 334 tests; catalogue Shopify parity passed 19
+    tests, and the full catalogue and installed-composition gates passed.
   - The pre-1.0 public-surface cleanup removed the parallel proxy-routing API
     and all version-0 checkpoint compatibility. Commerce-scraper lineages now
     reconstruct schema-v1 checkpoints directly from durable row identity.
