@@ -212,6 +212,10 @@ architecture rules in the plan and are not separate scope-expansion goals.
     with 2 expected skips, 282 deselections, and 284 subtests.
   - `main` branch protection requires the strict Python 3.11 and 3.12 CI matrix
     checks, so either Ruff or mypy failing blocks merge.
+  - The production CLI entrypoint completed a replay-only, dry-run
+    `connector_canary` rehearsal for Ceradel and `keramikbedarf-online`: 4,305
+    Shopify rows and 72 Shopware rows, zero errors or truncation, and 95 of 95
+    responses served from the recovered cache without network or output writes.
   - `pytest -q -m golden tests/test_recorded_library_parity.py -rs` replayed
     independent legacy/library paths from 51,579 recovered production-response
     entries: all 14 preflight, Shopify, Shopware, BigCommerce, PrestaShop,
