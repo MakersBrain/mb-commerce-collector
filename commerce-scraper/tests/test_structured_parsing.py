@@ -1,10 +1,16 @@
+import re
+from collections.abc import Iterator
 from decimal import Decimal
 
 import pytest
 
+import mb_commerce_scraper.parsing._structured as structured_module
 from mb_commerce_scraper.parsing._structured import (
+    DomFieldSelector,
+    VerifiedDomRules,
     breadcrumbs,
     decimal_amount,
+    dom_product,
     jsonld_brand,
     jsonld_gtin,
     jsonld_images,
@@ -58,3 +64,87 @@ def test_structured_drift_choices_are_explicit() -> None:
     assert probable_javascript_shell(
         '<html><body><div ng-version="17"></div><script src="app.js"></script></body></html>'
     )
+
+
+@pytest.mark.parametrize(
+    ("document", "rule", "expected"),
+    (
+        ('<H1 class="name featured">Clay &amp; Tools</H1>', "h1.name", "Clay & Tools"),
+        ('<main id="product">Verified</main>', "#product", "Verified"),
+        ('<span data-sku="A-1">SKU text</span>', "[data-sku]", "SKU text"),
+        ('<span data-kind="primary">Chosen</span>', "[data-kind=primary]", "Chosen"),
+        (
+            '<meta class="currency" content="EUR">',
+            "meta.currency",
+            "EUR",
+        ),
+    ),
+)
+def test_dom_selector_tokenization_preserves_matching_semantics(
+    document: str,
+    rule: str,
+    expected: str,
+) -> None:
+    assert structured_module.select(document, DomFieldSelector(selector=rule)) == expected
+
+
+def test_dom_product_tokenizes_and_parses_attributes_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = """<main id="product" data-live="yes">
+      <h1 class="name">DOM Clay</h1>
+      <p class="description">Smooth &amp; plastic</p>
+      <span class="sku" data-code="DOM-1">DOM-1</span>
+      <img class="image" src="/clay.jpg">
+      <span class="price">7.50</span>
+      <meta class="currency" content="EUR">
+      <link class="availability" content="InStock">
+    </main>"""
+    rules = VerifiedDomRules(
+        verification=(
+            DomFieldSelector(selector="#product"),
+            DomFieldSelector(selector="[data-live=yes]"),
+        ),
+        name=DomFieldSelector(selector="h1.name"),
+        description=DomFieldSelector(selector=".description"),
+        sku=DomFieldSelector(selector="[data-code]", attribute="data-code"),
+        image=DomFieldSelector(selector="img.image"),
+        price=DomFieldSelector(selector=".price"),
+        currency=DomFieldSelector(selector="meta.currency"),
+        availability=DomFieldSelector(selector="link.availability"),
+    )
+    scans = 0
+    attribute_parses = 0
+    original_pattern = structured_module._DOM_OPENING_TAG
+    original_attributes = structured_module._attributes
+
+    class CountingPattern:
+        def finditer(self, value: str) -> Iterator[re.Match[str]]:
+            nonlocal scans
+            scans += 1
+            return original_pattern.finditer(value)
+
+    def counted_attributes(raw: str) -> dict[str, str]:
+        nonlocal attribute_parses
+        attribute_parses += 1
+        return original_attributes(raw)
+
+    monkeypatch.setattr(structured_module, "_DOM_OPENING_TAG", CountingPattern())
+    monkeypatch.setattr(structured_module, "_attributes", counted_attributes)
+
+    product = dom_product(document, rules, "USD")
+
+    assert product == {
+        "@type": "Product",
+        "name": "DOM Clay",
+        "description": "Smooth & plastic",
+        "sku": "DOM-1",
+        "image": "/clay.jpg",
+        "offers": {
+            "price": "7.50",
+            "priceCurrency": "EUR",
+            "availability": "InStock",
+        },
+    }
+    assert scans == 1
+    assert attribute_parses == 8

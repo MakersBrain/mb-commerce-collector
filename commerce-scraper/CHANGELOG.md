@@ -64,6 +64,8 @@ based on Keep a Changelog, and releases follow the compatibility policy in
   parsing to one scan per supported encoding, independent of variant count.
 - Added request-scoped stale-cache lookups so middleware computes cache
   identity once and reads an expired artifact once through revalidation.
+- Tokenized opening tags and attributes once per verified DOM product instead
+  of rescanning and reparsing the document for every configured field.
 
 Before tagging the first release, move these notes under
 `## [0.1.0] - YYYY-MM-DD` and retain an empty `## [Unreleased]` section above

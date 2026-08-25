@@ -6,6 +6,7 @@ import hashlib
 import html
 import json
 import re
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urljoin, urlsplit
@@ -48,18 +49,47 @@ class VerifiedDomRules(BaseModel):
     availability: DomFieldSelector | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _DomOpeningTag:
+    name: str
+    attributes: dict[str, str]
+    content_start: int
+
+
+_DOM_OPENING_TAG = re.compile(
+    r"<(?P<tag>[A-Za-z][\w-]*)\b(?P<attrs>(?:[^>\"']|\"[^\"]*\"|'[^']*')*)>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _dom_tokens(document: str) -> tuple[_DomOpeningTag, ...]:
+    return tuple(
+        _DomOpeningTag(
+            name=match.group("tag"),
+            attributes=_attributes(match.group("attrs")),
+            content_start=match.end(),
+        )
+        for match in _DOM_OPENING_TAG.finditer(document)
+    )
+
+
 def select(document: str, rule: DomFieldSelector) -> str | None:
+    return _select(document, _dom_tokens(document), rule)
+
+
+def _select(
+    document: str,
+    tokens: tuple[_DomOpeningTag, ...],
+    rule: DomFieldSelector,
+) -> str | None:
     parsed = _selector(rule.selector)
     if parsed is None:
         return None
     tag, wanted_id, wanted_class, wanted_attr, wanted_value = parsed
-    tag_pattern = tag or r"[A-Za-z][\w-]*"
-    for match in re.finditer(
-        rf"<(?P<tag>{tag_pattern})\b(?P<attrs>(?:[^>\"']|\"[^\"]*\"|'[^']*')*)>",
-        document,
-        re.IGNORECASE | re.DOTALL,
-    ):
-        attrs = _attributes(match.group("attrs"))
+    for token in tokens:
+        if tag and token.name.casefold() != tag.casefold():
+            continue
+        attrs = token.attributes
         if wanted_id and attrs.get("id") != wanted_id:
             continue
         if wanted_class and wanted_class not in (attrs.get("class") or "").split():
@@ -70,15 +100,15 @@ def select(document: str, rule: DomFieldSelector) -> str | None:
             continue
         if rule.attribute:
             return clean(attrs.get(rule.attribute)) or None
-        if match.group("tag").casefold() in _VOID_TAGS:
+        if token.name.casefold() in _VOID_TAGS:
             return clean(attrs.get("content") or attrs.get("src") or attrs.get("value")) or None
         close = re.search(
-            rf"</{re.escape(match.group('tag'))}\s*>",
-            document[match.end() :],
+            rf"</{re.escape(token.name)}\s*>",
+            document[token.content_start :],
             re.IGNORECASE,
         )
-        end = match.end() + close.start() if close else len(document)
-        return clean(document[match.end() : end]) or None
+        end = token.content_start + close.start() if close else len(document)
+        return clean(document[token.content_start : end]) or None
     return None
 
 
@@ -325,25 +355,28 @@ def opengraph_product(document: str) -> dict[str, Any] | None:
 def dom_product(
     document: str, rules: VerifiedDomRules, default_currency: str | None
 ) -> dict[str, Any] | None:
-    if not all(select(document, rule) for rule in rules.verification):
+    tokens = _dom_tokens(document)
+
+    def selected(rule: DomFieldSelector | None) -> str | None:
+        return _select(document, tokens, rule) if rule is not None else None
+
+    if not all(selected(rule) for rule in rules.verification):
         return None
-    name = select(document, rules.name)
+    name = selected(rules.name)
     if not name:
         return None
     return {
         "@type": "Product",
         "name": name,
-        "description": select(document, rules.description) if rules.description else None,
-        "sku": select(document, rules.sku) if rules.sku else None,
-        "image": select(document, rules.image) if rules.image else None,
+        "description": selected(rules.description),
+        "sku": selected(rules.sku),
+        "image": selected(rules.image),
         "offers": {
-            "price": select(document, rules.price) if rules.price else None,
+            "price": selected(rules.price),
             "priceCurrency": (
-                select(document, rules.currency) if rules.currency else default_currency
+                selected(rules.currency) if rules.currency else default_currency
             ),
-            "availability": (
-                select(document, rules.availability) if rules.availability else None
-            ),
+            "availability": selected(rules.availability),
         },
     }
 

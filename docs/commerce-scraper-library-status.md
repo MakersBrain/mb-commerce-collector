@@ -149,13 +149,14 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `7e181b7` — centralize fail-closed Webshare profile quarantine.
 - `e1ffffc` — unify native collection assembly.
 - `519791a` — scan Shopify inventory HTML once per supported encoding.
+- `0947bcc` — reuse request-scoped cache lookups.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 76 source and test files.
-  - 336 library tests passed. Version-0 checkpoint compatibility and its
+  - 342 library tests passed. Version-0 checkpoint compatibility and its
     library test suite were removed before the first release.
   - Wheel and source distribution built.
   - 5 dependency-boundary tests passed.
@@ -252,6 +253,11 @@ architecture rules in the plan and are not separate scope-expansion goals.
   migration/round-trip tests passed against a throwaway database.
 - [x] Current implementation batch passed the verification gates recorded
   below.
+  - Verified DOM products now tokenize opening tags and attributes once per
+    document, then reuse those tokens across all verification and field rules.
+    Selector parity and scan/parse-count regressions passed alongside the
+    complete scraper gate (342 tests), full catalogue gate, and installed
+    two-wheel composition.
   - Request-scoped `ResponseCacheLookup` composition now computes standard and
     catalogue cache identity once, classifies fresh/stale data from one
     artifact read, and reuses the captured write identity after a miss or 304.

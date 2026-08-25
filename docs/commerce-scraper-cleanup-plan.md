@@ -382,13 +382,29 @@ behavioral consequences and should be scheduled on its own.**
   full fast suite (938 passed, 2 skipped, 187 deselected, 284 subtests), and
   installed two-wheel composition passed.
 
-- [ ] **C3 Tokenize the document once per `dom_product`.**
+- [x] **C3 Tokenize the document once per `dom_product`.**
   `select()` builds an f-string pattern and `finditer`s every opening tag,
   running `_attributes()` on each until a match. `dom_product` calls it once
   per verification rule plus up to seven field rules — roughly ten full
   tag-by-tag passes over the same document, re-parsing attributes from scratch
   each pass. Tokenize opening tags and their attribute dicts once, then filter
   that list per rule.
+  **Completed.** A module-level opening-tag pattern now builds one immutable
+  token sequence containing tag names, parsed attribute dictionaries, and
+  content offsets. `dom_product` shares that sequence across every verification
+  and field rule; standalone `select` retains its original behavior through the
+  same selector helper. Tag/id/class/attribute matching, void-tag fallback,
+  entity cleanup, and first-closing-tag content semantics are unchanged.
+  *Verified:* selector-shape parity covers tag/class, id, attribute presence,
+  attribute value, case-insensitive tags, entity cleanup, and void metadata. An
+  instrumented nine-rule product proves one opening-tag scan and one attribute
+  parse for each of its eight opening tags. The focused library parser and page
+  connector slice passed 55 tests; the complete scraper gate passed with 342
+  tests, Ruff, mypy over 76 files, schemas, package and installed-wheel
+  contracts, custom-connector verification, and release checks. The focused
+  catalogue adapter/framework parity slice passed 52 tests; catalogue Ruff,
+  mypy over 240 files, the full fast suite (938 passed, 2 skipped, 187
+  deselected, 284 subtests), and installed two-wheel composition passed.
 
 - [ ] **C4 Bound the httpx client cache.**
   `HttpxTransport._clients` is keyed by `(origin, resolved_address)` and never
