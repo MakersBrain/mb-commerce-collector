@@ -17,8 +17,10 @@ from mb_commerce_scraper.connectors import (
     GenericPagesFactory,
     GenericPagesOptions,
 )
+from mb_commerce_scraper.connectors._request_profiles import (
+    LEGACY_BROWSER_USER_AGENT,
+)
 from mb_commerce_scraper.connectors.base import ConnectorContext
-from mb_commerce_scraper.connectors.page_engine import PAGE_BROWSER_USER_AGENT
 from mb_commerce_scraper.parsing import JsonLdProductParser
 from mb_commerce_scraper.testing import FakeTransport, assert_connector_pages
 from mb_commerce_scraper.transports import RequestPurpose, TransportFailure
@@ -99,7 +101,7 @@ async def test_sitemap_jsonld_collection_finishes_with_complete_terminal_page() 
     assert pages[0].terminal and pages[0].enumeration_intact
     assert pages[0].resume_after is None
     assert transport.requests[-1].headers == {
-        "user-agent": PAGE_BROWSER_USER_AGENT
+        "user-agent": LEGACY_BROWSER_USER_AGENT
     }
 
 
@@ -435,7 +437,7 @@ async def test_category_and_pagination_discovery_feed_the_shared_engine() -> Non
         "https://shop.test/products/blue",
     ]
     assert all(
-        request.headers == {"user-agent": PAGE_BROWSER_USER_AGENT}
+        request.headers == {"user-agent": LEGACY_BROWSER_USER_AGENT}
         for request in transport.requests
     )
 

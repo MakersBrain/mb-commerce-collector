@@ -96,3 +96,25 @@ async def test_bigcommerce_canary_matches_legacy_product_without_variants() -> N
 
     assert len(legacy_result.records) == len(canary_result.records) == 1
     assert stable(canary_result.records[0]) == stable(legacy_result.records[0])
+
+
+@pytest.mark.asyncio
+async def test_bigcommerce_canary_preserves_legacy_configured_brand_basis() -> None:
+    product = node()
+    product["brand"] = None
+    graph = payload([product])
+    legacy_config = {**config("bigcommerce"), "brand": "Source Brand"}
+    canary_config = {**config("bigcommerce_connector"), "brand": "Source Brand"}
+    legacy = scrapers.build("bigcommerce", "shop", legacy_config, Fetcher(graph))
+    canary = scrapers.build(
+        "bigcommerce_connector",
+        "shop",
+        canary_config,
+        Fetcher(graph),
+    )
+
+    legacy_result = await legacy.scrape()
+    canary_result = await canary.scrape()
+
+    assert legacy_result.records[0]["brand_basis"] == "published"
+    assert stable(canary_result.records[0]) == stable(legacy_result.records[0])

@@ -1,0 +1,833 @@
+{
+  "digest": "3ba9daa5a4ca094fb51de13eee9594b0f6171cf4d6bff9939b05c56a32e55a30",
+  "discovered": 421,
+  "error_count": 0,
+  "errors": [],
+  "extraction_method": "graphql",
+  "field_coverage": {
+    "all_image_urls": 373,
+    "brand": 373,
+    "category_path": 373,
+    "claims": 32,
+    "colour": 213,
+    "description": 373,
+    "documents": 303,
+    "effects": 101,
+    "family": 373,
+    "firing": 140,
+    "form": 57,
+    "gtin": 0,
+    "manufacturer_sku": 286,
+    "package_size": 221,
+    "stock_quantity": 318,
+    "supplier_reference": 372,
+    "surface": 159,
+    "unit_price": 221,
+    "vat_status": 373
+  },
+  "notes": [
+    "storefront token discovered on https://www.speedballart.com/shop/ceramics/"
+  ],
+  "records": 373,
+  "rendered_pages": 0,
+  "requests": 10,
+  "sample": [
+    {
+      "all_image_urls": [
+        "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1441/001056_-_UG_Royal_Blue_-_16oz__43520.1769114462.jpg",
+        "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1443/CE_Studio_Underglaaze_2oz_Detail-1_1__79643.1769114466.jpg",
+        "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1444/CE_Studio_Underglaaze_Detail-1_1__48498.1769114510.jpg",
+        "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1442/FJFisher_Speedball_Underglaze_Map_06__69568.1769114462.jpg"
+      ],
+      "application_methods": [
+        "brushing"
+      ],
+      "availability": "https://schema.org/InStock",
+      "brand": "Speedball",
+      "brand_basis": "published",
+      "category_path": [
+        "Shop",
+        "Ceramics",
+        "Underglazes",
+        "Speedball",
+        "Glazes + Underglazes"
+      ],
+      "claims": null,
+      "coats": null,
+      "colour": {
+        "basis": "product_attribute",
+        "name": "White"
+      },
+      "currency": "USD",
+      "description": "you asked, we answered Smooth Operator Speedball Underglazes have always been known for their superior value and for vibrant and consistent firing results, but in late 2023, we answered the call to adjust our formula to enhance brushability and delivered in a big way! Now the entire range of (48) colors features the same rich color palette in a smooth consistency perfect for any application, no modification required.",
+      "documents": [
+        {
+          "name": "Safety Data Sheets",
+          "type": "safety_data_sheet",
+          "url": "https://www.speedballart.com/underglazes/Underglaze SDS | CE Underglazes MSDS.pdf"
+        }
+      ],
+      "effects": [
+        "transparent",
+        "opaque"
+      ],
+      "external_id": "speedball:https://www.speedballart.com/underglazes/#1015",
+      "extraction_method": "graphql",
+      "family": "underglaze",
+      "fetched_at": "<volatile>",
+      "firing": {
+        "basis": "published_text",
+        "cone_max": "10",
+        "cone_min": "05",
+        "cone_system": "orton",
+        "evidence": "Cone 05-10",
+        "max_celsius": 1305,
+        "min_celsius": 1046,
+        "temperature_basis": "derived_from_cone"
+      },
+      "form": null,
+      "format": "ceramics.catalogue_item.v2",
+      "gtin": null,
+      "image_url": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/attribute_rule_images/660_source_1774431905.jpg",
+      "list_price": null,
+      "manufacturer_sku": "001000",
+      "manufacturer_sku_basis": "manufacturer_shop",
+      "min_order_quantity": null,
+      "name": "Underglazes White, 2 fl oz",
+      "name_parsed_from": null,
+      "name_raw": "Underglazes White, 2 fl oz",
+      "package_size": {
+        "dimension": "volume",
+        "evidence": "2 fl oz",
+        "millilitres": 59.147,
+        "unit": "fl oz",
+        "value": 2.0
+      },
+      "parent_external_id": "speedball:https://www.speedballart.com/underglazes/",
+      "price": 6.61,
+      "price_text": null,
+      "product_name": "Underglazes",
+      "product_url": "https://www.speedballart.com/underglazes/",
+      "raw": {
+        "product": {
+          "availabilityV2": {
+            "description": "",
+            "status": "Available"
+          },
+          "brand": {
+            "name": "Speedball"
+          },
+          "categories": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Shop",
+                  "path": "/shop/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Ceramics",
+                  "path": "/shop/ceramics/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Underglazes",
+                  "path": "/shop/ceramics/glazes-underglazes/underglazes/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Speedball",
+                  "path": "/brands/speedball/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Glazes + Underglazes",
+                  "path": "/shop/ceramics/glazes-underglazes/"
+                }
+              }
+            ]
+          },
+          "customFields": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Short Description",
+                  "value": "These opaque underglazes will not move or bleed. Formulated for in a wide firing range from Cone 05-10, all colors are intermixable, lead-free + dinnerware-safe when used and fired as directed.  Swatches depict color with and without clear glaze."
+                }
+              },
+              {
+                "node": {
+                  "name": "Safety Data Sheets",
+                  "value": "Underglaze SDS | CE Underglazes MSDS.pdf"
+                }
+              },
+              {
+                "node": {
+                  "name": "Badge icon",
+                  "value": "made in the usa | flag-usa.png"
+                }
+              },
+              {
+                "node": {
+                  "name": "Badge icon",
+                  "value": "vegan | lucide-vegan.png"
+                }
+              },
+              {
+                "node": {
+                  "name": "Product Category",
+                  "value": "Ceramics"
+                }
+              },
+              {
+                "node": {
+                  "name": "badge",
+                  "value": "Popular"
+                }
+              }
+            ]
+          },
+          "defaultImage": {
+            "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1441/001056_-_UG_Royal_Blue_-_16oz__43520.1769114462.jpg"
+          },
+          "description": "<section class=\"about-product dark-bg\">\n<div class=\"container\">\n<div class=\"about-product__inner\">\n<div class=\"about-product__image\">\n<div class=\"about-product__img\"><img src=\"https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/image-manager/ce-studio-underglaaze-brushability2.jpg?t=1769093256\" alt=\"\" width=\"2065\" height=\"1901\" /></div>\n</div>\n<div class=\"about-product__content\">\n<p class=\"sub-heading\">you asked, we answered</p>\n<h2 class=\"page-heading\">Smooth Operator</h2>\n<p>Speedball Underglazes have always been known for their superior value and for vibrant and consistent firing results, but in late 2023, we answered the call to adjust our formula to enhance brushability and delivered in a big way! Now the entire range of (48) colors features the same rich color palette in a smooth consistency perfect for any application, no modification required.</p>\n</div>\n</div>\n</div>\n</section>",
+          "entityId": 122,
+          "images": {
+            "edges": [
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1441/001056_-_UG_Royal_Blue_-_16oz__43520.1769114462.jpg"
+                }
+              },
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1443/CE_Studio_Underglaaze_2oz_Detail-1_1__79643.1769114466.jpg"
+                }
+              },
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1444/CE_Studio_Underglaaze_Detail-1_1__48498.1769114510.jpg"
+                }
+              },
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1442/FJFisher_Speedball_Underglaze_Map_06__69568.1769114462.jpg"
+                }
+              }
+            ]
+          },
+          "name": "Underglazes",
+          "path": "/underglazes/",
+          "prices": {
+            "price": {
+              "currencyCode": "USD",
+              "value": 6.61
+            },
+            "retailPrice": null
+          },
+          "sku": ""
+        },
+        "variant": {
+          "defaultImage": {
+            "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/attribute_rule_images/660_source_1774431905.jpg"
+          },
+          "entityId": 1015,
+          "inventory": {
+            "aggregated": {
+              "availableToSell": 878
+            },
+            "isInStock": true
+          },
+          "options": {
+            "edges": [
+              {
+                "node": {
+                  "displayName": "Color",
+                  "values": {
+                    "edges": [
+                      {
+                        "node": {
+                          "label": "White"
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "node": {
+                  "displayName": "Size",
+                  "values": {
+                    "edges": [
+                      {
+                        "node": {
+                          "label": "2 fl oz"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "prices": {
+            "price": {
+              "currencyCode": "USD",
+              "value": 6.61
+            }
+          },
+          "sku": "001000"
+        }
+      },
+      "source": "speedball",
+      "source_detail_level": "api",
+      "source_updated_at": null,
+      "stock_quantity": 878,
+      "supplier_reference": "001000",
+      "surface": null,
+      "technical_attributes": {
+        "Badge icon": "vegan | lucide-vegan.png",
+        "Color": "White",
+        "Product Category": "Ceramics",
+        "Safety Data Sheets": "Underglaze SDS | CE Underglazes MSDS.pdf",
+        "Short Description": "These opaque underglazes will not move or bleed. Formulated for in a wide firing range from Cone 05-10, all colors are intermixable, lead-free + dinnerware-safe when used and fired as directed. Swatches depict color with and without clear glaze.",
+        "Size": "2 fl oz",
+        "badge": "Popular"
+      },
+      "unit_price": {
+        "currency": "USD",
+        "per": "l",
+        "value": 111.7555
+      },
+      "variant_title": "White, 2 fl oz",
+      "vat_rate": null,
+      "vat_status": "exclusive"
+    },
+    {
+      "all_image_urls": [
+        "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1441/001056_-_UG_Royal_Blue_-_16oz__43520.1769114462.jpg",
+        "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1443/CE_Studio_Underglaaze_2oz_Detail-1_1__79643.1769114466.jpg",
+        "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1444/CE_Studio_Underglaaze_Detail-1_1__48498.1769114510.jpg",
+        "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1442/FJFisher_Speedball_Underglaze_Map_06__69568.1769114462.jpg"
+      ],
+      "application_methods": [
+        "brushing"
+      ],
+      "availability": "https://schema.org/InStock",
+      "brand": "Speedball",
+      "brand_basis": "published",
+      "category_path": [
+        "Shop",
+        "Ceramics",
+        "Underglazes",
+        "Speedball",
+        "Glazes + Underglazes"
+      ],
+      "claims": null,
+      "coats": null,
+      "colour": {
+        "basis": "product_attribute",
+        "name": "White"
+      },
+      "currency": "USD",
+      "description": "you asked, we answered Smooth Operator Speedball Underglazes have always been known for their superior value and for vibrant and consistent firing results, but in late 2023, we answered the call to adjust our formula to enhance brushability and delivered in a big way! Now the entire range of (48) colors features the same rich color palette in a smooth consistency perfect for any application, no modification required.",
+      "documents": [
+        {
+          "name": "Safety Data Sheets",
+          "type": "safety_data_sheet",
+          "url": "https://www.speedballart.com/underglazes/Underglaze SDS | CE Underglazes MSDS.pdf"
+        }
+      ],
+      "effects": [
+        "transparent",
+        "opaque"
+      ],
+      "external_id": "speedball:https://www.speedballart.com/underglazes/#1016",
+      "extraction_method": "graphql",
+      "family": "underglaze",
+      "fetched_at": "<volatile>",
+      "firing": {
+        "basis": "published_text",
+        "cone_max": "10",
+        "cone_min": "05",
+        "cone_system": "orton",
+        "evidence": "Cone 05-10",
+        "max_celsius": 1305,
+        "min_celsius": 1046,
+        "temperature_basis": "derived_from_cone"
+      },
+      "form": null,
+      "format": "ceramics.catalogue_item.v2",
+      "gtin": null,
+      "image_url": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/attribute_rule_images/611_source_1774431906.jpg",
+      "list_price": null,
+      "manufacturer_sku": "001050",
+      "manufacturer_sku_basis": "manufacturer_shop",
+      "min_order_quantity": null,
+      "name": "Underglazes White, Pint",
+      "name_parsed_from": null,
+      "name_raw": "Underglazes White, Pint",
+      "package_size": {
+        "basis": "named_container",
+        "dimension": "volume",
+        "evidence": "pint",
+        "millilitres": 473.176,
+        "unit": "pint",
+        "value": 1.0
+      },
+      "parent_external_id": "speedball:https://www.speedballart.com/underglazes/",
+      "price": 20.13,
+      "price_text": null,
+      "product_name": "Underglazes",
+      "product_url": "https://www.speedballart.com/underglazes/",
+      "raw": {
+        "product": {
+          "availabilityV2": {
+            "description": "",
+            "status": "Available"
+          },
+          "brand": {
+            "name": "Speedball"
+          },
+          "categories": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Shop",
+                  "path": "/shop/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Ceramics",
+                  "path": "/shop/ceramics/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Underglazes",
+                  "path": "/shop/ceramics/glazes-underglazes/underglazes/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Speedball",
+                  "path": "/brands/speedball/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Glazes + Underglazes",
+                  "path": "/shop/ceramics/glazes-underglazes/"
+                }
+              }
+            ]
+          },
+          "customFields": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Short Description",
+                  "value": "These opaque underglazes will not move or bleed. Formulated for in a wide firing range from Cone 05-10, all colors are intermixable, lead-free + dinnerware-safe when used and fired as directed.  Swatches depict color with and without clear glaze."
+                }
+              },
+              {
+                "node": {
+                  "name": "Safety Data Sheets",
+                  "value": "Underglaze SDS | CE Underglazes MSDS.pdf"
+                }
+              },
+              {
+                "node": {
+                  "name": "Badge icon",
+                  "value": "made in the usa | flag-usa.png"
+                }
+              },
+              {
+                "node": {
+                  "name": "Badge icon",
+                  "value": "vegan | lucide-vegan.png"
+                }
+              },
+              {
+                "node": {
+                  "name": "Product Category",
+                  "value": "Ceramics"
+                }
+              },
+              {
+                "node": {
+                  "name": "badge",
+                  "value": "Popular"
+                }
+              }
+            ]
+          },
+          "defaultImage": {
+            "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1441/001056_-_UG_Royal_Blue_-_16oz__43520.1769114462.jpg"
+          },
+          "description": "<section class=\"about-product dark-bg\">\n<div class=\"container\">\n<div class=\"about-product__inner\">\n<div class=\"about-product__image\">\n<div class=\"about-product__img\"><img src=\"https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/image-manager/ce-studio-underglaaze-brushability2.jpg?t=1769093256\" alt=\"\" width=\"2065\" height=\"1901\" /></div>\n</div>\n<div class=\"about-product__content\">\n<p class=\"sub-heading\">you asked, we answered</p>\n<h2 class=\"page-heading\">Smooth Operator</h2>\n<p>Speedball Underglazes have always been known for their superior value and for vibrant and consistent firing results, but in late 2023, we answered the call to adjust our formula to enhance brushability and delivered in a big way! Now the entire range of (48) colors features the same rich color palette in a smooth consistency perfect for any application, no modification required.</p>\n</div>\n</div>\n</div>\n</section>",
+          "entityId": 122,
+          "images": {
+            "edges": [
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1441/001056_-_UG_Royal_Blue_-_16oz__43520.1769114462.jpg"
+                }
+              },
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1443/CE_Studio_Underglaaze_2oz_Detail-1_1__79643.1769114466.jpg"
+                }
+              },
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1444/CE_Studio_Underglaaze_Detail-1_1__48498.1769114510.jpg"
+                }
+              },
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/122/1442/FJFisher_Speedball_Underglaze_Map_06__69568.1769114462.jpg"
+                }
+              }
+            ]
+          },
+          "name": "Underglazes",
+          "path": "/underglazes/",
+          "prices": {
+            "price": {
+              "currencyCode": "USD",
+              "value": 6.61
+            },
+            "retailPrice": null
+          },
+          "sku": ""
+        },
+        "variant": {
+          "defaultImage": {
+            "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/attribute_rule_images/611_source_1774431906.jpg"
+          },
+          "entityId": 1016,
+          "inventory": {
+            "aggregated": {
+              "availableToSell": 1085
+            },
+            "isInStock": true
+          },
+          "options": {
+            "edges": [
+              {
+                "node": {
+                  "displayName": "Color",
+                  "values": {
+                    "edges": [
+                      {
+                        "node": {
+                          "label": "White"
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "node": {
+                  "displayName": "Size",
+                  "values": {
+                    "edges": [
+                      {
+                        "node": {
+                          "label": "Pint"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "prices": {
+            "price": {
+              "currencyCode": "USD",
+              "value": 20.13
+            }
+          },
+          "sku": "001050"
+        }
+      },
+      "source": "speedball",
+      "source_detail_level": "api",
+      "source_updated_at": null,
+      "stock_quantity": 1085,
+      "supplier_reference": "001050",
+      "surface": null,
+      "technical_attributes": {
+        "Badge icon": "vegan | lucide-vegan.png",
+        "Color": "White",
+        "Product Category": "Ceramics",
+        "Safety Data Sheets": "Underglaze SDS | CE Underglazes MSDS.pdf",
+        "Short Description": "These opaque underglazes will not move or bleed. Formulated for in a wide firing range from Cone 05-10, all colors are intermixable, lead-free + dinnerware-safe when used and fired as directed. Swatches depict color with and without clear glaze.",
+        "Size": "Pint",
+        "badge": "Popular"
+      },
+      "unit_price": {
+        "currency": "USD",
+        "per": "l",
+        "value": 42.5423
+      },
+      "variant_title": "White, Pint",
+      "vat_rate": null,
+      "vat_status": "exclusive"
+    },
+    {
+      "all_image_urls": [
+        "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/570/1955/002285_Studio_Plus_Glaze_Sampler_Pack__38966.1779478918.jpg",
+        "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/570/1956/002285_Studio_Plus_Glaze_Sampler_Pack__99764.1779478918.png"
+      ],
+      "application_methods": null,
+      "availability": "https://schema.org/InStock",
+      "brand": "Speedball",
+      "brand_basis": "published",
+      "category_path": [
+        "Shop",
+        "Ceramics",
+        "Speedball",
+        "Glazes + Underglazes",
+        "New & Featured",
+        "Studio Plus Glazes",
+        "Studio Plus Glazes"
+      ],
+      "claims": null,
+      "coats": null,
+      "colour": null,
+      "currency": "USD",
+      "description": "Studio Plus Sampler Pack A Lil' Dab Will Do Studio Plus was developed by popular demand, with artists wanting to find a vibrancy- and opacity-packed line offered at a value. Featuring (18) intermixable, core colors that are designed to fire true from 06-6 and (6) specialty colors that are uniquely able to deliver mottling magic at low-fire temps (Cone 06/05), this line is sure to become a fan favorite in pro and community studios alike! Packed with addition value, this pack is a GREAT way to test a wide range of this new studio favorite without breaking the bank!",
+      "documents": [
+        {
+          "name": "Safety Data Sheets",
+          "type": "safety_data_sheet",
+          "url": "https://www.speedballart.com/studio-plus-glaze-sampler-pack/Studio Plus SDS | CE Studio Plus SDS.pdf"
+        }
+      ],
+      "effects": null,
+      "external_id": "speedball:https://www.speedballart.com/studio-plus-glaze-sampler-pack/#3275",
+      "extraction_method": "graphql",
+      "family": "underglaze",
+      "fetched_at": "<volatile>",
+      "firing": {
+        "basis": "published_text",
+        "cone_max": "06",
+        "cone_min": "06",
+        "cone_system": "orton",
+        "evidence": "Cone 06",
+        "max_celsius": 999,
+        "min_celsius": 999,
+        "temperature_basis": "derived_from_cone"
+      },
+      "form": null,
+      "format": "ceramics.catalogue_item.v2",
+      "gtin": null,
+      "image_url": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/570/1955/002285_Studio_Plus_Glaze_Sampler_Pack__38966.1779478918.jpg",
+      "list_price": null,
+      "manufacturer_sku": "002285",
+      "manufacturer_sku_basis": "manufacturer_shop",
+      "min_order_quantity": null,
+      "name": "Studio Plus Glaze Sampler Pack",
+      "name_parsed_from": null,
+      "name_raw": "Studio Plus Glaze Sampler Pack",
+      "package_size": {
+        "dimension": "volume",
+        "evidence": "2fl oz",
+        "millilitres": 59.147,
+        "unit": "fl oz",
+        "value": 2.0
+      },
+      "parent_external_id": "speedball:https://www.speedballart.com/studio-plus-glaze-sampler-pack/",
+      "price": 60.08,
+      "price_text": null,
+      "product_name": "Studio Plus Glaze Sampler Pack",
+      "product_url": "https://www.speedballart.com/studio-plus-glaze-sampler-pack/",
+      "raw": {
+        "product": {
+          "availabilityV2": {
+            "description": "",
+            "status": "Available"
+          },
+          "brand": {
+            "name": "Speedball"
+          },
+          "categories": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Shop",
+                  "path": "/shop/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Ceramics",
+                  "path": "/shop/ceramics/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Speedball",
+                  "path": "/brands/speedball/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Glazes + Underglazes",
+                  "path": "/shop/ceramics/glazes-underglazes/"
+                }
+              },
+              {
+                "node": {
+                  "name": "New & Featured",
+                  "path": "/shop/new-featured/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Studio Plus Glazes",
+                  "path": "/shop/new-featured/studio-plus-glazes/"
+                }
+              },
+              {
+                "node": {
+                  "name": "Studio Plus Glazes",
+                  "path": "/shop/ceramics/glazes-underglazes/studio-plus-glazes/"
+                }
+              }
+            ]
+          },
+          "customFields": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Short Description",
+                  "value": "Speedball Studio Plus glazes are a fantastic addition to any creative space!  Features (12) 2fl. oz bottles of the line's most popular colors, including (10) core and (2) mottling colors."
+                }
+              },
+              {
+                "node": {
+                  "name": "Badge icon",
+                  "value": "made in the usa | flag-usa.png"
+                }
+              },
+              {
+                "node": {
+                  "name": "Badge icon",
+                  "value": "vegan | lucide-vegan.png"
+                }
+              },
+              {
+                "node": {
+                  "name": "Badge",
+                  "value": "New"
+                }
+              },
+              {
+                "node": {
+                  "name": "Safety Data Sheets",
+                  "value": "Studio Plus SDS | CE Studio Plus SDS.pdf"
+                }
+              },
+              {
+                "node": {
+                  "name": "Spec_Contents",
+                  "value": "Includes (1)ea. 2fl oz bottles of the following Studio Plus Glazes: Glacier, Onyx, Rich Brown, Cherry Crush, Pink Sunset, Tangerine, Bumble Bee, Evergreen, Lapis Lazuli, Mystic Plum, Caribbean, Plumberry Ember"
+                }
+              },
+              {
+                "node": {
+                  "name": "Product Category",
+                  "value": "Ceramics"
+                }
+              }
+            ]
+          },
+          "defaultImage": {
+            "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/570/1955/002285_Studio_Plus_Glaze_Sampler_Pack__38966.1779478918.jpg"
+          },
+          "description": "<section class=\"about-product dark-bg\">\n<div class=\"container\">\n<div class=\"about-product__inner\">\n<div class=\"about-product__image\">\n<div class=\"about-product__img\"><img src=\"https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/image-manager/studio-plus-sampler.png?t=1779478889\" alt=\"\" width=\"1200\" height=\"1592\" /></div>\n</div>\n<div class=\"about-product__content\">\n<p class=\"sub-heading\">Studio Plus Sampler Pack</p>\n<h2 class=\"page-heading\">A Lil' Dab Will Do</h2>\n<p>Studio Plus was developed by popular demand, with artists wanting to find a vibrancy- and opacity-packed line offered at a value. Featuring (18) intermixable, core colors that are designed to fire true from 06-6 and (6) specialty colors that are uniquely able to deliver mottling magic at low-fire temps (Cone 06/05), this line is sure to become a fan favorite in pro and community studios alike! Packed with addition value, this pack is a GREAT way to test a wide range of this new studio favorite without breaking the bank!</p>\n</div>\n</div>\n</div>\n</section>",
+          "entityId": 570,
+          "images": {
+            "edges": [
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/570/1955/002285_Studio_Plus_Glaze_Sampler_Pack__38966.1779478918.jpg"
+                }
+              },
+              {
+                "node": {
+                  "urlOriginal": "https://cdn11.bigcommerce.com/s-glqkoqulcz/images/stencil/original/products/570/1956/002285_Studio_Plus_Glaze_Sampler_Pack__99764.1779478918.png"
+                }
+              }
+            ]
+          },
+          "name": "Studio Plus Glaze Sampler Pack",
+          "path": "/studio-plus-glaze-sampler-pack/",
+          "prices": {
+            "price": {
+              "currencyCode": "USD",
+              "value": 60.08
+            },
+            "retailPrice": null
+          },
+          "sku": "002285"
+        },
+        "variant": {
+          "defaultImage": null,
+          "entityId": 3275,
+          "inventory": {
+            "aggregated": {
+              "availableToSell": 1
+            },
+            "isInStock": true
+          },
+          "options": {
+            "edges": []
+          },
+          "prices": {
+            "price": {
+              "currencyCode": "USD",
+              "value": 60.08
+            }
+          },
+          "sku": "002285"
+        }
+      },
+      "source": "speedball",
+      "source_detail_level": "api",
+      "source_updated_at": null,
+      "stock_quantity": 1,
+      "supplier_reference": "002285",
+      "surface": null,
+      "technical_attributes": {
+        "Badge": "New",
+        "Badge icon": "vegan | lucide-vegan.png",
+        "Product Category": "Ceramics",
+        "Safety Data Sheets": "Studio Plus SDS | CE Studio Plus SDS.pdf",
+        "Short Description": "Speedball Studio Plus glazes are a fantastic addition to any creative space! Features (12) 2fl. oz bottles of the line's most popular colors, including (10) core and (2) mottling colors.",
+        "Spec_Contents": "Includes (1)ea. 2fl oz bottles of the following Studio Plus Glazes: Glacier, Onyx, Rich Brown, Cherry Crush, Pink Sunset, Tangerine, Bumble Bee, Evergreen, Lapis Lazuli, Mystic Plum, Caribbean, Plumberry Ember"
+      },
+      "unit_price": {
+        "currency": "USD",
+        "per": "l",
+        "value": 1015.7743
+      },
+      "variant_title": null,
+      "vat_rate": null,
+      "vat_status": "exclusive"
+    }
+  ],
+  "scraper": "bigcommerce",
+  "source": "speedball",
+  "truncated": false
+}

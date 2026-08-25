@@ -40,10 +40,12 @@ ARCHIVE_MANIFEST = ROOT / "cache-archive.json"
 # tests meaningful. Keep the set explicit: deriving it from whatever happens to
 # be present would let a missing golden silently reduce CI coverage.
 REQUIRED_RECORDED_SOURCES = {
+    "amaco": "bigcommerce",
     "ceradel": "shopify",
     "ceramique-peinture": "shopify",
     "penguin-pottery": "shopify",
     "keramikbedarf-online": "shopware",
+    "speedball": "bigcommerce",
 }
 CI_ARCHIVE_REQUIRED = "CATALOGUE_GOLDEN_ARCHIVE_REQUIRED"
 

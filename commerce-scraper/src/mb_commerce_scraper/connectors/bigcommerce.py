@@ -46,6 +46,7 @@ from mb_commerce_scraper.transports import (
     TransportRequest,
 )
 
+from ._request_profiles import LEGACY_BROWSER_USER_AGENT
 from .base import (
     BrowserRequirement,
     CommerceConnector,
@@ -84,6 +85,38 @@ query Catalogue($after: String, $first: Int!) {
       } } }
     } }
   } }
+}
+"""
+
+# Existing production recordings and storefront caches key this exact document.
+# Keep it for the ordinary 50-item path; the variable query above remains the
+# bounded form for configured or result-limited pages below 50 items.
+LEGACY_CATALOGUE_QUERY = """
+query Catalogue($after: String) {
+  site {
+    products(first: 50, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      edges { node {
+        entityId name path sku description
+        brand { name }
+        availabilityV2 { status description }
+        defaultImage { urlOriginal }
+        images(first: 12) { edges { node { urlOriginal } } }
+        prices { price { value currencyCode } retailPrice { value } }
+        categories { edges { node { name path } } }
+        customFields { edges { node { name value } } }
+        variants(first: 30) { edges { node {
+          entityId sku
+          defaultImage { urlOriginal }
+          prices { price { value currencyCode } }
+          inventory { isInStock aggregated { availableToSell } }
+          options { edges { node {
+            displayName values { edges { node { label } } }
+          } } }
+        } } }
+      } }
+    }
+  }
 }
 """
 
@@ -162,6 +195,7 @@ class BigCommerceConnector(CommerceConnector):
                 if remaining_before is None
                 else min(self.options.page_size, remaining_before)
             )
+            legacy_page = page_size == 50
             try:
                 response = await self.transport.request(TransportRequest(
                     method="POST",
@@ -171,10 +205,23 @@ class BigCommerceConnector(CommerceConnector):
                         "content-type": "application/json",
                         "origin": origin,
                         "referer": token_page,
+                        **(
+                            {}
+                            if rendered
+                            else {"user-agent": LEGACY_BROWSER_USER_AGENT}
+                        ),
                     },
                     json_body={
-                        "query": CATALOGUE_QUERY,
-                        "variables": {"after": after, "first": page_size},
+                        "query": (
+                            LEGACY_CATALOGUE_QUERY
+                            if legacy_page
+                            else CATALOGUE_QUERY
+                        ),
+                        "variables": (
+                            {"after": after}
+                            if legacy_page
+                            else {"after": after, "first": page_size}
+                        ),
                     },
                     purpose=RequestPurpose.DISCOVERY,
                     priority=RequestPriority.DISCOVERY,
@@ -294,6 +341,11 @@ class BigCommerceConnector(CommerceConnector):
                 try:
                     response = await self.transport.request(TransportRequest(
                         url=page,
+                        headers=(
+                            {}
+                            if rendered
+                            else {"user-agent": LEGACY_BROWSER_USER_AGENT}
+                        ),
                         purpose=RequestPurpose.DISCOVERY,
                         priority=RequestPriority.DISCOVERY,
                         estimated_bytes=500_000,

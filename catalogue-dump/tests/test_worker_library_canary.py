@@ -1312,7 +1312,6 @@ async def test_native_worker_uses_library_lineage_and_terminal_recovery(
         assert browser_request["headers"]["authorization"].startswith("Bearer ")
         assert browser_request["json_body"]["variables"] == {
             "after": None,
-            "first": 50,
         }
         assert browser_session.token not in repr(finished)
         assert browser_session.token not in repr(lineage_rows)

@@ -58,6 +58,7 @@ from mb_commerce_scraper.transports import (
     TransportRequest,
 )
 
+from ._request_profiles import LEGACY_BROWSER_USER_AGENT
 from .base import (
     BrowserRequirement,
     CommerceConnector,
@@ -67,16 +68,11 @@ from .base import (
 )
 from .factory import ConnectorPlan
 
-PAGE_BROWSER_USER_AGENT = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
-)
-
 
 def _page_request_headers(browser: BrowserHint) -> dict[str, str]:
     if browser is BrowserHint.REQUIRED:
         return {}
-    return {"user-agent": PAGE_BROWSER_USER_AGENT}
+    return {"user-agent": LEGACY_BROWSER_USER_AGENT}
 
 
 class DiscoveryOptions(BaseModel):

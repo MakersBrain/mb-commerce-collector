@@ -235,6 +235,15 @@ class _CeramicsProjector:
                 entity.title,
             )
 
+        # The legacy BigCommerce scraper substitutes its configured source
+        # brand before calling record.build(), so that fallback is classified
+        # as a published brand. Preserve that connector-specific output during
+        # migration; other connectors retain the more precise source-default
+        # classification.
+        published_brand = entity.vendor
+        if entity.connector == "bigcommerce" and not published_brand:
+            published_brand = options.brand
+
         row = legacy_record.build(
             source=entity.source_id,
             product_url=product_url,
@@ -243,7 +252,7 @@ class _CeramicsProjector:
             name=name,
             product_name=entity.title,
             variant_title=variant_title,
-            brand=entity.vendor,
+            brand=published_brand,
             manufacturer_sku=manufacturer_sku,
             supplier_reference=variant.sku
             if variant is not None

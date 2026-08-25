@@ -8,6 +8,9 @@ from typing import Any
 import pytest
 
 from mb_commerce_scraper import CollectionRequest
+from mb_commerce_scraper.connectors._request_profiles import (
+    LEGACY_BROWSER_USER_AGENT,
+)
 from mb_commerce_scraper.connectors.base import ConnectorContext
 from mb_commerce_scraper.connectors.bigcommerce import (
     BigCommerceConnector,
@@ -118,6 +121,10 @@ async def test_public_graphql_snapshot_is_neutral() -> None:
     assert snapshot.documents[0].url == f"{ORIGIN}/docs/sds.pdf"
     assert snapshot.variants[0].offers[0].price.amount == 12.50
     assert transport.requests[-1].json_body is not None
+    assert transport.requests[0].headers == {
+        "user-agent": LEGACY_BROWSER_USER_AGENT
+    }
+    assert transport.requests[-1].headers["user-agent"] == LEGACY_BROWSER_USER_AGENT
     assert [
         (item.url, item.purpose, item.browser, item.estimated_bytes)
         for item in transport.requests
@@ -170,7 +177,7 @@ async def test_http_denial_uses_rendered_token_and_browser_graphql() -> None:
     }
     assert isinstance(graphql.json_body, dict)
     assert isinstance(graphql.json_body["query"], str)
-    assert graphql.json_body["variables"] == {"after": None, "first": 50}
+    assert graphql.json_body["variables"] == {"after": None}
     assert pages[0].diagnostics == ()
     assert [
         (item.purpose, item.browser, item.estimated_bytes)

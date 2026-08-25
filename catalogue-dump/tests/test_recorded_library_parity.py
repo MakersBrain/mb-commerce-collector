@@ -52,6 +52,16 @@ def _bounded_shopify_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     return {**payload, "records": records}
 
 
+def _bounded_bigcommerce_legacy(payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply the library's public extension bound to legacy raw payloads."""
+    records: list[dict[str, Any]] = []
+    for original in payload["records"]:
+        bounded_raw = sanitize_json_value(original["raw"])
+        assert isinstance(bounded_raw, dict)
+        records.append({**original, "raw": bounded_raw})
+    return {**payload, "records": records}
+
+
 def _recorded_shopify_sources() -> list[str]:
     configured = support.sources()
     return [
@@ -89,6 +99,11 @@ def _recorded_source_case(name: str) -> list[Any]:
 
 
 RECORDED_KERAMIKBEDARF = _recorded_source_case("keramikbedarf-online")
+RECORDED_BIGCOMMERCE = [
+    source
+    for name in ("amaco", "speedball")
+    for source in _recorded_source_case(name)
+]
 
 
 @pytest.mark.golden
@@ -178,5 +193,53 @@ def test_recorded_keramikbedarf_responses_have_shopware_projection_parity(
         "errors",
     ):
         assert library_frozen[field] == legacy_frozen[field]
+    assert not legacy["summary"].get("interrupted", False)
+    assert not library["summary"].get("interrupted", False)
+
+
+@pytest.mark.golden
+@pytest.mark.parametrize("source", RECORDED_BIGCOMMERCE)
+def test_recorded_bigcommerce_responses_have_legacy_library_projection_parity(
+    source: str,
+) -> None:
+    legacy = asyncio.run(support.collect(source))
+    library = asyncio.run(
+        support.collect(source, scraper="library_bigcommerce_connector")
+    )
+
+    legacy_frozen = support.freeze(source, legacy)
+    bounded_legacy_frozen = support.freeze(
+        source, _bounded_bigcommerce_legacy(legacy)
+    )
+    library_frozen = support.freeze(source, library)
+    expected = json.loads(support.golden_path(source).read_text(encoding="utf-8"))
+
+    for field in (
+        "records",
+        "discovered",
+        "requests",
+        "rendered_pages",
+        "field_coverage",
+        "sample",
+        "digest",
+        "truncated",
+        "error_count",
+        "errors",
+    ):
+        assert legacy_frozen[field] == expected[field]
+
+    for field in (
+        "records",
+        "discovered",
+        "requests",
+        "rendered_pages",
+        "field_coverage",
+        "truncated",
+        "error_count",
+        "errors",
+    ):
+        assert library_frozen[field] == legacy_frozen[field]
+    assert library_frozen["sample"] == bounded_legacy_frozen["sample"]
+    assert library_frozen["digest"] == bounded_legacy_frozen["digest"]
     assert not legacy["summary"].get("interrupted", False)
     assert not library["summary"].get("interrupted", False)

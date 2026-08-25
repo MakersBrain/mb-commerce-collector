@@ -206,22 +206,22 @@ architecture rules in the plan and are not separate scope-expansion goals.
     an all-source invariant now builds all 88 canonical connector/options pairs
     through the application registry instead.
 - [x] Recovered-cache migration checkpoint:
-  - The library gate passed Ruff, mypy over 76 source files, 360 tests, and the
+  - The library gate passed Ruff, mypy over 77 source files, 360 tests, and the
     frozen-schema check.
-  - The catalogue gate passed Ruff, mypy over 240 source files, and 940 tests
-    with 2 expected skips, 273 deselections, and 284 subtests.
+  - The catalogue gate passed Ruff, mypy over 240 source files, and 945 tests
+    with 2 expected skips, 275 deselections, and 284 subtests.
   - `pytest -q -m golden tests/test_recorded_library_parity.py -rs` replayed
     independent legacy/library paths from 51,579 recovered production-response
-    entries: all 5 preflight, Shopify, and Shopware cases passed.
+    entries: all 7 preflight, Shopify, Shopware, and BigCommerce cases passed.
   - The recovered volume is newer and broader than the checked-in golden set.
     An archive-wide characterization produced 14 unrelated stale-baseline
     failures, 10 passes, and 67 sources without reviewed goldens; those 67
     provisional outputs were not added. Publishing a versioned archive and
     manifest remains an operational CI task.
   - Cache publication now accepts repeated `push --host` selectors. A local
-    deterministic build of the four reviewed hosts contains 123 files and
-    5,529,600 bytes with SHA-256
-    `8fecb0edb599c5ed23f98a03639118ffeb0875472d11c82bec9d112a4acf2cb0`;
+    deterministic build of the six reviewed hosts contains 155 files and
+    6,000,640 bytes with SHA-256
+    `3c747eb4abf0736459ca656f02d3e2c1ad83e562d5aa7fb003016846b1f31c45`;
     it has not been uploaded or written into the checked-in manifest.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
   throwaway PostgreSQL 17 instance, covering concurrent authorization,
@@ -694,6 +694,11 @@ remains a Phase 7 cutover gate rather than a Phase 1 contract-extraction gap.
     frozen golden and compares projected count, coverage, sample, full digest,
     errors, truncation, and interruption semantics. The recovered production
     recording passes with 72 legacy and 72 library rows.
+  - The same gate covers Amaco and Speedball through stable and library
+    BigCommerce paths. Both recordings reproduce their reviewed legacy
+    goldens, then match 1,008 semantic rows, 1,383 discoveries, 31 direct
+    requests, zero renders, and terminal/error semantics. Long raw descriptions
+    are compared after the library's public extension-size bound.
   - CI sets `CATALOGUE_GOLDEN_ARCHIVE_REQUIRED=1` only after the configured
     archive pull succeeds. In that mode, missing manifests, source hosts,
     recordings, or frozen outputs fail before the parity cases can silently
@@ -1156,7 +1161,7 @@ they do not reopen the Phase 5 library deliverables.
 |---|---:|---:|---:|---:|---:|---:|
 | WooCommerce | Yes | Yes | Yes | No | No | No |
 | PrestaShop/Sio2 | Yes | Yes | Yes | No | No | No |
-| BigCommerce | Yes | Yes | Yes | No | No | No |
+| BigCommerce | Yes | Yes | Yes | Yes | No | No |
 | Wix | Yes | Yes | Yes | No | No | No |
 | Shopware | Yes | Yes | Yes | No | No | No |
 | Starweb | Yes | Yes | Yes | No | No | No |
@@ -1216,6 +1221,11 @@ Cross-cutting work:
   - The first page-based gate passes for `keramikbedarf-online` and Shopware:
     both paths discover and project 72 rows with identical normalized output,
     coverage, errors, and terminal semantics. Other framework families remain.
+  - Recovered Amaco and Speedball recordings pass the BigCommerce gate with
+    1,008 projected rows, 1,383 discovered products, and 31 replay requests.
+    Semantic output is exact after preserving the legacy configured-brand
+    classification; raw upstream descriptions retain the public extension
+    size bound.
 - [~] Review request counts and byte estimates.
   - Focused traffic profiles now pin exact logical request order, purpose,
     browser hint, and byte estimate for WooCommerce, PrestaShop/Sio2,
@@ -1495,8 +1505,9 @@ Exit criterion: **not met**.
    lease ownership. The live Camoufox callback gate independently covers
    physical browser authorization because Shopify declares browser capability
    `never`.
-5. Run BigCommerce recorded replay and projected-output comparison, then a
-   limited browser-capable canary with the tested source-level rollback route.
+5. Run a limited browser-capable BigCommerce canary with the tested
+   source-level rollback route; recorded replay and projected-output parity now
+   pass for Amaco and Speedball.
 6. Run representative PrestaShop and Sio2 sources through recorded replay,
    projected output comparison, and limited canaries with independent rollback.
 7. Run a real rootless Podman/Quadlet activation/readability smoke, then a
@@ -1529,6 +1540,11 @@ After each implementation batch:
   library result to the exact twice-sanitized legacy projection while retaining
   exact equality for every semantic catalogue field. This keeps the published
   memory/redaction contract without weakening migration evidence.
+
+- BigCommerce applies the public extension-sanitization bound once to the
+  reconstructed legacy raw payload. Recorded parity compares that bounded
+  projection while requiring exact equality for identifiers, all semantic
+  catalogue fields, discovery, request counts, and terminal behavior.
 
 - B1 resolves the previously documented parsing drift in favor of the shared
   helper behavior: specification names may contain up to 99 characters, the
