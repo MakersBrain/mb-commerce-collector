@@ -146,6 +146,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `a362166` — share browser session request dispatch.
 - `fb93b43` — consolidate application site-plugin support.
 - `f2cb149` — remove retired Fetcher telemetry traversal.
+- `7e181b7` — centralize fail-closed Webshare profile quarantine.
 
 ### Verification at last review
 
@@ -324,6 +325,13 @@ architecture rules in the plan and are not separate scope-expansion goals.
     recovery. Operator actions update the audit actor while system recovery
     preserves it. All 15 focused profile-import tests and the full 92-test
     PostgreSQL control suite passed, alongside 34 static control tests.
+  - Local commands and durable workers now share native collection planning
+    and bound execution assembly in `CatalogueCommerceRuntime`: source policy,
+    both request contracts, partition declaration, cache, checkpoint, proxy,
+    and browser gating have one owner. Dynamic partitions remain discovery
+    inputs while durable declarations are learned from emitted pages. The full
+    938-test fast catalogue suite and 180-test PostgreSQL suite passed with
+    Ruff, mypy, and installed two-wheel composition.
   - The provider-neutral durable Webshare composition and existing Decodo and
     Webshare adapter suites passed 29 focused tests.
   - The strict Webshare gateway-secret contract passed 47 focused tests.

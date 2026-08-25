@@ -1151,6 +1151,8 @@ async def test_native_worker_uses_library_lineage_and_terminal_recovery(
         del args, kwargs
         if scraper not in {
             "bigcommerce",
+            "prestashop",
+            "sio2",
             "wix",
             "shopware",
             "starweb",
@@ -1206,6 +1208,8 @@ async def test_native_worker_uses_library_lineage_and_terminal_recovery(
     assert native_proxy_resolutions == 1
     browser_capable = {
         "bigcommerce",
+        "prestashop",
+        "sio2",
         "wix",
         "shopware",
         "starweb",

@@ -95,6 +95,72 @@ def _forbid_resource_construction(*args: Any, **kwargs: Any) -> Any:
     raise AssertionError("identity validation must precede resource construction")
 
 
+def test_collection_plan_owns_dynamic_partition_declaration() -> None:
+    source = SourcesFile.model_validate(
+        {
+            "shop": {
+                "label": "Shop",
+                "url": "https://shop.test/",
+                "scraper": "woocommerce",
+                "store_categories": ["glazes"],
+            }
+        }
+    )["shop"]
+    runtime = CatalogueCommerceRuntime(application_connector_registry())
+
+    plan = runtime.plan_collection(
+        "shop",
+        source,
+        run=CrawlParams(cache_mode="off"),
+        datasets=("ceramics.catalogue_item.v2",),
+        requested_fields=frozenset({SnapshotField.IDENTITY}),
+        result_limit=25,
+        cancelled=lambda: False,
+    )
+
+    assert plan.request.categories == ("glazes",)
+    assert plan.library_request.partitions == ("glazes",)
+    assert plan.route.dynamic_partitions
+    assert plan.connector_configuration == {"partitions": []}
+
+
+def test_collection_assembly_applies_shared_browser_gate(tmp_path: Path) -> None:
+    source = SourcesFile.model_validate(
+        {
+            "shop": {
+                "label": "Shop",
+                "url": "https://shop.test/",
+                "scraper": "ceramicolours",
+                "category_ids": ["5101"],
+            }
+        }
+    )["shop"]
+    runtime = CatalogueCommerceRuntime(application_connector_registry())
+    run = CrawlParams(cache_mode="off", browser="never")
+    plan = runtime.plan_collection(
+        "shop",
+        source,
+        run=run,
+        datasets=("ceramics.catalogue_item.v2",),
+        requested_fields=frozenset({SnapshotField.IDENTITY}),
+        result_limit=None,
+        cancelled=lambda: False,
+    )
+
+    assembly = runtime.assemble_collection(
+        plan,
+        checkpoint=None,
+        cache_directory=tmp_path,
+        collection_id="collection-browser-disabled",
+        browser_factory=_forbid_resource_construction,
+    )
+
+    assert plan.route.uses_browser_transport
+    assert assembly.routes.browser is None
+    assert assembly.spec.cache.mode == run.cache_mode
+    assert assembly.spec.request is plan.library_request
+
+
 def _shopify_product(
     identifier: int,
     title: str,

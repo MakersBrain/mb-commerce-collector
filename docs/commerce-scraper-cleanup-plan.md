@@ -533,7 +533,7 @@ the paid-traffic path and depend on Track 0.1.
   PostgreSQL 17. Control-service Ruff and mypy over 30 files passed; the full
   suite passed with 34 static tests and 92 PostgreSQL tests.
 
-- [ ] **D7 One native-collection assembly.**
+- [x] **D7 One native-collection assembly.**
   `Worker._crawl_connector_canary` and `LocalLibraryScraper._collect`
   independently re-implement the same ~80 lines: `layered_source_config` →
   `library_canary_route` → registry-membership check → building **both** a
@@ -544,6 +544,24 @@ the paid-traffic path and depend on Track 0.1.
   collection-construction policy living in two call sites instead of behind it.
   **They have already drifted — only the worker honours `dynamic_partitions`.**
   Resolve that divergence deliberately as part of the extraction.
+  **Completed.** `CatalogueCommerceRuntime` now owns a pure planning phase for
+  layered source policy, registry/route validation, catalogue and library
+  requests, cache inputs, and initial partition declarations, followed by a
+  bound assembly phase for checkpoints, execution identity, proxy routing, and
+  lazy browser selection. Local commands and durable workers both use those
+  phases; neither constructs its own native spec or route bindings.
+  Dynamic connector partitions now have one explicit rule: the shared plan
+  retains requested discovery partitions but seeds an empty durable partition
+  declaration, and the worker committer records actual emitted partitions.
+  Local runs consume the same plan without inventing a persistence ledger they
+  do not own. The shared browser gate also exposed stale PostgreSQL matrix
+  expectations for PrestaShop and SIO-2, whose optional browser capability was
+  added in D9; those expectations now match the registry plan.
+  *Verified:* 69 focused runtime/adapter tests and 17 focused PostgreSQL worker
+  lineage tests passed. Catalogue Ruff and mypy over 240 files passed;
+  `pytest -q` -> 938 passed, 2 skipped, 187 deselected, and 284 subtests; the
+  complete PostgreSQL suite passed with 180 tests and 1 environment-specific
+  skip; installed two-wheel composition passed.
 
 - [x] **D8 Narrow the proxy authorization lock.**
   `authorize` and `_reconcile` each take a process-wide `self._lock`, then

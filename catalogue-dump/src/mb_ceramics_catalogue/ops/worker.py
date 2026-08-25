@@ -47,29 +47,13 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
-from mb_commerce_scraper import (
-    BrowserPolicy as LibraryBrowserPolicy,
-)
-from mb_commerce_scraper import (
-    CollectionRequest as LibraryCollectionRequest,
-)
-from mb_commerce_scraper import (
-    RefreshMode as LibraryRefreshMode,
-)
-from mb_commerce_scraper import (
-    SnapshotField as LibrarySnapshotField,
-)
 from mb_commerce_scraper import sanitize_diagnostic_text
 from psycopg.types.json import Jsonb
 
 from mb_ceramics_catalogue import __version__, scrapers
 from mb_ceramics_catalogue.config.settings import CrawlParams, Settings
 from mb_ceramics_catalogue.config.sources import SourcesFile
-from mb_ceramics_catalogue.connectors import (
-    BrowserBackendName,
-    CollectionRequest,
-    RefreshMode,
-)
+from mb_ceramics_catalogue.connectors import BrowserBackendName
 from mb_ceramics_catalogue.crawl import artifacts
 from mb_ceramics_catalogue.crawl.progress import Progress
 from mb_ceramics_catalogue.crawl.runner import barren as run_source_barren
@@ -81,22 +65,15 @@ from mb_ceramics_catalogue.observability import logging as obs
 from mb_ceramics_catalogue.observability import metrics, tracing
 from mb_ceramics_catalogue.ops import events, health, leases, monitor, queue, runs, schedule
 from mb_ceramics_catalogue.ops import outputs as ops_outputs
-from mb_ceramics_catalogue.ops.commerce_scraper_adapter import (
-    layered_source_config,
-)
 from mb_ceramics_catalogue.ops.commerce_scraper_proxy_runtime import (
     resolve_native_proxy_runtime,
 )
 from mb_ceramics_catalogue.ops.commerce_scraper_runtime import (
     TRANSPORT_TOTAL_NAMES,
     BorrowedBrowserBinding,
-    CatalogueCachePolicy,
     CatalogueCommerceRuntime,
-    NativeCollectionSpec,
-    NativeRouteBindings,
 )
 from mb_ceramics_catalogue.ops.connector_adapters import (
-    library_canary_route,
     runtime_plan,
 )
 from mb_ceramics_catalogue.ops.delivery import Delivery, routes_for
@@ -864,26 +841,21 @@ class Worker:
             "ceramics.catalogue_identity.v2" if config.identity_only else "ceramics.catalogue_item.v2"
         )
         selected = tuple(current_ceramics if name == "ceramics" else name for name in params.datasets)
-        configuration = layered_source_config(
+        requested_fields = registry.collection_requirements(selected)[0]
+        collection_plan = self._commerce_runtime.plan_collection(
             job.source_id,
             config,
             run=params,
             datasets=selected,
+            requested_fields=requested_fields,
+            result_limit=params.limit,
+            cancelled=self._cancels[job.id].is_set,
             connector_plan=adapter,
         )
+        configuration = collection_plan.configuration
         library_source = configuration.source
-        route = library_canary_route(adapter, library_source.connector)
-        if route is None:
-            raise ValueError(
-                f"connector_canary has no approved native route for {config.scraper!r}"
-            )
-        library_partitions = route.request_partitions
+        route = collection_plan.route
         library_dynamic_partitions = route.dynamic_partitions
-        if library_source.connector not in library_registry.names():
-            raise ValueError(
-                f"approved library canary connector {library_source.connector!r} "
-                "is not registered"
-            )
         definitions = tuple(registry.get(name) for name in selected)
         keys = {
             definition.name: ops_outputs.DatasetKey(
@@ -895,26 +867,8 @@ class Worker:
         # Library connectors enumerate a coherent neutral snapshot in FULL
         # mode. PRICE is application projection intent: the compatibility
         # record marker makes the loader preserve weekly descriptive fields.
-        request = CollectionRequest(
-            source_id=job.source_id,
-            base_url=config.url,
-            refresh_mode=RefreshMode.FULL,
-            requested_fields=registry.collection_requirements(selected)[0],
-            result_limit=params.limit,
-            collections=adapter.collections,
-            categories=adapter.categories,
-            cancellation_check=self._cancels[job.id].is_set,
-        )
-        library_request = LibraryCollectionRequest(
-            source_id=job.source_id,
-            base_url=config.url,
-            refresh_mode=LibraryRefreshMode.FULL,
-            requested_fields=frozenset(
-                LibrarySnapshotField(field.value) for field in request.requested_fields
-            ),
-            result_limit=params.limit,
-            partitions=library_partitions,
-        )
+        request = collection_plan.request
+        library_request = collection_plan.library_request
         connector_name = library_source.connector
         connector_version = library_registry.connector_version(connector_name)
         connector_options = library_source.connector_options
@@ -944,13 +898,7 @@ class Worker:
                     connector_options=connector_options,
                     dataset_fingerprint=dataset_fingerprint,
                     dataset_selection=dataset_selection,
-                    connector_configuration={
-                        "partitions": (
-                            []
-                            if library_dynamic_partitions
-                            else list(library_request.partitions or ("main",))
-                        )
-                    },
+                    connector_configuration=collection_plan.connector_configuration,
                     budget_state={"request_budget": request.request_budget},
                 ),
                 datasets=list(keys.values()),
@@ -995,42 +943,29 @@ class Worker:
                     source=configuration.source,
                     source_policy=configuration.proxy,
                 )
-                browser_backend: BrowserBackend | None = None
-                browser_job: BrowserJobContext | None = None
-                if (
-                    route.uses_browser_transport
-                    and configuration.fetch.browser is not LibraryBrowserPolicy.NEVER
-                ):
+                def browser_binding() -> BorrowedBrowserBinding | None:
                     browser_backend, browser_job = self._browser_for_job(
                         job,
                         params,
                         native_proxy is not None,
                     )
-                browser_binding = (
-                    BorrowedBrowserBinding(browser_backend, browser_job)
-                    if browser_backend is not None and browser_job is not None
-                    else None
-                )
-                collection = NativeCollectionSpec(
-                    configuration=configuration,
-                    request=library_request,
+                    return (
+                        BorrowedBrowserBinding(browser_backend, browser_job)
+                        if browser_backend is not None and browser_job is not None
+                        else None
+                    )
+
+                assembly = self._commerce_runtime.assemble_collection(
+                    collection_plan,
                     checkpoint=library_checkpoint,
-                    cache=CatalogueCachePolicy(
-                        directory=self.settings.cache_dir,
-                        mode=params.cache_mode,
-                        maximum_age_seconds=params.cache_max_age_seconds,
-                        stale_on_error=params.stale_on_error,
-                    ),
-                    cancelled=self._cancels[job.id].is_set,
+                    cache_directory=self.settings.cache_dir,
                     collection_id=str(lineage),
-                )
-                routes = NativeRouteBindings(
                     proxy=native_proxy,
-                    browser=browser_binding,
+                    browser_factory=browser_binding,
                 )
                 async with self._commerce_runtime.open_collection(
-                    collection,
-                    routes,
+                    assembly.spec,
+                    assembly.routes,
                 ) as opened:
                     native_connector = opened.connector
                     committer = ops_outputs.PostgresPageCommitter(

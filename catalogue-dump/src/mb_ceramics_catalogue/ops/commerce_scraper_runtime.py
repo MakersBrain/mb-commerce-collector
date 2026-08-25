@@ -38,6 +38,7 @@ from mb_ceramics_catalogue.connectors import (
     CollectionRequest as CatalogueCollectionRequest,
 )
 from mb_ceramics_catalogue.connectors import RefreshMode as CatalogueRefreshMode
+from mb_ceramics_catalogue.connectors import SnapshotField as CatalogueSnapshotField
 from mb_ceramics_catalogue.datasets import ProjectionContext, built_in_registry
 from mb_ceramics_catalogue.observability import logging as obs
 from mb_ceramics_catalogue.observability import metrics, tracing
@@ -65,6 +66,8 @@ from .commerce_scraper_pipeline import LibraryPipelineConnector
 from .commerce_scraper_proxy_runtime import NativeProxyRuntimeSpec
 from .commerce_scraper_transport import LegacyFetcher, LegacyFetcherTransport
 from .connector_adapters import (
+    ConnectorRuntimePlan,
+    LibraryCanaryRoute,
     application_connector_registry,
     library_canary_route,
     runtime_plan,
@@ -105,6 +108,40 @@ class NativeCollectionSpec:
 class NativeRouteBindings:
     proxy: NativeProxyRuntimeSpec | None = None
     browser: BorrowedBrowserBinding | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NativeCollectionPlan:
+    """Pure application policy shared by local and durable collections."""
+
+    route: LibraryCanaryRoute
+    configuration: CatalogueSourceConfig
+    cache_mode: CacheMode
+    cache_maximum_age_seconds: float | None
+    stale_on_error: bool
+    cancelled: Callable[[], bool]
+    request: CatalogueCollectionRequest
+    library_request: CollectionRequest
+
+    @property
+    def connector_configuration(self) -> dict[str, list[str]]:
+        """Seed durable partition state without predeclaring dynamic output."""
+
+        return {
+            "partitions": (
+                []
+                if self.route.dynamic_partitions
+                else list(self.library_request.partitions or ("main",))
+            )
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class NativeCollectionAssembly:
+    """A planned collection bound to one execution and its owned routes."""
+
+    spec: NativeCollectionSpec
+    routes: NativeRouteBindings
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,6 +344,106 @@ class CatalogueCommerceRuntime:
     def __init__(self, registry: ConnectorRegistry | None = None) -> None:
         self.registry = registry or application_connector_registry()
 
+    def plan_collection(
+        self,
+        source_id: str,
+        source: SourceConfig,
+        *,
+        run: CrawlParams,
+        datasets: tuple[str, ...],
+        requested_fields: frozenset[CatalogueSnapshotField],
+        result_limit: int | None,
+        cancelled: Callable[[], bool],
+        connector_plan: ConnectorRuntimePlan | None = None,
+    ) -> NativeCollectionPlan:
+        """Resolve source policy, native route, and both request contracts once."""
+
+        plan = connector_plan or runtime_plan(source)
+        configuration = layered_source_config(
+            source_id,
+            source,
+            run=run,
+            datasets=datasets,
+            connector_plan=plan,
+        )
+        route = library_canary_route(plan, configuration.source.connector)
+        if route is None:
+            raise ValueError(
+                f"connector_canary has no approved native route for {source.scraper!r}"
+            )
+        if configuration.source.connector not in self.registry.names():
+            raise ValueError(
+                f"approved native connector {configuration.source.connector!r} "
+                "is not registered"
+            )
+        request = CatalogueCollectionRequest(
+            source_id=source_id,
+            base_url=source.url,
+            refresh_mode=CatalogueRefreshMode.FULL,
+            requested_fields=requested_fields,
+            result_limit=result_limit,
+            collections=plan.collections,
+            categories=plan.categories,
+            cancellation_check=cancelled,
+        )
+        library_request = CollectionRequest(
+            source_id=source_id,
+            base_url=source.url,
+            refresh_mode=RefreshMode.FULL,
+            requested_fields=frozenset(
+                SnapshotField(field.value) for field in requested_fields
+            ),
+            result_limit=result_limit,
+            partitions=route.request_partitions,
+        )
+        return NativeCollectionPlan(
+            route=route,
+            configuration=configuration,
+            cache_mode=run.cache_mode,
+            cache_maximum_age_seconds=run.cache_max_age_seconds,
+            stale_on_error=run.stale_on_error,
+            cancelled=cancelled,
+            request=request,
+            library_request=library_request,
+        )
+
+    def assemble_collection(
+        self,
+        plan: NativeCollectionPlan,
+        *,
+        checkpoint: ConnectorCheckpoint | None,
+        cache_directory: Path,
+        collection_id: str,
+        proxy: NativeProxyRuntimeSpec | None = None,
+        browser_factory: Callable[[], BorrowedBrowserBinding | None] | None = None,
+    ) -> NativeCollectionAssembly:
+        """Bind one pure plan to execution state and lazily selected routes."""
+
+        browser = (
+            browser_factory()
+            if browser_factory is not None
+            and plan.route.uses_browser_transport
+            and plan.configuration.fetch.browser is not BrowserPolicy.NEVER
+            else None
+        )
+        spec = NativeCollectionSpec(
+            configuration=plan.configuration,
+            request=plan.library_request,
+            checkpoint=checkpoint,
+            cache=CatalogueCachePolicy(
+                directory=cache_directory,
+                mode=plan.cache_mode,
+                maximum_age_seconds=plan.cache_maximum_age_seconds,
+                stale_on_error=plan.stale_on_error,
+            ),
+            cancelled=plan.cancelled,
+            collection_id=collection_id,
+        )
+        return NativeCollectionAssembly(
+            spec=spec,
+            routes=NativeRouteBindings(proxy=proxy, browser=browser),
+        )
+
     @asynccontextmanager
     async def open_collection(
         self,
@@ -504,45 +641,19 @@ class LocalLibraryScraper:
         )
         definition = dataset_registry.get(dataset)
         requested_fields = dataset_registry.collection_requirements((dataset,))[0]
-        configuration = layered_source_config(
+        plan = self._session.runtime.plan_collection(
             self.name,
             self._source,
             run=self._session.params,
             datasets=(dataset,),
-            connector_plan=self._plan,
-        )
-        if configuration.proxy.mode is not ProxyMode.NEVER:
-            raise ValueError("local commerce collection cannot enable a paid proxy")
-        route = library_canary_route(self._plan, configuration.source.connector)
-        if route is None:
-            raise ValueError(
-                f"connector_canary has no approved native route for {self._source.scraper!r}"
-            )
-        if configuration.source.connector not in self._session.runtime.registry.names():
-            raise ValueError(
-                f"approved native connector {configuration.source.connector!r} is not registered"
-            )
-
-        request = CatalogueCollectionRequest(
-            source_id=self.name,
-            base_url=self.base_url,
-            refresh_mode=CatalogueRefreshMode.FULL,
             requested_fields=requested_fields,
             result_limit=limit,
-            collections=self._plan.collections,
-            categories=self._plan.categories,
-            cancellation_check=lambda: self._cancel_requested,
+            cancelled=lambda: self._cancel_requested,
+            connector_plan=self._plan,
         )
-        library_request = CollectionRequest(
-            source_id=self.name,
-            base_url=self.base_url,
-            refresh_mode=RefreshMode.FULL,
-            requested_fields=frozenset(
-                SnapshotField(field.value) for field in requested_fields
-            ),
-            result_limit=limit,
-            partitions=route.request_partitions,
-        )
+        configuration = plan.configuration
+        if configuration.proxy.mode is not ProxyMode.NEVER:
+            raise ValueError("local commerce collection cannot enable a paid proxy")
         projection = ProjectionContext(
             collection_id=collection_id,
             source_id=self.name,
@@ -559,40 +670,31 @@ class LocalLibraryScraper:
                 }
             }
         )
-        browser = (
-            BorrowedBrowserBinding(
+        def browser_binding() -> BorrowedBrowserBinding:
+            return BorrowedBrowserBinding(
                 self._session.browser,
                 BrowserJobContext(
                     job_id=collection_id,
                     logical_profile=self.name,
                 ),
             )
-            if route.uses_browser_transport
-            and configuration.fetch.browser is not BrowserPolicy.NEVER
-            else None
-        )
-        spec = NativeCollectionSpec(
-            configuration=configuration,
-            request=library_request,
+
+        assembly = self._session.runtime.assemble_collection(
+            plan,
             checkpoint=None,
-            cache=CatalogueCachePolicy(
-                directory=self._session.cache_directory,
-                mode=self._session.params.cache_mode,
-                maximum_age_seconds=self._session.params.cache_max_age_seconds,
-                stale_on_error=self._session.params.stale_on_error,
-            ),
-            cancelled=lambda: self._cancel_requested,
+            cache_directory=self._session.cache_directory,
             collection_id=collection_id,
+            browser_factory=browser_binding,
         )
         opened: OpenCatalogueCollection | None = None
         last_terminal = False
         try:
             async with self._session.runtime.open_collection(
-                spec,
-                NativeRouteBindings(proxy=None, browser=browser),
+                assembly.spec,
+                assembly.routes,
             ) as active:
                 opened = active
-                async for page in active.connector.collect(request):
+                async for page in active.connector.collect(plan.request):
                     self.result.discovered += page.discovered
                     last_terminal = page.terminal
                     if not page.enumeration_intact:
