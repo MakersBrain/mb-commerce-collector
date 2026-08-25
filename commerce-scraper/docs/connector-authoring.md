@@ -29,7 +29,9 @@ clients, proxy pools, caches, loggers, or global registries.
 The two required contracts are:
 
 - `ConnectorFactory`: normalized `name`, stable `version`, a strict Pydantic
-  `options_model`, and `build(transport=..., options=..., context=...)`;
+  `options_model`, I/O-free `plan(options, base_url=...,
+  request_partitions=...)`, and
+  `build(transport=..., options=..., context=...)`;
 - `CommerceConnector`: `name`, `platform`, `version`, typed `capabilities`, and
   async `collect(request, checkpoint)` yielding ordered `EntityPage` values.
 
@@ -89,6 +91,16 @@ Names use lowercase kebab case. The factory and built connector must report the
 same version. Options should use `ConfigDict(extra="forbid", frozen=True)` so a
 misspelled or stale setting fails at composition rather than changing runtime
 behavior silently.
+
+`plan()` receives a registry-validated options instance and must return a
+`ConnectorPlan` without opening a transport or constructing the connector.
+Declare the exact stable partition keys the connector will emit, whether those
+partitions are discovered dynamically, and the effective `BrowserRequirement`
+after applying options such as a disabled render fallback. `base_url` exists
+for deterministic keys derived from a default discovery root;
+`request_partitions` carries caller-selected scope that is intentionally not a
+connector option. Keep this method and the connector's actual partition logic
+backed by the same helper.
 
 ## Essential tests
 

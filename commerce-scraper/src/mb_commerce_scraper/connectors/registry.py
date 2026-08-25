@@ -7,7 +7,7 @@ from typing import Any
 from mb_commerce_scraper.transports import CommerceTransport
 
 from .base import CommerceConnector, ConnectorContext
-from .factory import ConnectorFactory
+from .factory import ConnectorFactory, ConnectorPlan
 
 NAME = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
@@ -38,6 +38,8 @@ class ConnectorRegistry:
             raise ValueError(
                 f"connector {name!r} must declare a non-empty normalized version"
             )
+        if not callable(getattr(factory, "plan", None)):
+            raise ValueError(f"connector {name!r} must declare a planning method")
         if name in self._factories:
             raise ValueError(f"connector {name!r} is already registered")
         self._factories[name] = factory
@@ -51,6 +53,23 @@ class ConnectorRegistry:
     def connector_version(self, name: str) -> str:
         """Return registered immutable metadata without building a connector."""
         return self._factory(name).version
+
+    def plan(
+        self,
+        name: str,
+        *,
+        options: dict[str, Any],
+        base_url: str,
+        request_partitions: tuple[str, ...] = (),
+    ) -> ConnectorPlan:
+        """Validate options and derive collection topology without construction."""
+        factory = self._factory(name)
+        validated = factory.options_model.model_validate(options)
+        return factory.plan(
+            validated,
+            base_url=base_url,
+            request_partitions=request_partitions,
+        )
 
     def build(
         self,

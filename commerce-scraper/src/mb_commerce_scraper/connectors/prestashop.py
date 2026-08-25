@@ -1096,3 +1096,20 @@ class PrestaShopFactory(SimpleConnectorFactory[PrestaShopOptions, PrestaShopConn
     version = PrestaShopConnector.version
     options_model = PrestaShopOptions
     connector_type = PrestaShopConnector
+
+    def _plan_partitions(
+        self,
+        options: PrestaShopOptions,
+        *,
+        base_url: str,
+        request_partitions: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        del request_partitions
+        return prestashop_partition_keys(options, base_url)
+
+    def _plan_browser(self, options: PrestaShopOptions) -> BrowserRequirement:
+        return (
+            BrowserRequirement.NEVER
+            if options.render is False
+            else BrowserRequirement.OPTIONAL
+        )

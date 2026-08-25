@@ -532,7 +532,7 @@ the paid-traffic path and depend on Track 0.1.
   two authorizations run sequentially), so the test fails if the lock is
   re-widened.
 
-- [ ] **D9 Derive canary routes from library capabilities.**
+- [x] **D9 Derive canary routes from library capabilities.**
   `LibraryCanaryRoute` re-declares, per connector, facts the library connector
   already owns: `uses_browser_transport=options.render is not False` is written
   out eight times, and `request_partitions` is hand-derived by `_page_partitions`
@@ -551,6 +551,27 @@ the paid-traffic path and depend on Track 0.1.
   *Note:* keep `ConnectorRuntimePlan.library_canary` optional.
   `register_runtime_adapter` is a public hook, so the guards at its five call
   sites are defense against externally-registered adapters, not dead code.
+  **Completed.** Every connector factory now exposes an I/O-free `plan()` and
+  the public registry validates options before returning an immutable
+  `ConnectorPlan` with exact partitions, dynamic declaration, and effective
+  `BrowserRequirement`. The plan accepts a base URL for PrestaShop's hashed
+  fallback root and caller-selected partitions for Shopify collection scope.
+  Shared page-engine factories use the same category/sitemap/strategy logic as
+  their connectors; option-sensitive BigCommerce, Wix, PrestaShop, generic,
+  vendor, and application-plugin browser requirements fail closed to `never`
+  when rendering is disabled.
+  The catalogue owns one translation from a registry plan to its optional
+  canary approval object. All per-projector browser expressions,
+  `_page_partitions`, fixed `main`/`sitemap` declarations, and direct
+  `prestashop_partition_keys` use are gone. This also exposes PrestaShop's
+  already-declared optional browser capability to canary composition instead
+  of silently omitting the browser binding.
+  *Verified:* 74 focused library registry/generic/runtime tests and 39 focused
+  catalogue adapter/boundary tests passed. `make scraper-check` -> 326 tests,
+  Ruff, mypy over 76 files, schemas, build, 5 boundary tests, 226 reviewed
+  public exports, external-consumer, and release gates passed. Catalogue Ruff
+  and mypy over 239 files passed; `pytest -q` -> 936 passed, 2 skipped, 187
+  deselected, and 284 subtests; installed two-wheel composition passed.
 
 - [ ] **D10 Move per-process env into the roles table.**
   `deploy/podman/build_runtime_stage.py:162-177` applies per-process

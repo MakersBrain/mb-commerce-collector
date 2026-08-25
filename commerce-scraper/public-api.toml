@@ -18,6 +18,7 @@ symbols = [
   "ConnectorCheckpoint",
   "ConnectorContext",
   "ConnectorFactory",
+  "ConnectorPlan",
   "ConnectorRegistry",
   "Diagnostic",
   "DiagnosticCode",
@@ -69,7 +70,7 @@ symbols = [
 symbols = [
   "BigCommerceConnector", "BigCommerceFactory", "BigCommerceOptions",
   "BrowserRequirement", "CommerceConnector", "ConnectorCapabilities",
-  "ConnectorContext", "ConnectorFactory", "ConnectorRegistry",
+  "ConnectorContext", "ConnectorFactory", "ConnectorPlan", "ConnectorRegistry",
   "DiscoveryOptions", "DomRules", "GenericPagesConnector",
   "GenericPagesFactory", "GenericPagesOptions", "NitroSellConnector",
   "NitroSellFactory", "NitroSellOptions", "PluginLoadError",

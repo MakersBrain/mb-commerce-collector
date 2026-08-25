@@ -612,6 +612,13 @@ class WixFactory(SimpleConnectorFactory[WixOptions, WixConnector]):
     options_model = WixOptions
     connector_type = WixConnector
 
+    def _plan_browser(self, options: WixOptions) -> BrowserRequirement:
+        return (
+            BrowserRequirement.NEVER
+            if options.render is False
+            else BrowserRequirement.OPTIONAL
+        )
+
 
 def _warmup_product(document: str, url: str) -> dict[str, Any] | None:
     slug = unquote(urlparse(url).path.rstrip("/").rsplit("/", 1)[-1])

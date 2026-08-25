@@ -21,7 +21,7 @@ from mb_commerce_scraper.parsing import ProductParser
 from mb_commerce_scraper.transports import CommerceTransport
 
 from .base import BrowserRequirement, ConnectorCapabilities, ConnectorContext
-from .factory import validated_options
+from .factory import ConnectorPlan, validated_options
 from .page_engine import (
     DiscoveryOptions as DiscoveryOptions,
 )
@@ -31,6 +31,7 @@ from .page_engine import (
 from .page_engine import (
     PageEngineConnector,
     PageEngineOptions,
+    page_engine_plan,
 )
 
 
@@ -235,3 +236,22 @@ class GenericPagesFactory:
             parser=self._parser,
             discovery=self._discovery,
         )
+
+    def plan(
+        self,
+        options: BaseModel,
+        *,
+        base_url: str,
+        request_partitions: tuple[str, ...] = (),
+    ) -> ConnectorPlan:
+        del base_url, request_partitions
+        validated = validated_options(
+            options, GenericPagesOptions, factory_name=self.name
+        )
+        identity = (
+            _strategy_identity(self._discovery, kind="discovery")["name"]
+            if self._discovery is not None
+            else None
+        )
+        assert isinstance(identity, str) or identity is None
+        return page_engine_plan(validated, custom_discovery=identity)

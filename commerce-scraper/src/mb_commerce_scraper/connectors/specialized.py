@@ -6,10 +6,10 @@ import hashlib
 import json
 import re
 from decimal import Decimal, InvalidOperation
-from typing import Any, Literal, cast
+from typing import Any, Generic, Literal, TypeVar, cast
 from urllib.parse import unquote, urljoin, urlparse
 
-from pydantic import JsonValue
+from pydantic import BaseModel, JsonValue
 
 from mb_commerce_scraper.models import (
     Availability,
@@ -34,8 +34,8 @@ from mb_commerce_scraper.transports import (
 from .base import (
     ConnectorContext,
 )
-from .factory import SimpleConnectorFactory
-from .page_engine import PageEngineConnector, PageEngineOptions
+from .factory import ConnectorPlan, SimpleConnectorFactory, validated_options
+from .page_engine import PageEngineConnector, PageEngineOptions, page_engine_plan
 
 
 class ShopwareOptions(PageEngineOptions):
@@ -456,33 +456,53 @@ class SumUpConnector(PageEngineConnector):
         return detailed[0] if len(detailed) == 1 else None
 
 
-class ShopwareFactory(SimpleConnectorFactory[ShopwareOptions, ShopwareConnector]):
+PageOptionsT = TypeVar("PageOptionsT", bound=PageEngineOptions)
+PageConnectorT = TypeVar("PageConnectorT", bound=PageEngineConnector)
+
+
+class _SpecializedPageFactory(
+    SimpleConnectorFactory[PageOptionsT, PageConnectorT],
+    Generic[PageOptionsT, PageConnectorT],
+):
+    def plan(
+        self,
+        options: BaseModel,
+        *,
+        base_url: str,
+        request_partitions: tuple[str, ...] = (),
+    ) -> ConnectorPlan:
+        del base_url, request_partitions
+        return page_engine_plan(
+            validated_options(options, self.options_model, factory_name=self.name)
+        )
+
+
+class ShopwareFactory(_SpecializedPageFactory[ShopwareOptions, ShopwareConnector]):
     name = "shopware"
     version = ShopwareConnector.version
     options_model = ShopwareOptions
     connector_type = ShopwareConnector
 
 
-class StarwebFactory(SimpleConnectorFactory[StarwebOptions, StarwebConnector]):
+class StarwebFactory(_SpecializedPageFactory[StarwebOptions, StarwebConnector]):
     name = "starweb"
     version = StarwebConnector.version
     options_model = StarwebOptions
     connector_type = StarwebConnector
 
 
-class NitroSellFactory(SimpleConnectorFactory[NitroSellOptions, NitroSellConnector]):
+class NitroSellFactory(_SpecializedPageFactory[NitroSellOptions, NitroSellConnector]):
     name = "nitrosell"
     version = NitroSellConnector.version
     options_model = NitroSellOptions
     connector_type = NitroSellConnector
 
 
-class SumUpFactory(SimpleConnectorFactory[SumUpOptions, SumUpConnector]):
+class SumUpFactory(_SpecializedPageFactory[SumUpOptions, SumUpConnector]):
     name = "sumup"
     version = SumUpConnector.version
     options_model = SumUpOptions
     connector_type = SumUpConnector
-
 
 def _class_content(document: str, class_name: str) -> str:
     match = re.search(

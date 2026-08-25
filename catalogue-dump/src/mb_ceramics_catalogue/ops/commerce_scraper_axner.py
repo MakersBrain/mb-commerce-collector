@@ -15,6 +15,7 @@ from mb_commerce_scraper.connectors import (
     CommerceConnector,
     ConnectorCapabilities,
     ConnectorContext,
+    ConnectorPlan,
     DiscoveryOptions,
     GenericPagesConnector,
     GenericPagesOptions,
@@ -115,6 +116,26 @@ class AxnerFactory:
     name = AxnerConnector.name
     version = AxnerConnector.version
     options_model: type[BaseModel] = AxnerOptions
+
+    def plan(
+        self,
+        options: BaseModel,
+        *,
+        base_url: str,
+        request_partitions: tuple[str, ...] = (),
+    ) -> ConnectorPlan:
+        del base_url, request_partitions
+        if not isinstance(options, AxnerOptions):
+            raise TypeError("axner factory requires validated AxnerOptions options")
+        validated = options
+        return ConnectorPlan(
+            partitions=("main",),
+            browser=(
+                BrowserRequirement.NEVER
+                if validated.render is False
+                else BrowserRequirement.OPTIONAL
+            ),
+        )
 
     def build(
         self,

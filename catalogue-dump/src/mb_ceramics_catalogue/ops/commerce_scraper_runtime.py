@@ -56,18 +56,19 @@ from .commerce_scraper_adapter import (
     layered_source_config,
     source_definition,
 )
-from .commerce_scraper_axner import AxnerFactory
 from .commerce_scraper_browser import (
     BorrowedBrowserTransport,
     CamoufoxProxyBrowserTransportFactory,
 )
 from .commerce_scraper_cache import CatalogueCacheStats, CatalogueResponseCache
-from .commerce_scraper_ceramicolours import CeramicoloursFactory
-from .commerce_scraper_keramik_kraft import KeramikKraftFactory
 from .commerce_scraper_pipeline import LibraryPipelineConnector
 from .commerce_scraper_proxy_runtime import NativeProxyRuntimeSpec
 from .commerce_scraper_transport import LegacyFetcher, LegacyFetcherTransport
-from .connector_adapters import library_canary_route, runtime_plan
+from .connector_adapters import (
+    application_connector_registry,
+    library_canary_route,
+    runtime_plan,
+)
 
 LOGGER = obs.get_logger("catalogue.commerce_scraper")
 
@@ -126,15 +127,6 @@ class _ContextualTelemetry:
 
     def emit(self, event: str, fields: dict[str, JsonValue]) -> None:
         self._telemetry.emit(event, {**fields, **self._context})
-
-
-def application_connector_registry() -> ConnectorRegistry:
-    """Compose library built-ins with explicitly approved application plugins."""
-    registry = ConnectorRegistry.with_builtins()
-    registry.register(AxnerFactory())
-    registry.register(CeramicoloursFactory())
-    registry.register(KeramikKraftFactory())
-    return registry
 
 
 def local_canary_source_config(config: SourceConfig) -> SourceConfig:

@@ -625,3 +625,10 @@ class BigCommerceFactory(SimpleConnectorFactory[BigCommerceOptions, BigCommerceC
     version = BigCommerceConnector.version
     options_model = BigCommerceOptions
     connector_type = BigCommerceConnector
+
+    def _plan_browser(self, options: BigCommerceOptions) -> BrowserRequirement:
+        return (
+            BrowserRequirement.OPTIONAL
+            if options.allow_rendered_token_fallback
+            else BrowserRequirement.NEVER
+        )

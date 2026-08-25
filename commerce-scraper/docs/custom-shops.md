@@ -74,6 +74,7 @@ plugin provides two objects:
 - a connector implementing `name`, `platform`, `version`, `capabilities`, and
   async `collect(request, checkpoint)`;
 - a factory implementing `name`, `version`, `options_model`, and
+  I/O-free `plan(options, base_url=..., request_partitions=...)` plus
   `build(transport=..., options=..., context=...)`.
 
 Publish the factory through the stable entry-point group:

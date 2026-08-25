@@ -904,3 +904,21 @@ class WooCommerceFactory(
     version = WooCommerceConnector.version
     options_model = WooCommerceOptions
     connector_type = WooCommerceConnector
+
+    def _plan_partitions(
+        self,
+        options: WooCommerceOptions,
+        *,
+        base_url: str,
+        request_partitions: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        del base_url
+        return request_partitions or options.store_categories
+
+    def _plan_dynamic_partitions(
+        self,
+        options: WooCommerceOptions,
+        *,
+        request_partitions: tuple[str, ...],
+    ) -> bool:
+        return bool(request_partitions or options.store_categories)

@@ -15,6 +15,7 @@ from mb_commerce_scraper.connectors import (
     CommerceConnector,
     ConnectorCapabilities,
     ConnectorContext,
+    ConnectorPlan,
     DiscoveryOptions,
     GenericPagesConnector,
     GenericPagesOptions,
@@ -108,6 +109,28 @@ class KeramikKraftFactory:
     name = KeramikKraftConnector.name
     version = KeramikKraftConnector.version
     options_model: type[BaseModel] = KeramikKraftOptions
+
+    def plan(
+        self,
+        options: BaseModel,
+        *,
+        base_url: str,
+        request_partitions: tuple[str, ...] = (),
+    ) -> ConnectorPlan:
+        del base_url, request_partitions
+        if not isinstance(options, KeramikKraftOptions):
+            raise TypeError(
+                "keramik-kraft factory requires validated KeramikKraftOptions options"
+            )
+        validated = options
+        return ConnectorPlan(
+            partitions=("main",),
+            browser=(
+                BrowserRequirement.NEVER
+                if validated.render is False
+                else BrowserRequirement.OPTIONAL
+            ),
+        )
 
     def build(
         self,

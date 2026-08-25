@@ -208,10 +208,12 @@ def test_library_canary_routes_are_explicit_application_metadata() -> None:
     assert library_canary_route(prestashop, "prestashop") == LibraryCanaryRoute(
         connector="prestashop",
         request_partitions=("sitemap:0:d30089dfe4db",),
+        uses_browser_transport=True,
     )
     assert library_canary_route(sio2, "prestashop") == LibraryCanaryRoute(
         connector="prestashop",
         request_partitions=("category:0:9bc2b475c709",),
+        uses_browser_transport=True,
     )
     assert sio2.ceramics_projection == {"source_policy": "sio2"}
     assert library_canary_route(wix, "wix") == LibraryCanaryRoute(

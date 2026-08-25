@@ -63,6 +63,7 @@ from .base import (
     ConnectorContext,
     validate_connector_request,
 )
+from .factory import ConnectorPlan
 
 
 class DiscoveryOptions(BaseModel):
@@ -140,6 +141,28 @@ class PageEngineOptions(BaseModel):
         if self.dom_rules is not None and "dom" not in self.parsers:
             raise ValueError("dom_rules require the dom parser")
         return self
+
+
+def page_engine_plan(
+    options: PageEngineOptions,
+    *,
+    custom_discovery: str | None = None,
+) -> ConnectorPlan:
+    partition = (
+        f"strategy:{custom_discovery}"
+        if custom_discovery is not None
+        else "category"
+        if options.discovery.category_urls
+        else "sitemap"
+    )
+    return ConnectorPlan(
+        partitions=(partition,),
+        browser=(
+            BrowserRequirement.NEVER
+            if options.render is False
+            else BrowserRequirement.OPTIONAL
+        ),
+    )
 
 
 def _dom_selector(value: str | DomFieldSelector) -> DomFieldSelector:

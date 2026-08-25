@@ -14,6 +14,7 @@ from mb_commerce_scraper.connectors import (
     CommerceConnector,
     ConnectorCapabilities,
     ConnectorContext,
+    ConnectorPlan,
     DiscoveryOptions,
     GenericPagesConnector,
     GenericPagesOptions,
@@ -147,6 +148,28 @@ class CeramicoloursFactory:
     name = CeramicoloursConnector.name
     version = CeramicoloursConnector.version
     options_model: type[BaseModel] = CeramicoloursOptions
+
+    def plan(
+        self,
+        options: BaseModel,
+        *,
+        base_url: str,
+        request_partitions: tuple[str, ...] = (),
+    ) -> ConnectorPlan:
+        del base_url, request_partitions
+        if not isinstance(options, CeramicoloursOptions):
+            raise TypeError(
+                "ceramicolours factory requires validated CeramicoloursOptions options"
+            )
+        validated = options
+        return ConnectorPlan(
+            partitions=("main",),
+            browser=(
+                BrowserRequirement.NEVER
+                if validated.render is False
+                else BrowserRequirement.OPTIONAL
+            ),
+        )
 
     def build(
         self,

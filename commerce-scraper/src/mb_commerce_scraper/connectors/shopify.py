@@ -712,3 +712,13 @@ class ShopifyFactory(SimpleConnectorFactory[ShopifyOptions, ShopifyConnector]):
     version = ShopifyConnector.version
     options_model = ShopifyOptions
     connector_type = ShopifyConnector
+
+    def _plan_partitions(
+        self,
+        options: ShopifyOptions,
+        *,
+        base_url: str,
+        request_partitions: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        del options, base_url
+        return request_partitions

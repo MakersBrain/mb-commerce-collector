@@ -35,6 +35,9 @@ based on Keep a Changelog, and releases follow the compatibility policy in
   typed values from the general event dictionary.
 - Public `build_checkpoint` construction using the canonical collection
   fingerprint and schema-v1 checkpoint identity.
+- Public immutable `ConnectorPlan` metadata and `ConnectorRegistry.plan()` for
+  deriving connector partitions, dynamic declarations, and effective browser
+  requirements without constructing a connector or performing I/O.
 
 ### Changed
 

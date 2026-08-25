@@ -1,6 +1,6 @@
 from .base import BrowserRequirement, CommerceConnector, ConnectorCapabilities, ConnectorContext
 from .bigcommerce import BigCommerceConnector, BigCommerceFactory, BigCommerceOptions
-from .factory import ConnectorFactory
+from .factory import ConnectorFactory, ConnectorPlan
 from .generic_pages import (
     DiscoveryOptions,
     DomRules,
@@ -42,6 +42,7 @@ __all__ = [
     "ConnectorCapabilities",
     "ConnectorContext",
     "ConnectorFactory",
+    "ConnectorPlan",
     "ConnectorRegistry",
     "DiscoveryOptions",
     "DomRules",

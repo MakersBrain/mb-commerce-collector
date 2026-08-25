@@ -33,11 +33,17 @@ subpackage surfaces have these roles:
 - `runtime`: the high-level borrowed-resource client and owned HTTP builder;
 - `testing`: supported test helpers for third-party connector conformance.
 
+`ConnectorPlan` is the factory-owned, I/O-free declaration of effective
+partition keys, dynamic partition handling, and browser requirements for one
+validated options model. Applications should call `ConnectorRegistry.plan()`
+rather than reproduce connector partition or browser logic. The planning call
+accepts the source base URL where a stable partition key depends on it, plus
+explicit request partitions such as Shopify collection scope.
+
 `TelemetryHooks` is the supported observer protocol for application-owned
-structured tracing and debugging sinks. Connector-specific composition may use
-public helpers such as `prestashop_partition_keys` when it must construct a
-partitioned collection request without depending on connector implementation
-modules.
+structured tracing and debugging sinks. Low-level consumers may still use
+public helpers such as `prestashop_partition_keys`, but registry planning is
+the canonical application-composition path.
 
 `build_checkpoint` is the supported constructor for connector-authored
 schema-v1 checkpoints. It binds source, connector version, options, and

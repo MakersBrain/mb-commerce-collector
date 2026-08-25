@@ -31,6 +31,7 @@ from mb_commerce_scraper.connectors import (
     CommerceConnector,
     ConnectorCapabilities,
     ConnectorContext,
+    ConnectorPlan,
     ConnectorRegistry,
 )
 from mb_commerce_scraper.proxy import (
@@ -303,6 +304,16 @@ class UnsafeFactory:
     version = UnsafeConnector.version
     options_model: type[BaseModel] = UnsafeOptions
 
+    def plan(
+        self,
+        options: BaseModel,
+        *,
+        base_url: str,
+        request_partitions: tuple[str, ...] = (),
+    ) -> ConnectorPlan:
+        del options, base_url, request_partitions
+        return ConnectorPlan()
+
     def build(
         self,
         *,
@@ -357,6 +368,16 @@ class OpenConnectorFactory:
 
     def __init__(self) -> None:
         self.connector: OpenConnector | None = None
+
+    def plan(
+        self,
+        options: BaseModel,
+        *,
+        base_url: str,
+        request_partitions: tuple[str, ...] = (),
+    ) -> ConnectorPlan:
+        del options, base_url, request_partitions
+        return ConnectorPlan()
 
     def build(
         self,

@@ -21,7 +21,11 @@ from mb_commerce_scraper import (
     RefreshMode,
     SnapshotField,
 )
-from mb_commerce_scraper.connectors import ConnectorCapabilities, ConnectorContext
+from mb_commerce_scraper.connectors import (
+    ConnectorCapabilities,
+    ConnectorContext,
+    ConnectorPlan,
+)
 from mb_commerce_scraper.transports import (
     CommerceTransport,
     RequestPriority,
@@ -139,6 +143,20 @@ class ExampleFeedFactory:
     name = ExampleFeedConnector.name
     version = ExampleFeedConnector.version
     options_model: type[BaseModel] = ExampleFeedOptions
+
+    def plan(
+        self,
+        options: BaseModel,
+        *,
+        base_url: str,
+        request_partitions: tuple[str, ...] = (),
+    ) -> ConnectorPlan:
+        del base_url, request_partitions
+        if not isinstance(options, ExampleFeedOptions):
+            raise TypeError(
+                "example-feed factory requires validated ExampleFeedOptions options"
+            )
+        return ConnectorPlan()
 
     def build(
         self,

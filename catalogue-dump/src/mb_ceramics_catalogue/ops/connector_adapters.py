@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 
 from mb_commerce_scraper.connectors import (
     BigCommerceOptions,
+    BrowserRequirement,
+    ConnectorRegistry,
     DiscoveryOptions,
     GenericPagesOptions,
     NitroSellOptions,
@@ -20,14 +22,14 @@ from mb_commerce_scraper.connectors import (
     SumUpOptions,
     WixOptions,
     WooCommerceOptions,
-    prestashop_partition_keys,
 )
+from pydantic import BaseModel
 
 from mb_ceramics_catalogue.config.sources import SourceConfig
 
-from .commerce_scraper_axner import AxnerOptions
-from .commerce_scraper_ceramicolours import CeramicoloursOptions
-from .commerce_scraper_keramik_kraft import KeramikKraftOptions
+from .commerce_scraper_axner import AxnerFactory, AxnerOptions
+from .commerce_scraper_ceramicolours import CeramicoloursFactory, CeramicoloursOptions
+from .commerce_scraper_keramik_kraft import KeramikKraftFactory, KeramikKraftOptions
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +76,36 @@ RuntimeProjector = Callable[[SourceConfig], ConnectorRuntimePlan]
 RUNTIME_ADAPTERS: dict[str, RuntimeProjector] = {}
 
 
+def application_connector_registry() -> ConnectorRegistry:
+    """Compose library built-ins with explicitly approved application plugins."""
+    registry = ConnectorRegistry.with_builtins()
+    registry.register(AxnerFactory())
+    registry.register(CeramicoloursFactory())
+    registry.register(KeramikKraftFactory())
+    return registry
+
+
+def _library_canary(
+    connector: str,
+    options: BaseModel,
+    config: SourceConfig,
+    *,
+    request_partitions: tuple[str, ...] = (),
+) -> LibraryCanaryRoute:
+    plan = application_connector_registry().plan(
+        connector,
+        options=options.model_dump(mode="json"),
+        base_url=config.url,
+        request_partitions=request_partitions,
+    )
+    return LibraryCanaryRoute(
+        connector=connector,
+        request_partitions=plan.partitions,
+        dynamic_partitions=plan.dynamic_partitions,
+        uses_browser_transport=plan.browser is not BrowserRequirement.NEVER,
+    )
+
+
 def register_runtime_adapter(name: str, projector: RuntimeProjector) -> None:
     if name in RUNTIME_ADAPTERS:
         raise ValueError(f"runtime adapter {name!r} is already registered")
@@ -118,9 +150,8 @@ def _shopify(config: SourceConfig) -> ConnectorRuntimePlan:
         extraction_method="api_json",
         source_detail_level="api",
         collections=collections,
-        library_canary=LibraryCanaryRoute(
-            connector="shopify",
-            request_partitions=collections,
+        library_canary=_library_canary(
+            "shopify", options, config, request_partitions=collections
         ),
     )
 
@@ -143,11 +174,7 @@ def _woocommerce(config: SourceConfig) -> ConnectorRuntimePlan:
         extraction_method="api_json",
         source_detail_level="api",
         categories=categories,
-        library_canary=LibraryCanaryRoute(
-            connector="woocommerce",
-            request_partitions=categories,
-            dynamic_partitions=bool(categories),
-        ),
+        library_canary=_library_canary("woocommerce", options, config),
     )
 
 
@@ -162,10 +189,7 @@ def _bigcommerce(config: SourceConfig) -> ConnectorRuntimePlan:
         connector_options=options.model_dump(mode="json"),
         extraction_method="graphql",
         source_detail_level="api",
-        library_canary=LibraryCanaryRoute(
-            connector="bigcommerce",
-            uses_browser_transport=True,
-        ),
+        library_canary=_library_canary("bigcommerce", options, config),
     )
 
 
@@ -182,15 +206,8 @@ def _wix(config: SourceConfig) -> ConnectorRuntimePlan:
         connector_options=options.model_dump(mode="json"),
         extraction_method="dom",
         source_detail_level="product_page",
-        library_canary=LibraryCanaryRoute(
-            connector="wix",
-            uses_browser_transport=True,
-        ),
+        library_canary=_library_canary("wix", options, config),
     )
-
-
-def _page_partitions(config: SourceConfig, *, sitemaps: tuple[str, ...]) -> tuple[str, ...]:
-    return ("sitemap",) if sitemaps or config.use_advertised_sitemaps is not False else ("category",)
 
 
 def _specialized_options(
@@ -229,18 +246,12 @@ def _specialized(config: SourceConfig, name: str) -> ConnectorRuntimePlan:
     }
     options_type, method = definitions[name]
     options = _specialized_options(options_type, config)
-    sitemaps = tuple(options.discovery.sitemaps)
-    partitions = _page_partitions(config, sitemaps=sitemaps)
     return ConnectorRuntimePlan(
         connector=name,
         connector_options=options.model_dump(mode="json"),
         extraction_method=method,
         source_detail_level="product_page",
-        library_canary=LibraryCanaryRoute(
-            connector=name,
-            request_partitions=partitions,
-            uses_browser_transport=options.render is not False,
-        ),
+        library_canary=_library_canary(name, options, config),
     )
 
 
@@ -263,11 +274,7 @@ def _sumup(config: SourceConfig) -> ConnectorRuntimePlan:
         connector_options=options.model_dump(mode="json"),
         extraction_method="dom",
         source_detail_level="product_page",
-        library_canary=LibraryCanaryRoute(
-            connector="sumup",
-            request_partitions=("sitemap",),
-            uses_browser_transport=options.render is not False,
-        ),
+        library_canary=_library_canary("sumup", options, config),
     )
 
 
@@ -285,17 +292,13 @@ def _prestashop(config: SourceConfig, *, sio2: bool = False) -> ConnectorRuntime
         page_limit=config.page_limit or 500,
         category_page_limit=config.category_page_limit or 120,
     )
-    partitions = prestashop_partition_keys(options, config.url)
     return ConnectorRuntimePlan(
         connector="prestashop",
         connector_options=options.model_dump(mode="json"),
         extraction_method="dom",
         source_detail_level="product_page",
         ceramics_projection={"source_policy": "sio2"} if sio2 else {},
-        library_canary=LibraryCanaryRoute(
-            connector="prestashop",
-            request_partitions=partitions,
-        ),
+        library_canary=_library_canary("prestashop", options, config),
     )
 
 
@@ -324,17 +327,12 @@ def _pagecommerce(config: SourceConfig) -> ConnectorRuntimePlan:
         parsers=("jsonld", "microdata", "opengraph"),
         browser_zero_gain_limit=10,
     )
-    partitions = _page_partitions(config, sitemaps=tuple(discovery.sitemaps))
     return ConnectorRuntimePlan(
         connector="generic-pages",
         connector_options=options.model_dump(mode="json"),
         extraction_method="structured",
         source_detail_level="product_page",
-        library_canary=LibraryCanaryRoute(
-            connector="generic-pages",
-            request_partitions=partitions,
-            uses_browser_transport=options.render is not False,
-        ),
+        library_canary=_library_canary("generic-pages", options, config),
     )
 
 
@@ -358,11 +356,7 @@ def _axner(config: SourceConfig) -> ConnectorRuntimePlan:
         connector_options=options.model_dump(mode="json"),
         extraction_method="dom",
         source_detail_level="product_page",
-        library_canary=LibraryCanaryRoute(
-            connector="axner",
-            request_partitions=("main",),
-            uses_browser_transport=options.render is not False,
-        ),
+        library_canary=_library_canary("axner", options, config),
     )
 
 
@@ -380,11 +374,7 @@ def _ceramicolours(config: SourceConfig) -> ConnectorRuntimePlan:
         connector_options=options.model_dump(mode="json"),
         extraction_method="dom",
         source_detail_level="product_page",
-        library_canary=LibraryCanaryRoute(
-            connector="ceramicolours",
-            request_partitions=("main",),
-            uses_browser_transport=options.render is not False,
-        ),
+        library_canary=_library_canary("ceramicolours", options, config),
     )
 
 
@@ -406,11 +396,7 @@ def _keramik_kraft(config: SourceConfig) -> ConnectorRuntimePlan:
         connector_options=options.model_dump(mode="json"),
         extraction_method="dom",
         source_detail_level="product_page",
-        library_canary=LibraryCanaryRoute(
-            connector="keramik-kraft",
-            request_partitions=("main",),
-            uses_browser_transport=options.render is not False,
-        ),
+        library_canary=_library_canary("keramik-kraft", options, config),
     )
 
 
