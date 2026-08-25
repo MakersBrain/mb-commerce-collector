@@ -17,12 +17,37 @@ TOKEN = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 PASSWORD = TOKEN
 MAX_PROVIDER_SECRET_BYTES = 1_048_576
 WEBSHARE_GATEWAY_EXPORT = "catalogue/proxy/WEBSHARE_GATEWAY_V2_JSON"
-DB_ROLES = {
-    "service": ("catalogue_service", "CATALOGUE_SERVICE_DB_PASSWORD"),
-    "control": ("catalogue_control", "CATALOGUE_CONTROL_DB_PASSWORD"),
-    "dispatcher": ("catalogue_dispatcher", "CATALOGUE_DISPATCHER_DB_PASSWORD"),
-    "worker": ("catalogue_worker", "CATALOGUE_WORKER_DB_PASSWORD"),
-    "worker-browser": ("catalogue_worker", "CATALOGUE_WORKER_DB_PASSWORD"),
+DB_ROLES: dict[str, tuple[str, str, tuple[str, ...]]] = {
+    "service": ("catalogue_service", "CATALOGUE_SERVICE_DB_PASSWORD", ()),
+    "control": (
+        "catalogue_control",
+        "CATALOGUE_CONTROL_DB_PASSWORD",
+        (
+            "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE="
+            "/run/secrets/webshare-gateway/webshare-gateway.json",
+        ),
+    ),
+    "dispatcher": (
+        "catalogue_dispatcher",
+        "CATALOGUE_DISPATCHER_DB_PASSWORD",
+        (),
+    ),
+    "worker": (
+        "catalogue_worker",
+        "CATALOGUE_WORKER_DB_PASSWORD",
+        (
+            "CATALOGUE_CACHE_DIR=/var/lib/catalogue/cache",
+            "CATALOGUE_DUMPS_DIR=/var/lib/catalogue/dumps",
+        ),
+    ),
+    "worker-browser": (
+        "catalogue_worker",
+        "CATALOGUE_WORKER_DB_PASSWORD",
+        (
+            "CATALOGUE_CACHE_DIR=/var/lib/catalogue/cache",
+            "CATALOGUE_DUMPS_DIR=/var/lib/catalogue/dumps",
+        ),
+    ),
 }
 NATS_ROLES = {
     "publish": "catalogue-publisher",
@@ -161,20 +186,14 @@ def build(values_path: Path, secret_root: Path, output: Path) -> None:
     port = values["postgres_port"]
     database = values["postgres_database"]
     common = "CATALOGUE_LOG_JSON=true\n"
-    for process, (role, password_name) in DB_ROLES.items():
+    for process, (role, password_name, extra_env) in DB_ROLES.items():
         password = _secret(secret_root, f"catalogue/database/{password_name}", TOKEN)
         dsn = (
             f"postgresql://{role}:{quote(password, safe='')}@{host}:{port}/{database}"
             "?sslmode=verify-full&sslrootcert=/run/database/postgres-ca.crt"
         )
         additions = "CATALOGUE_DSN=" + dsn + "\n"
-        if process == "control":
-            additions += (
-                "CATALOGUE_PROXY_WEBSHARE_GATEWAY_SECRET_FILE="
-                "/run/secrets/webshare-gateway/webshare-gateway.json\n"
-            )
-        if process in {"worker", "worker-browser"}:
-            additions += "CATALOGUE_CACHE_DIR=/var/lib/catalogue/cache\nCATALOGUE_DUMPS_DIR=/var/lib/catalogue/dumps\n"
+        additions += "".join(f"{entry}\n" for entry in extra_env)
         _write(config / f"{process}.env", common + additions)
 
     control_token = _secret(secret_root, "catalogue/application/CATALOGUE_CONTROL_TOKEN", TOKEN)

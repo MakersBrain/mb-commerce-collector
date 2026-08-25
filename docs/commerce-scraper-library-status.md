@@ -141,6 +141,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `517db89` — unify middleware failure telemetry.
 - `f99d757` — make optional transport capabilities explicit.
 - `edcc179` — extract the shared page engine and nested options model.
+- `ad8f399` — derive canary routes from connector factory plans.
 
 ### Verification at last review
 
@@ -293,6 +294,10 @@ architecture rules in the plan and are not separate scope-expansion goals.
     canary composition. The complete scraper gate passed with 326 tests and 226
     reviewed exports; catalogue lint/type/fast tests and installed two-wheel
     composition remained green.
+  - Podman runtime-stage roles now own their static process environment in one
+    table column; the renderer has no control/worker process-name branches.
+    Exact generated environment assertions and the complete 32-test Podman
+    deployment suite passed with deployment-tree Ruff.
   - The provider-neutral durable Webshare composition and existing Decodo and
     Webshare adapter suites passed 29 focused tests.
   - The strict Webshare gateway-secret contract passed 47 focused tests.
@@ -302,7 +307,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
     resolver → routed transport → real HTTP proxy framing, and proves exact
     sticky credential grammar, one durable authorization/reconciliation/close,
     no direct request, and complete lease/connection cleanup.
-  - The Podman/rootless deployment suite passed 29 tests; worker entrypoint and
+  - The Podman/rootless deployment suite passed 32 tests; worker entrypoint and
     rendered Compose placement passed 4 focused tests plus Compose
     configuration validation. A combined live PostgreSQL gate passed 18
     durable-fence and schema-migration cases.

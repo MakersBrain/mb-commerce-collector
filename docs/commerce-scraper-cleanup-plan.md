@@ -573,13 +573,22 @@ the paid-traffic path and depend on Track 0.1.
   and mypy over 239 files passed; `pytest -q` -> 936 passed, 2 skipped, 187
   deselected, and 284 subtests; installed two-wheel composition passed.
 
-- [ ] **D10 Move per-process env into the roles table.**
+- [x] **D10 Move per-process env into the roles table.**
   `deploy/podman/build_runtime_stage.py:162-177` applies per-process
   configuration as `if process == "control"` / `if process in {"worker",
   "worker-browser"}` branches inside the loop over `DB_ROLES` — the table that
   already describes each process. Add an `extra_env` column so the table stays
   the single place to look up what a process gets, instead of the loop body
   growing a branch per process.
+  **Completed.** `DB_ROLES` now carries an immutable third `extra_env` column
+  for the control gateway path and both worker cache/dump paths. The renderer
+  appends that metadata uniformly; both process-name branches are gone. The
+  separately loaded control token remains in its secret-handling phase.
+  A table-shape regression test makes the ownership explicit, and an exact
+  five-file assertion proves the generated service, control, dispatcher,
+  worker, and browser-worker environments remain byte-for-byte unchanged.
+  *Verified:* Ruff passed for the complete Podman deployment tree and all 32
+  Podman deployment tests passed.
 
 ---
 
