@@ -91,6 +91,25 @@ def test_models_use_only_standard_library_pydantic_and_models() -> None:
     assert violations == []
 
 
+def test_page_engine_does_not_depend_on_vendor_connectors() -> None:
+    forbidden = {
+        f"{PACKAGE_NAME}.connectors.generic_pages",
+        f"{PACKAGE_NAME}.connectors.specialized",
+    }
+    violations = [
+        f"{line}: {module}"
+        for line, module in _imports(PACKAGE / "connectors" / "page_engine.py")
+        if module in forbidden
+    ]
+    generic_imports = {
+        module
+        for _, module in _imports(PACKAGE / "connectors" / "generic_pages.py")
+    }
+    if f"{PACKAGE_NAME}.connectors.specialized" in generic_imports:
+        violations.append("generic_pages imports the vendor connector module")
+    assert violations == []
+
+
 def test_core_import_does_not_load_optional_or_application_dependencies() -> None:
     output = subprocess.check_output(
         [

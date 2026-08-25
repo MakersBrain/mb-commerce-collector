@@ -198,14 +198,20 @@ def _specialized_options(
     config: SourceConfig,
 ) -> ShopwareOptions | StarwebOptions | NitroSellOptions:
     return model(
-        sitemaps=tuple(config.sitemaps or ()),
-        use_advertised_sitemaps=(True if config.use_advertised_sitemaps is None else config.use_advertised_sitemaps),
-        category_urls=tuple(config.category_urls or ()),
-        product_pattern=config.product_pattern,
-        pagination_patterns=tuple(config.pagination_patterns or ()),
-        card_links_only=bool(config.card_links_only),
+        discovery=DiscoveryOptions(
+            sitemaps=tuple(config.sitemaps or ()),
+            use_advertised_sitemaps=(
+                True
+                if config.use_advertised_sitemaps is None
+                else config.use_advertised_sitemaps
+            ),
+            category_urls=tuple(config.category_urls or ()),
+            product_pattern=config.product_pattern,
+            pagination_patterns=tuple(config.pagination_patterns or ()),
+            card_links_only=bool(config.card_links_only),
+            category_page_limit=config.category_page_limit or 120,
+        ),
         page_limit=config.page_limit or 500,
-        category_page_limit=config.category_page_limit or 120,
         render=config.render, brand=config.brand, currency=config.currency,
         vat_status=config.vat_status,
         vat_rate=Decimal(str(config.vat_rate)) if config.vat_rate is not None else None,
@@ -223,7 +229,7 @@ def _specialized(config: SourceConfig, name: str) -> ConnectorRuntimePlan:
     }
     options_type, method = definitions[name]
     options = _specialized_options(options_type, config)
-    sitemaps = tuple(options.sitemaps)
+    sitemaps = tuple(options.discovery.sitemaps)
     partitions = _page_partitions(config, sitemaps=sitemaps)
     return ConnectorRuntimePlan(
         connector=name,
@@ -242,8 +248,12 @@ def _sumup(config: SourceConfig) -> ConnectorRuntimePlan:
     origin = f"{urlparse(config.url).scheme}://{urlparse(config.url).netloc}"
     sitemaps = tuple(config.sitemaps or (f"{origin}/sitemap.products.xml",))
     options = SumUpOptions(
-        sitemaps=sitemaps, use_advertised_sitemaps=False,
-        product_pattern=config.product_pattern, page_limit=config.page_limit or 500,
+        discovery=DiscoveryOptions(
+            sitemaps=sitemaps,
+            use_advertised_sitemaps=False,
+            product_pattern=config.product_pattern,
+        ),
+        page_limit=config.page_limit or 500,
         render=config.render, brand=config.brand, currency=config.currency,
         vat_status=config.vat_status,
         vat_rate=Decimal(str(config.vat_rate)) if config.vat_rate is not None else None,

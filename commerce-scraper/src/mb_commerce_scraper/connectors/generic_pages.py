@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import AsyncIterator
-from decimal import Decimal
 from typing import Literal, cast
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, JsonValue
 
 from mb_commerce_scraper.discovery import DiscoveryFailure, DiscoveryStrategy
 from mb_commerce_scraper.models import (
@@ -19,126 +18,31 @@ from mb_commerce_scraper.models import (
     build_checkpoint,
 )
 from mb_commerce_scraper.parsing import ProductParser
-from mb_commerce_scraper.parsing._structured import DomFieldSelector, VerifiedDomRules
 from mb_commerce_scraper.transports import CommerceTransport
 
 from .base import BrowserRequirement, ConnectorCapabilities, ConnectorContext
 from .factory import validated_options
-from .specialized import SpecializedPageConnector, SpecializedPageOptions
+from .page_engine import (
+    DiscoveryOptions as DiscoveryOptions,
+)
+from .page_engine import (
+    DomRules as DomRules,
+)
+from .page_engine import (
+    PageEngineConnector,
+    PageEngineOptions,
+)
 
 
-class DiscoveryOptions(BaseModel):
-    """Safe, bounded product-page discovery configuration."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    sitemaps: tuple[str, ...] = ()
-    use_advertised_sitemaps: bool = True
-    category_urls: tuple[str, ...] = ()
-    product_pattern: str | None = None
-    pagination_patterns: tuple[str, ...] = ()
-    card_links_only: bool = False
-    sitemap_limit: int = Field(default=100, ge=1, le=10_000)
-    category_page_limit: int = Field(default=120, ge=1, le=10_000)
-
-
-class DomRules(BaseModel):
-    """Verified, data-only selectors that never enter a CSS/JS engine."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    verification: tuple[str | DomFieldSelector, ...] = ()
-    name: str | DomFieldSelector
-    price: str | DomFieldSelector | None = None
-    currency: str | DomFieldSelector | None = None
-    description: str | DomFieldSelector | None = None
-    sku: str | DomFieldSelector | None = None
-    image: str | DomFieldSelector | None = None
-    availability: str | DomFieldSelector | None = None
-
-    @model_validator(mode="after")
-    def _selectors_are_supported(self) -> DomRules:
-        self.as_verified()
-        return self
-
-    def as_verified(self) -> VerifiedDomRules:
-        name = _dom_selector(self.name)
-        verification = tuple(_dom_selector(value) for value in self.verification)
-        return VerifiedDomRules(
-            verification=verification or (name,),
-            name=name,
-            price=_optional_dom_selector(self.price),
-            currency=_optional_dom_selector(self.currency),
-            description=_optional_dom_selector(self.description),
-            sku=_optional_dom_selector(self.sku),
-            image=_optional_dom_selector(self.image),
-            availability=_optional_dom_selector(self.availability),
-        )
-
-
-class GenericPagesOptions(BaseModel):
+class GenericPagesOptions(PageEngineOptions):
     """Declarative configuration for a generic structured-data shop."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    discovery: DiscoveryOptions = Field(default_factory=DiscoveryOptions)
     parsers: tuple[Literal["jsonld", "microdata", "opengraph", "dom"], ...] = (
         "jsonld",
     )
-    dom_rules: DomRules | None = None
-    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
-    brand: str | None = None
-    vat_status: Literal["inclusive", "exclusive", "unknown"] | None = None
-    vat_rate: Decimal | None = Field(default=None, ge=0, le=1)
-    stock_from_quantity_maximum: bool = False
-    page_limit: int = Field(default=10_000, ge=1)
-    render: bool | None = None
-    browser_zero_gain_limit: int = Field(default=10, ge=1)
-
-    @model_validator(mode="after")
-    def _dom_parser_is_explicit(self) -> GenericPagesOptions:
-        if "dom" in self.parsers and self.dom_rules is None:
-            raise ValueError("the dom parser requires dom_rules")
-        if self.dom_rules is not None and "dom" not in self.parsers:
-            raise ValueError("dom_rules require the dom parser")
-        return self
-
-    def as_page_options(self) -> SpecializedPageOptions:
-        """Project the public nested schema into the shared page-collection engine."""
-
-        discovery = self.discovery
-        return SpecializedPageOptions(
-            sitemaps=discovery.sitemaps,
-            use_advertised_sitemaps=discovery.use_advertised_sitemaps,
-            category_urls=discovery.category_urls,
-            product_pattern=discovery.product_pattern,
-            pagination_patterns=discovery.pagination_patterns,
-            card_links_only=discovery.card_links_only,
-            sitemap_limit=discovery.sitemap_limit,
-            category_page_limit=discovery.category_page_limit,
-            parsers=self.parsers,
-            dom_rules=self.dom_rules.as_verified() if self.dom_rules else None,
-            currency=self.currency,
-            brand=self.brand,
-            vat_status=self.vat_status,
-            vat_rate=self.vat_rate,
-            stock_from_quantity_maximum=self.stock_from_quantity_maximum,
-            page_limit=self.page_limit,
-            render=self.render,
-            browser_zero_gain_limit=self.browser_zero_gain_limit,
-        )
 
 
-def _dom_selector(value: str | DomFieldSelector) -> DomFieldSelector:
-    return value if isinstance(value, DomFieldSelector) else DomFieldSelector(selector=value)
-
-
-def _optional_dom_selector(
-    value: str | DomFieldSelector | None,
-) -> DomFieldSelector | None:
-    return _dom_selector(value) if value is not None else None
-
-
-class GenericPagesConnector(SpecializedPageConnector):
+class GenericPagesConnector(PageEngineConnector):
     """Generic connector using the shared, checkpoint-safe page collection engine."""
 
     name = "generic-pages"
@@ -172,7 +76,7 @@ class GenericPagesConnector(SpecializedPageConnector):
             if discovery is not None
             else None
         )
-        super().__init__(transport, options.as_page_options(), context)
+        super().__init__(transport, options, context)
 
     async def _discover(self, base_url: str) -> AsyncIterator[str]:
         if self._discovery_override is None:
@@ -184,8 +88,8 @@ class GenericPagesConnector(SpecializedPageConnector):
         candidates = 0
         maximum_candidates = max(
             self.options.page_limit,
-            self.options.sitemap_limit,
-            self.options.category_page_limit,
+            self.options.discovery.sitemap_limit,
+            self.options.discovery.category_page_limit,
         ) + 1
         async for candidate in self._discovery_override.discover(base_url):
             if self.context.cancelled():

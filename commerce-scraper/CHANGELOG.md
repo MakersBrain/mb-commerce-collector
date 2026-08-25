@@ -53,6 +53,10 @@ based on Keep a Changelog, and releases follow the compatibility policy in
 - Replaced duck-typed optional transport capabilities with runtime-checkable
   request-scoped rotation and browser-authorization protocols, with shared
   forwarding through transport wrappers.
+- Moved the shared page-collection engine out of the vendor connector module
+  and consolidated generic and specialized connector configuration on one
+  nested discovery options model. Vendor discovery fields now live under
+  `discovery`, matching generic-page configuration.
 
 Before tagging the first release, move these notes under
 `## [0.1.0] - YYYY-MM-DD` and retain an empty `## [Unreleased]` section above

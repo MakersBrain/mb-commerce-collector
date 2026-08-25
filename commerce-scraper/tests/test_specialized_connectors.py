@@ -10,6 +10,7 @@ from pydantic import JsonValue
 
 from mb_commerce_scraper import CollectionRequest
 from mb_commerce_scraper.connectors.base import ConnectorContext
+from mb_commerce_scraper.connectors.generic_pages import DiscoveryOptions, DomRules
 from mb_commerce_scraper.connectors.specialized import (
     NitroSellConnector,
     NitroSellOptions,
@@ -21,7 +22,6 @@ from mb_commerce_scraper.connectors.specialized import (
     SumUpOptions,
 )
 from mb_commerce_scraper.models import RefreshMode, SnapshotField
-from mb_commerce_scraper.parsing._structured import VerifiedDomRules
 from mb_commerce_scraper.testing import (
     FakeTransport,
     assert_cancelled_without_requests,
@@ -186,7 +186,9 @@ async def test_sumup_collection_runs_contextual_conformance_harness() -> None:
         body=_sumup_page() + f"<script>{secret}</script>",
     )
     options = SumUpOptions(
-        sitemaps=("/s.xml",), product_pattern=r"/article/"
+        discovery=DiscoveryOptions(
+            sitemaps=("/s.xml",), product_pattern=r"/article/"
+        )
     )
     connector = SumUpConnector(transport, options, _context())
     intent = _request()
@@ -229,7 +231,9 @@ async def test_oversized_product_body_becomes_a_non_retryable_diagnostic() -> No
     transport = BrowserDispatchTransport(raw, maximum_response_bytes=128)
     connector = ShopwareConnector(
         transport,
-        ShopwareOptions(sitemaps=("/s.xml",), product_pattern=r"/a$"),
+        ShopwareOptions(
+            discovery=DiscoveryOptions(sitemaps=("/s.xml",), product_pattern=r"/a$")
+        ),
         _context(),
     )
 
@@ -248,7 +252,7 @@ async def test_oversized_sitemap_becomes_a_non_retryable_diagnostic() -> None:
     raw.add("https://shop.test/s.xml", body="oversized-sitemap-secret")
     connector = ShopwareConnector(
         BrowserDispatchTransport(raw, maximum_response_bytes=10),
-        ShopwareOptions(sitemaps=("/s.xml",)),
+        ShopwareOptions(discovery=DiscoveryOptions(sitemaps=("/s.xml",))),
         _context(),
     )
 
@@ -280,7 +284,9 @@ async def test_collection_is_ordered_bounded_and_checkpoint_resumable(
     transport.add("https://shop.test/s.xml", body=sitemap)
     transport.add("https://shop.test/a", body=JSONLD)
     transport.add("https://shop.test/b", body=JSONLD)
-    options = options_type(sitemaps=("/s.xml",), product_pattern=r"/[ab]$")
+    options = options_type(
+        discovery=DiscoveryOptions(sitemaps=("/s.xml",), product_pattern=r"/[ab]$")
+    )
     connector = connector_type(transport, options, _context())
     intent = _request()
 
@@ -338,7 +344,9 @@ async def test_result_limit_is_typed_and_does_not_fetch_next_product() -> None:
     transport.add("https://shop.test/a", body=NITRO + f"<script>{secret}</script>")
     connector = NitroSellConnector(
         transport,
-        NitroSellOptions(sitemaps=("/s.xml",), product_pattern=r"/[ab]$"),
+        NitroSellOptions(
+            discovery=DiscoveryOptions(sitemaps=("/s.xml",), product_pattern=r"/[ab]$")
+        ),
         _context(),
     )
 
@@ -391,7 +399,9 @@ async def test_cancellation_stops_before_transport_io(
 ) -> None:
     transport = FakeTransport()
     connector = connector_type(
-        transport, options_type(sitemaps=("/s.xml",)), _context(cancelled=True)
+        transport,
+        options_type(discovery=DiscoveryOptions(sitemaps=("/s.xml",))),
+        _context(cancelled=True),
     )
 
     await assert_cancelled_without_requests(
@@ -427,11 +437,13 @@ async def test_category_discovery_preserves_path_patterns_cards_and_pagination()
     connector = ShopwareConnector(
         transport,
         ShopwareOptions(
-            use_advertised_sitemaps=False,
-            category_urls=("/clay/",),
-            product_pattern=r"^/Clay/\d+-",
-            pagination_patterns=(r"[?&]page=",),
-            card_links_only=True,
+            discovery=DiscoveryOptions(
+                use_advertised_sitemaps=False,
+                category_urls=("/clay/",),
+                product_pattern=r"^/Clay/\d+-",
+                pagination_patterns=(r"[?&]page=",),
+                card_links_only=True,
+            )
         ),
         _context(),
     )
@@ -450,7 +462,9 @@ async def test_category_discovery_preserves_path_patterns_cards_and_pagination()
 
 
 async def test_checkpoint_fingerprint_rejects_option_drift() -> None:
-    options = SumUpOptions(sitemaps=("/products.xml",))
+    options = SumUpOptions(
+        discovery=DiscoveryOptions(sitemaps=("/products.xml",))
+    )
     connector = SumUpConnector(FakeTransport(), options, _context())
     checkpoint = connector.checkpoint(
         _request(), "lineage-1", {"after_url": "https://shop.test/a"}
@@ -462,7 +476,9 @@ async def test_checkpoint_fingerprint_rejects_option_drift() -> None:
         options=cast(dict[str, JsonValue], options.model_dump(mode="json")),
     )
     changed = SumUpConnector(
-        FakeTransport(), SumUpOptions(sitemaps=("/changed.xml",)), _context()
+        FakeTransport(),
+        SumUpOptions(discovery=DiscoveryOptions(sitemaps=("/changed.xml",))),
+        _context(),
     )
 
     with pytest.raises(ValueError, match="CHECKPOINT_INVALID"):
@@ -482,7 +498,7 @@ def test_configured_microdata_and_verified_dom_parser_chain() -> None:
     assert micro.variants[0].offers[0].evidence[0].method == "html"
     assert micro.platform_extensions["page_parser"] == "microdata"
 
-    rules = VerifiedDomRules.model_validate({
+    rules = DomRules.model_validate({
         "verification": [{"selector": "#product"}],
         "name": {"selector": "h1.name"},
         "price": {"selector": "span.price"},
@@ -530,7 +546,9 @@ async def test_browser_required_hint_and_rendered_fallback() -> None:
     )
     transport.add("https://shop.test/a", body=JSONLD)
     connector = ShopwareConnector(
-        transport, ShopwareOptions(sitemaps=("/s.xml",)), _context()
+        transport,
+        ShopwareOptions(discovery=DiscoveryOptions(sitemaps=("/s.xml",))),
+        _context(),
     )
     [page] = await assert_connector_pages(connector.collect(_request()))
     assert page.items[0].title == "Clay"
@@ -549,7 +567,9 @@ async def test_multi_snapshot_limit_resumes_without_loss_and_preserves_sequence(
     transport.add("https://shop.test/s.xml", body=sitemap)
     transport.add("https://shop.test/a", body=document)
     connector = ShopwareConnector(
-        transport, ShopwareOptions(sitemaps=("/s.xml",)), _context()
+        transport,
+        ShopwareOptions(discovery=DiscoveryOptions(sitemaps=("/s.xml",))),
+        _context(),
     )
     [limited] = await assert_connector_pages(connector.collect(_request(limit=1)))
     assert [item.title for item in limited.items] == ["One"]
@@ -562,7 +582,9 @@ async def test_multi_snapshot_limit_resumes_without_loss_and_preserves_sequence(
     resumed_transport.add("https://shop.test/s.xml", body=sitemap)
     resumed_transport.add("https://shop.test/a", body=document)
     resumed_connector = ShopwareConnector(
-        resumed_transport, ShopwareOptions(sitemaps=("/s.xml",)), _context()
+        resumed_transport,
+        ShopwareOptions(discovery=DiscoveryOptions(sitemaps=("/s.xml",))),
+        _context(),
     )
     checkpoint = resumed_connector.checkpoint(
         _request(limit=1), "lineage", limited.resume_after
@@ -584,7 +606,9 @@ async def test_resume_rejects_missing_out_of_range_and_intra_page_positions() ->
         transport.add("https://shop.test/s.xml", body=sitemap)
         transport.add("https://shop.test/a", body=JSONLD)
         connector = ShopwareConnector(
-            transport, ShopwareOptions(sitemaps=("/s.xml",)), _context()
+            transport,
+            ShopwareOptions(discovery=DiscoveryOptions(sitemaps=("/s.xml",))),
+            _context(),
         )
         checkpoint = connector.checkpoint(_request(), "lineage", cursor)
         await anext(connector.collect(_request(), checkpoint))
@@ -618,7 +642,9 @@ async def test_cancellation_during_discovery_stops_before_entity_request() -> No
         clock=lambda: NOW, cancelled=lambda: bool(transport.requests)
     )
     connector = ShopwareConnector(
-        transport, ShopwareOptions(sitemaps=("/s.xml",)), context
+        transport,
+        ShopwareOptions(discovery=DiscoveryOptions(sitemaps=("/s.xml",))),
+        context,
     )
     assert [page async for page in connector.collect(_request())] == []
     assert [request.url for request in transport.requests] == [

@@ -139,16 +139,17 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `6ac428f` — consolidate connector parsing helpers.
 - `1c9c8eb` — unify checkpoint and connector-factory plumbing.
 - `517db89` — unify middleware failure telemetry.
+- `f99d757` — make optional transport capabilities explicit.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 75 source and test files.
-  - 313 library tests passed. Version-0 checkpoint compatibility and its
+  - 314 library tests passed. Version-0 checkpoint compatibility and its
     library test suite were removed before the first release.
   - Wheel and source distribution built.
-  - 4 dependency-boundary tests passed.
+  - 5 dependency-boundary tests passed.
   - The installed-wheel matrix verified all 224 reviewed public exports across
     nine modules, metadata/source version parity, typed package data, and
     isolated base, HTTP, and development extras; the base install remained
@@ -278,6 +279,12 @@ architecture rules in the plan and are not separate scope-expansion goals.
     remains fail-closed through runtime and routed composition. The complete
     scraper gate passed with 313 tests; catalogue lint/type/fast tests and
     installed composition remained green.
+  - Generic and vendor page connectors now share one independently housed page
+    engine and one nested options model. The generic conversion layer and flat
+    specialized duplicate are gone, and catalogue runtime plans serialize the
+    same discovery shape for every page-engine connector. The complete scraper
+    gate passed with 314 tests and mypy over 76 files; catalogue lint/type/fast
+    tests and installed two-wheel composition remained green.
   - The provider-neutral durable Webshare composition and existing Decodo and
     Webshare adapter suites passed 29 focused tests.
   - The strict Webshare gateway-secret contract passed 47 focused tests.

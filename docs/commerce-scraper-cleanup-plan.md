@@ -286,7 +286,7 @@ Independent of Tracks A, C and D. Safe to parallelize across B1-B5.
   936 passed, 2 skipped, 187 deselected, and 284 subtests; installed two-wheel
   catalogue composition passed.
 
-- [ ] **B5 One options model for the page engine, in its own module.**
+- [x] **B5 One options model for the page engine, in its own module.**
   `SpecializedPageConnector` takes a flat `SpecializedPageOptions` while the
   generic connector exposes a nested `GenericPagesOptions`/`DiscoveryOptions`
   and converts between them — eight discovery fields declared twice with
@@ -297,6 +297,23 @@ Independent of Tracks A, C and D. Safe to parallelize across B1-B5.
   way. Give the engine one options model (the nested one, with vendor
   subclasses composing `DiscoveryOptions`) and move it to its own module.
   *Prerequisite for:* D9.
+  **Completed.** The bounded collection, discovery, parsing, checkpoint, and
+  resume implementation now lives in `connectors/page_engine.py`, independent
+  of every vendor connector. `PageEngineOptions` declares the shared runtime
+  fields once and composes the public nested `DiscoveryOptions`; generic pages
+  and all four vendor option types specialize that model directly. The generic
+  projection method and flat `SpecializedPageOptions` duplicate are gone.
+  Catalogue runtime plans now serialize the same nested discovery shape for
+  generic and vendor connectors, while generic checkpoint fingerprints retain
+  their existing representation. As an intentional pre-1.0 contract cleanup,
+  vendor discovery fields must now be supplied under `discovery`.
+  *Verified:* 45 focused generic/specialized library tests and 42 focused
+  catalogue adapter/boundary tests passed. `make scraper-check` -> 314 tests,
+  Ruff, mypy over 76 files, schemas, build, 5 boundary tests,
+  installed-wheel/public-API, external-consumer, and release gates passed.
+  Catalogue Ruff and mypy over 239 files passed; `pytest -q` -> 936 passed, 2
+  skipped, 187 deselected, and 284 subtests; installed two-wheel catalogue
+  composition passed.
 
 ---
 
