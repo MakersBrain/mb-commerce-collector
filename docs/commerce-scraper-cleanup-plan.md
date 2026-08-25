@@ -406,7 +406,7 @@ behavioral consequences and should be scheduled on its own.**
   mypy over 240 files, the full fast suite (938 passed, 2 skipped, 187
   deselected, 284 subtests), and installed two-wheel composition passed.
 
-- [ ] **C4 Bound the httpx client cache.**
+- [x] **C4 Bound the httpx client cache.**
   `HttpxTransport._clients` is keyed by `(origin, resolved_address)` and never
   evicts; each entry owns a live connection pool with open sockets. A worker
   crawling many origins — or one origin behind rotating DNS, where the resolved
@@ -414,6 +414,25 @@ behavioral consequences and should be scheduled on its own.**
   process lifetime, released only at `aclose()`. Add an LRU bound (~32) with
   `await client.aclose()` on eviction, or key by origin alone and pin the
   address through httpx `extensions`.
+  **Completed.** Owned HTTPX clients now live in a strict 32-entry LRU keyed by
+  logical origin and validated address. Acquisition refreshes recency; an idle
+  least-recently-used entry is removed and awaited closed before the replacement
+  is exposed. Per-entry active counts prevent eviction during a stream. When
+  every entry is active, a new distinct endpoint waits for a release rather
+  than exceeding the bound or closing an in-flight pool. `aclose()` rejects new
+  acquisitions, drains active owned and borrowed-client requests, closes every
+  retained owned client, and remains serialized/idempotent; injected clients
+  remain borrowed and are not closed.
+  *Verified:* focused regressions cover strict positive bounds, LRU refresh,
+  exact eviction closure, a one-client cap under concurrent acquisition,
+  active-stream shutdown draining, post-close rejection, and the existing HTTP
+  request/proxy integration behavior (67 tests). The complete scraper gate
+  passed with 349 tests, Ruff, mypy over 76 files, schemas, package and
+  installed-wheel contracts, custom-connector verification, and release
+  checks. The focused catalogue transport/browser/runtime slice passed 54
+  tests plus 10 subtests; catalogue Ruff, mypy over 240 files, the full fast
+  suite (938 passed, 2 skipped, 187 deselected, 284 subtests), and installed
+  two-wheel composition passed.
 
 - [ ] **C5 Cache DNS resolution per host with a TTL.**
   `system_resolver` no longer blocks the event loop, but still resolves on

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+from collections import OrderedDict
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -27,6 +32,13 @@ class HTTPStatusError(RuntimeError):
         self.url = url
 
 
+@dataclass(slots=True)
+class _ClientEntry:
+    client: Any
+    active_requests: int = 0
+    ready: bool = True
+
+
 class HttpxTransport(CommerceTransport):
     """Optional HTTP backend; importing the package root does not import httpx."""
 
@@ -40,6 +52,7 @@ class HttpxTransport(CommerceTransport):
         url_policy: URLPolicy | None = None,
         maximum_redirects: int = 10,
         maximum_response_bytes: int = DEFAULT_MAXIMUM_RESPONSE_BYTES,
+        maximum_clients: int = 32,
     ) -> None:
         try:
             import httpx
@@ -47,7 +60,18 @@ class HttpxTransport(CommerceTransport):
             raise RuntimeError("HttpxTransport requires mb-commerce-scraper[http]") from error
         self._httpx = httpx
         self._client = client
-        self._clients: dict[tuple[str, str], Any] = {}
+        if (
+            not isinstance(maximum_clients, int)
+            or isinstance(maximum_clients, bool)
+            or maximum_clients < 1
+        ):
+            raise ValueError("maximum_clients must be a positive integer")
+        self._maximum_clients = maximum_clients
+        self._clients: OrderedDict[tuple[str, str], _ClientEntry] = OrderedDict()
+        self._client_condition = asyncio.Condition()
+        self._close_lock = asyncio.Lock()
+        self._external_active_requests = 0
+        self._closed = False
         self._client_options: dict[str, Any] = {
             "timeout": timeout,
             "follow_redirects": False,
@@ -79,7 +103,6 @@ class HttpxTransport(CommerceTransport):
             address = addresses[0]
             endpoint = self._endpoint_url(current, address)
             headers["Host"] = self._host_header(parsed)
-            client = self._client or self._client_for(current, address)
             query = request.query if redirect == 0 else None
             logical_response_url = (
                 str(self._httpx.URL(current, params=query)) if query else current
@@ -98,7 +121,7 @@ class HttpxTransport(CommerceTransport):
             transmitted_bytes += estimated_transmitted_bytes(physical_request)
             http_failure_type: str | None = None
             try:
-                async with client.stream(
+                async with self._client_for(current, address) as client, client.stream(
                     method,
                     endpoint,
                     params=query,
@@ -186,9 +209,21 @@ class HttpxTransport(CommerceTransport):
         del reason
 
     async def aclose(self) -> None:
-        clients, self._clients = tuple(self._clients.values()), {}
-        for client in clients:
-            await client.aclose()
+        async with self._close_lock:
+            async with self._client_condition:
+                self._closed = True
+                self._client_condition.notify_all()
+                await self._client_condition.wait_for(
+                    lambda: self._external_active_requests == 0
+                    and all(
+                        entry.active_requests == 0
+                        for entry in self._clients.values()
+                    )
+                )
+                clients = tuple(entry.client for entry in self._clients.values())
+                self._clients.clear()
+            for client in clients:
+                await client.aclose()
 
     async def __aenter__(self) -> HttpxTransport:
         return self
@@ -196,13 +231,81 @@ class HttpxTransport(CommerceTransport):
     async def __aexit__(self, *_: object) -> None:
         await self.aclose()
 
-    def _client_for(self, logical_url: str, address: str) -> Any:
+    @asynccontextmanager
+    async def _client_for(
+        self,
+        logical_url: str,
+        address: str,
+    ) -> AsyncIterator[Any]:
+        if self._client is not None:
+            async with self._client_condition:
+                if self._closed:
+                    raise RuntimeError("HTTP transport is closed")
+                self._external_active_requests += 1
+            try:
+                yield self._client
+            finally:
+                async with self._client_condition:
+                    self._external_active_requests -= 1
+                    self._client_condition.notify_all()
+            return
+
         key = (URLPolicy._origin(logical_url), address)
-        client = self._clients.get(key)
-        if client is None:
-            client = self._httpx.AsyncClient(**self._client_options)
-            self._clients[key] = client
-        return client
+        evicted: Any | None = None
+        async with self._client_condition:
+            while True:
+                if self._closed:
+                    raise RuntimeError("HTTP transport is closed")
+                entry = self._clients.get(key)
+                if entry is not None:
+                    if not entry.ready:
+                        await self._client_condition.wait()
+                        continue
+                    self._clients.move_to_end(key)
+                    entry.active_requests += 1
+                    break
+                idle_key = next(
+                    (
+                        candidate
+                        for candidate, candidate_entry in self._clients.items()
+                        if candidate_entry.active_requests == 0
+                    ),
+                    None,
+                )
+                if len(self._clients) < self._maximum_clients or idle_key is not None:
+                    if len(self._clients) >= self._maximum_clients:
+                        assert idle_key is not None
+                        evicted = self._clients.pop(idle_key).client
+                    entry = _ClientEntry(
+                        self._httpx.AsyncClient(**self._client_options),
+                        active_requests=1,
+                        ready=evicted is None,
+                    )
+                    self._clients[key] = entry
+                    break
+                await self._client_condition.wait()
+        try:
+            if evicted is not None:
+                try:
+                    await evicted.aclose()
+                except BaseException:
+                    async with self._client_condition:
+                        if self._clients.get(key) is entry:
+                            self._clients.pop(key)
+                        self._client_condition.notify_all()
+                    await entry.client.aclose()
+                    raise
+                async with self._client_condition:
+                    if self._clients.get(key) is entry:
+                        entry.ready = True
+                    self._client_condition.notify_all()
+            yield entry.client
+        finally:
+            async with self._client_condition:
+                retained = self._clients.get(key)
+                if retained is entry:
+                    retained.active_requests -= 1
+                self._client_condition.notify_all()
 
     @staticmethod
     def _endpoint_url(logical_url: str, address: str) -> str:

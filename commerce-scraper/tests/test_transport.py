@@ -499,6 +499,185 @@ async def test_http_transport_connects_to_the_validated_address_with_logical_hos
     await client.aclose()
 
 
+class TrackingHttpxClient:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+
+
+class BlockingCloseHttpxClient(TrackingHttpxClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.close_started = asyncio.Event()
+        self.allow_close = asyncio.Event()
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+        self.close_started.set()
+        await self.allow_close.wait()
+
+
+@pytest.mark.parametrize("maximum_clients", (0, -1, True))
+def test_http_transport_requires_a_positive_client_bound(
+    maximum_clients: int,
+) -> None:
+    with pytest.raises(ValueError, match="maximum_clients"):
+        HttpxTransport(
+            allowed_origins=("https://shop.test",),
+            maximum_clients=maximum_clients,
+        )
+
+
+async def test_http_transport_evicts_and_closes_the_idle_lru_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[TrackingHttpxClient] = []
+
+    def client_factory(**_options: object) -> TrackingHttpxClient:
+        client = TrackingHttpxClient()
+        created.append(client)
+        return client
+
+    transport = HttpxTransport(
+        allowed_origins=("https://one.test", "https://two.test", "https://three.test"),
+        maximum_clients=2,
+    )
+    monkeypatch.setattr(transport._httpx, "AsyncClient", client_factory)
+
+    async with transport._client_for("https://one.test/a", "93.184.216.1") as first:
+        pass
+    async with transport._client_for("https://two.test/a", "93.184.216.2") as second:
+        pass
+    async with transport._client_for("https://one.test/b", "93.184.216.1") as reused:
+        assert reused is first
+    async with transport._client_for("https://three.test/a", "93.184.216.3") as third:
+        pass
+
+    assert len(transport._clients) == 2
+    assert tuple(transport._clients) == (
+        ("https://one.test", "93.184.216.1"),
+        ("https://three.test", "93.184.216.3"),
+    )
+    assert second.close_calls == 1
+    assert first.close_calls == 0
+    assert third.close_calls == 0
+
+    await transport.aclose()
+
+    assert first.close_calls == 1
+    assert third.close_calls == 1
+    assert transport._clients == {}
+    assert len(created) == 3
+
+
+async def test_http_transport_waits_instead_of_evicting_an_active_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[TrackingHttpxClient] = []
+
+    def client_factory(**_options: object) -> TrackingHttpxClient:
+        client = TrackingHttpxClient()
+        created.append(client)
+        return client
+
+    transport = HttpxTransport(
+        allowed_origins=("https://one.test", "https://two.test"),
+        maximum_clients=1,
+    )
+    monkeypatch.setattr(transport._httpx, "AsyncClient", client_factory)
+    second_started = asyncio.Event()
+    second_acquired = asyncio.Event()
+
+    async def acquire_second() -> None:
+        second_started.set()
+        async with transport._client_for(
+            "https://two.test/a", "93.184.216.2"
+        ):
+            second_acquired.set()
+
+    async with transport._client_for("https://one.test/a", "93.184.216.1") as first:
+        task = asyncio.create_task(acquire_second())
+        await second_started.wait()
+        await asyncio.sleep(0)
+        assert not second_acquired.is_set()
+        assert first.close_calls == 0
+        assert len(transport._clients) == 1
+
+    await task
+
+    assert second_acquired.is_set()
+    assert first.close_calls == 1
+    assert len(transport._clients) == 1
+    await transport.aclose()
+
+
+async def test_http_transport_hides_replacement_until_eviction_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evicted = BlockingCloseHttpxClient()
+    replacement = TrackingHttpxClient()
+    clients = iter((evicted, replacement))
+    transport = HttpxTransport(
+        allowed_origins=("https://one.test", "https://two.test"),
+        maximum_clients=1,
+    )
+    monkeypatch.setattr(
+        transport._httpx,
+        "AsyncClient",
+        lambda **_options: next(clients),
+    )
+    async with transport._client_for("https://one.test/a", "93.184.216.1"):
+        pass
+
+    acquired = [asyncio.Event(), asyncio.Event()]
+
+    async def acquire_replacement(index: int) -> None:
+        async with transport._client_for(
+            "https://two.test/a", "93.184.216.2"
+        ):
+            acquired[index].set()
+
+    first = asyncio.create_task(acquire_replacement(0))
+    await evicted.close_started.wait()
+    second = asyncio.create_task(acquire_replacement(1))
+    await asyncio.sleep(0)
+
+    assert not any(event.is_set() for event in acquired)
+
+    evicted.allow_close.set()
+    await asyncio.gather(first, second)
+
+    assert all(event.is_set() for event in acquired)
+    assert evicted.close_calls == 1
+    await transport.aclose()
+
+
+async def test_http_transport_close_drains_active_clients(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = TrackingHttpxClient()
+    transport = HttpxTransport(
+        allowed_origins=("https://shop.test",),
+        maximum_clients=1,
+    )
+    monkeypatch.setattr(transport._httpx, "AsyncClient", lambda **_options: client)
+
+    async with transport._client_for("https://shop.test/a", "93.184.216.1"):
+        close = asyncio.create_task(transport.aclose())
+        await asyncio.sleep(0)
+        assert not close.done()
+        assert client.close_calls == 0
+
+    await close
+
+    assert client.close_calls == 1
+    with pytest.raises(RuntimeError, match="transport is closed"):
+        async with transport._client_for("https://shop.test/b", "93.184.216.1"):
+            pass
+
+
 def test_transmitted_byte_estimate_is_deterministic_and_secret_free() -> None:
     request = TransportRequest(
         method="POST",
