@@ -88,12 +88,12 @@ from mb_ceramics_catalogue.ops.commerce_scraper_proxy_runtime import (
     resolve_native_proxy_runtime,
 )
 from mb_ceramics_catalogue.ops.commerce_scraper_runtime import (
+    TRANSPORT_TOTAL_NAMES,
     BorrowedBrowserBinding,
     CatalogueCachePolicy,
     CatalogueCommerceRuntime,
     NativeCollectionSpec,
     NativeRouteBindings,
-    fetcher_transport_totals,
 )
 from mb_ceramics_catalogue.ops.connector_adapters import (
     library_canary_route,
@@ -129,6 +129,8 @@ from mb_ceramics_catalogue.transports.browser import (
 from mb_ceramics_catalogue.transports.cdp_extension_proxy import CdpExtensionProxyBackend
 
 LOGGER = obs.get_logger("catalogue.worker")
+
+
 class _BorrowedConnectionPool:
     """Expose the worker's fenced job connection to the proxy adapter.
 
@@ -981,7 +983,7 @@ class Worker:
                 )
                 traffic_requests = 0
                 rendered_pages = 0
-                transport_totals = fetcher_transport_totals(None)
+                transport_totals = dict.fromkeys(TRANSPORT_TOTAL_NAMES, 0)
             else:
                 native_proxy = resolve_native_proxy_runtime(
                     _BorrowedConnectionPool(connection),

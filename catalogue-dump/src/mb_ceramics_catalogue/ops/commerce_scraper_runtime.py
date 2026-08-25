@@ -150,18 +150,23 @@ def local_canary_source_config(config: SourceConfig) -> SourceConfig:
     return config.model_copy(update={"scraper": adapter})
 
 
+TRANSPORT_TOTAL_NAMES = (
+    "direct_requests",
+    "impersonated_requests",
+    "browser_requests",
+    "proxy_requests",
+    "http_tx_bytes_estimated",
+    "http_rx_bytes_estimated",
+    "browser_tx_bytes_estimated",
+    "browser_rx_bytes_estimated",
+)
+
+
 class LibraryDebugTelemetry:
     """Adapt sanitized library events to catalogue logs, traces, and totals."""
 
     _TOTAL_NAMES = (
-        "direct_requests",
-        "impersonated_requests",
-        "browser_requests",
-        "proxy_requests",
-        "http_tx_bytes_estimated",
-        "http_rx_bytes_estimated",
-        "browser_tx_bytes_estimated",
-        "browser_rx_bytes_estimated",
+        *TRANSPORT_TOTAL_NAMES,
         "physical_requests",
         "unclassified_requests",
     )
@@ -642,16 +647,7 @@ class LocalLibraryScraper:
         totals = opened.telemetry.transport_totals()
         self.result.requests = totals["physical_requests"]
         self.result.rendered_pages = totals["browser_requests"]
-        for name in (
-            "direct_requests",
-            "impersonated_requests",
-            "browser_requests",
-            "proxy_requests",
-            "http_tx_bytes_estimated",
-            "http_rx_bytes_estimated",
-            "browser_tx_bytes_estimated",
-            "browser_rx_bytes_estimated",
-        ):
+        for name in TRANSPORT_TOTAL_NAMES:
             setattr(self.result, name, totals[name])
         self.result.outcome_counts = opened.telemetry.outcome_counts()
         self.result.outcome_counts["browser_gain"] = self.result.browser_gain
@@ -783,29 +779,3 @@ async def apply_library_fetch_policy(
         fetcher.limiter.set_delay(config.url, float(config.delay))
     if not await fetcher.may_fetch(config.url, bool(config.ignore_robots), bool(config.obey_robots)):
         raise RuntimeError("robots.txt disallows the library connector")
-
-
-def fetcher_transport_totals(fetcher: LegacyFetcher | None) -> dict[str, int]:
-    """Read route/byte counters without mutating or double-merging Fetcher stats."""
-    names = (
-        "direct_requests",
-        "impersonated_requests",
-        "browser_requests",
-        "proxy_requests",
-        "http_tx_bytes_estimated",
-        "http_rx_bytes_estimated",
-        "browser_tx_bytes_estimated",
-        "browser_rx_bytes_estimated",
-    )
-    totals = dict.fromkeys(names, 0)
-    current: Any = fetcher
-    seen: set[int] = set()
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        stats = current.stats
-        for name in names:
-            value = getattr(stats, name, 0)
-            if isinstance(value, int):
-                totals[name] += value
-        current = getattr(current, "proxy_fallback", None)
-    return totals

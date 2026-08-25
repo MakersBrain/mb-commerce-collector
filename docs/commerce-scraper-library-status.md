@@ -144,6 +144,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `ad8f399` — derive canary routes from connector factory plans.
 - `9d5ba26` — centralize static process environment in deployment roles.
 - `a362166` — share browser session request dispatch.
+- `fb93b43` — consolidate application site-plugin support.
 
 ### Verification at last review
 
@@ -312,6 +313,11 @@ architecture rules in the plan and are not separate scope-expansion goals.
     intentionally different URL rules. All 19 focused plugin and import-boundary
     tests and the full 937-test catalogue suite passed with Ruff, mypy, and
     installed two-wheel composition.
+  - The production-dead legacy Fetcher telemetry traversal and its synthetic
+    fallback-chain test are removed. Native telemetry now owns one shared list
+    of route/byte result totals, also used for zero-valued terminal-recovery
+    summaries. The 43 focused worker/runtime tests and full 936-test catalogue
+    suite passed with Ruff, mypy, and installed two-wheel composition.
   - The provider-neutral durable Webshare composition and existing Decodo and
     Webshare adapter suites passed 29 focused tests.
   - The strict Webshare gateway-secret contract passed 47 focused tests.

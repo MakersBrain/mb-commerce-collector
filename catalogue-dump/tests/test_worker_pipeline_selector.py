@@ -36,7 +36,6 @@ from mb_ceramics_catalogue.ops.commerce_scraper_runtime import (
     LibraryDebugTelemetry,
     apply_library_fetch_policy,
     build_library_pipeline_connector,
-    fetcher_transport_totals,
     local_canary_source_config,
     open_native_library_pipeline_connector,
 )
@@ -352,23 +351,6 @@ def test_local_bespoke_rollback_adapter_remains_registered() -> None:
     assert scrapers.load("ceramicolours_connector").__name__ == (
         "CeramicoloursConnectorScraper"
     )
-
-
-def test_transport_summary_aggregates_direct_and_fallback_without_mutation():
-    fallback = SimpleNamespace(
-        stats=SimpleNamespace(proxy_requests=2, http_rx_bytes_estimated=300),
-        proxy_fallback=None,
-    )
-    direct = SimpleNamespace(
-        stats=SimpleNamespace(direct_requests=1, http_rx_bytes_estimated=100),
-        proxy_fallback=fallback,
-    )
-
-    totals = fetcher_transport_totals(cast(Any, direct))
-
-    assert totals["direct_requests"] == 1
-    assert totals["proxy_requests"] == 2
-    assert totals["http_rx_bytes_estimated"] == 400
 
 
 def test_native_telemetry_accumulates_terminal_attempt_accounting_once():

@@ -494,7 +494,7 @@ the paid-traffic path and depend on Track 0.1.
   skipped, 187 deselected, and 284 subtests; installed two-wheel composition
   passed.
 
-- [ ] **D5 Delete the retired fetcher traversal.**
+- [x] **D5 Delete the retired fetcher traversal.**
   `fetcher_transport_totals` walks a `LegacyFetcher` chain production never
   passes: the only non-test call site is `worker.py:984`, which passes `None`,
   so the loop never runs and it returns `dict.fromkeys(names, 0)`. The
@@ -503,6 +503,16 @@ the paid-traffic path and depend on Track 0.1.
   `LibraryDebugTelemetry._TOTAL_NAMES`.
   Export one `TRANSPORT_TOTAL_NAMES`; delete the traversal and its test.
   Behavior-preserving in production.
+  **Completed.** `fetcher_transport_totals` and its synthetic linked-Fetcher
+  test are gone. `TRANSPORT_TOTAL_NAMES` is now the single definition for the
+  eight route/byte totals projected into legacy-shaped local results and
+  zero-valued terminal-recovery worker summaries; native debug telemetry
+  extends it only with physical and unclassified request totals. Production no
+  longer carries a `proxy_fallback` object-graph walk, cycle guard, or
+  duck-typed legacy stats reader.
+  *Verified:* 43 focused worker/runtime/accounting tests passed. Catalogue Ruff
+  and mypy over 240 files passed; `pytest -q` -> 936 passed, 2 skipped, 187
+  deselected, and 284 subtests; installed two-wheel composition passed.
 
 - [ ] **D6 One quarantine statement.**
   `set enabled = false, lifecycle = 'pending', pending_action = null,
