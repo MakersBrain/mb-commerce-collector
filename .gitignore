@@ -54,3 +54,7 @@ deploy/secrets/
 # Decodo dashboard endpoint exports contain plaintext proxy credentials.
 decodo.csv
 decodo.env
+
+# Observability credentials (copy the .example files; values from Infisical)
+deploy/observability/vmagent.env
+deploy/observability/vmalert.env

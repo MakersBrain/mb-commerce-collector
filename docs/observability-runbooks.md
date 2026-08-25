@@ -1,12 +1,13 @@
 # Catalogue observability runbooks
 
 The optional stack starts with `docker compose --profile observability up -d`.
-Grafana is on `http://127.0.0.1:3001`, VictoriaMetrics on
-`http://127.0.0.1:8428`, and vmalert on `http://127.0.0.1:8880` by default.
-VictoriaMetrics both scrapes and stores; vmalert evaluates the alert rules and
-is where firing alerts are listed. The dashboard links back to the catalogue
-operator pages; request, job, run, and trace IDs remain log search keys and are
-never metric labels.
+Grafana is on `http://127.0.0.1:3001`, vmagent on `http://127.0.0.1:8429`, and
+vmalert on `http://127.0.0.1:8880` by default. Nothing here stores metrics:
+vmagent scrapes and remote-writes to the shared plane in mazenet-infra, vmalert
+evaluates these rules against that plane and delivers to its Alertmanager, and
+Grafana reads back from it. A metric missing locally is normal; check the
+plane. The dashboard links back to the catalogue operator pages; request, job,
+run, and trace IDs remain log search keys and are never metric labels.
 
 ## SourceNeverSucceeded
 
@@ -53,8 +54,11 @@ partial catalogue data even when some records were loaded.
 
 ## MetricsTargetDown
 
-Open VictoriaMetrics **Targets** (`http://127.0.0.1:8428/targets`) and identify
-the exact job and instance.
+Open vmagent **Targets** (`http://127.0.0.1:8429/targets`) and identify the
+exact job and instance. If the targets are healthy but the series are absent on
+the plane, the fault is delivery rather than collection: check vmagent's
+remote-write queue on `http://127.0.0.1:8429/metrics`
+(`vmagent_remotewrite_pending_data_bytes`) before chasing the exporter.
 For control/service, check the container health and `/metrics`; for workers,
 confirm Docker DNS returns every replica and port 9109 is listening. A missing
 worker target also makes worker-local rates incomplete, so restore collection

@@ -532,49 +532,69 @@ services:
       start_period: 10s
       retries: 3
 
-  # Optional, bounded operational metrics. VictoriaMetrics scrapes every target
-  # itself: `-promscrape.config` reads the same Prometheus config format, so the
-  # Docker DNS discovery below is unchanged. Scraping a load-balanced worker name
-  # as one target would mix process-local counters across replicas.
+  # Operational metrics leave this host; they are not stored on it. The shared
+  # plane in mazenet-infra owns storage, and MakersBrain's vmagent in mb-infra
+  # already forwards catalogue-control and catalogue-service from production
+  # (deploy/podman/render.py, CATALOGUE_SCRAPE_JOBS). This vmagent covers the
+  # jobs that one does not: the dispatcher and both worker pools.
   #
-  # It also accepts OTLP metrics at /opentelemetry/v1/metrics with no enabling
-  # flag, which is the fan-in point for albumfete and the makersbrain line.
-  victoriametrics:
+  # Scraping a load-balanced worker name as one target would mix process-local
+  # counters across replicas, so the pools are discovered by Docker DNS. vmagent
+  # has no per-job dns_sd refresh_interval; -promscrape.dnsSDCheckInterval is
+  # the global equivalent.
+  #
+  # The remote-write queue is on disk on purpose: a bounded plane outage
+  # backfills instead of being lost, without putting a TSDB on this host.
+  vmagent:
     profiles: ["observability"]
-    image: victoriametrics/victoria-metrics:v1.147.0
-    container_name: catalogue-victoriametrics
+    image: victoriametrics/vmagent:v1.148.0
+    container_name: catalogue-vmagent
+    env_file:
+      - path: ./deploy/observability/vmagent.env
+        required: false
+    environment:
+      CATALOGUE_ENVIRONMENT: ${CATALOGUE_ENVIRONMENT:-local}
     command:
-      - --promscrape.config=/etc/victoriametrics/scrape.yml
+      - --envflag.enable
+      - --promscrape.config=/etc/vmagent/scrape.yml
       - --promscrape.dnsSDCheckInterval=15s
-      - --storageDataPath=/victoria-metrics-data
-      - --retentionPeriod=14d
-      - --httpListenAddr=:8428
+      - --remoteWrite.tmpDataPath=/vmagent-queue
+      - --remoteWrite.maxDiskUsagePerURL=268435456
+      - --httpListenAddr=:8429
     volumes:
-      - ./deploy/observability/scrape.yml:/etc/victoriametrics/scrape.yml:ro
-      - victoriametrics-data:/victoria-metrics-data
+      - ./deploy/observability/scrape.yml:/etc/vmagent/scrape.yml:ro
+      - vmagent-queue:/vmagent-queue
     ports:
-      - "127.0.0.1:${CATALOGUE_METRICS_PORT:-8428}:8428"
+      - "127.0.0.1:${CATALOGUE_VMAGENT_PORT:-8429}:8429"
     restart: unless-stopped
 
-  # VictoriaMetrics stores; it does not evaluate rules. vmalert owns the alert
-  # rules Prometheus used to run, querying and writing alert state back to VM.
-  # -notifier.blackhole: there is no Alertmanager here, and vmalert refuses to
-  # start with alerting rules unless a notifier mode is chosen explicitly.
-  # Alerts stay visible on vmalert's own UI and are delivered nowhere, which is
-  # what the Prometheus setup did too.
+  # The alert rules are service knowledge -- they name catalogue sources, jobs
+  # and worker health -- so they stay in this repository next to the code that
+  # emits those series. vmalert holds no TSDB: it queries the plane, which is
+  # where its own vmagent just wrote, and delivers to the plane's Alertmanager.
+  #
+  # -rule.evalDelay is not optional here. Every rule in alerts.yml fires on
+  # missing data (`== 0`, `> 900`, absent sources), and samples arrive by remote
+  # write seconds after the timestamp they carry. Without the delay a late batch
+  # is indistinguishable from an outage. The plane's own vmalert uses 60s for
+  # exactly this reason; see mazenet-infra roles/observe/templates/vmalert.container.j2.
+  #
+  # -remoteWrite/-remoteRead round-trip ALERTS and ALERTS_FOR_STATE so that
+  # restarting this unit does not reset every `for:` timer to zero.
   vmalert:
     profiles: ["observability"]
-    image: victoriametrics/vmalert:v1.147.0
+    image: victoriametrics/vmalert:v1.148.0
     container_name: catalogue-vmalert
     depends_on:
-      - victoriametrics
+      - vmagent
+    env_file:
+      - path: ./deploy/observability/vmalert.env
+        required: false
     command:
+      - --envflag.enable
       - --rule=/etc/vmalert/alerts.yml
-      - --datasource.url=http://victoriametrics:8428
-      - --remoteWrite.url=http://victoriametrics:8428
-      - --remoteRead.url=http://victoriametrics:8428
-      - --evaluationInterval=15s
-      - --notifier.blackhole
+      - --evaluationInterval=30s
+      - --rule.evalDelay=60s
       - --httpListenAddr=:8880
     volumes:
       - ./deploy/observability/alerts.yml:/etc/vmalert/alerts.yml:ro
@@ -587,11 +607,16 @@ services:
     image: grafana/grafana:12.1.0
     container_name: catalogue-grafana
     depends_on:
-      - victoriametrics
+      - vmagent
     environment:
       GF_SECURITY_ADMIN_USER: ${CATALOGUE_GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${CATALOGUE_GRAFANA_PASSWORD:-catalogue-local}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # Expanded by Grafana's provisioning, not by compose: the datasource now
+      # addresses the shared plane and needs the Access token to read it.
+      CATALOGUE_METRICS_QUERY_URL: ${CATALOGUE_METRICS_QUERY_URL:-}
+      CATALOGUE_METRICS_ACCESS_CLIENT_ID: ${CATALOGUE_METRICS_ACCESS_CLIENT_ID:-}
+      CATALOGUE_METRICS_ACCESS_CLIENT_SECRET: ${CATALOGUE_METRICS_ACCESS_CLIENT_SECRET:-}
     volumes:
       - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -620,8 +645,8 @@ volumes:
   # Explorer-only copy of the assertion signing key. The one-shot initializer
   # preserves the host key's 0600 mode while assigning it to the container UID.
   operator-secrets:
-  # Bounded by the 14-day -retentionPeriod above.
-  victoriametrics-data:
+  # The remote-write buffer only. Nothing here is a metrics store.
+  vmagent-queue:
   grafana-data:
 
 secrets:

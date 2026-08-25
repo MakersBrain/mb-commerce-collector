@@ -1,10 +1,17 @@
 apiVersion: 1
 
-# VictoriaMetrics serves the Prometheus querying API on 8428, so the stock
-# prometheus datasource type works unchanged and MetricsQL stays available as a
-# PromQL superset. The dashboards pin no datasource uid, so they follow
-# isDefault; deleteDatasources drops the old entry from the persisted
-# grafana-data volume, which provisioning would otherwise leave behind.
+# There is no local store any more: vmagent forwards and keeps nothing, so this
+# datasource points at the shared plane in mazenet-infra. VictoriaMetrics serves
+# the Prometheus querying API, so the stock prometheus type still works and
+# MetricsQL is available as a PromQL superset.
+#
+# BLOCKED on the same contract revision as vmalert: the active contract grants
+# the vmagent token /api/v1/write only, and no query-API read path exists yet.
+# Until CATALOGUE_METRICS_QUERY_URL resolves, panels will not load.
+#
+# The dashboards pin no datasource uid, so they follow isDefault.
+# deleteDatasources drops the entry the local-storage iteration left in the
+# persisted grafana-data volume, which provisioning would otherwise keep.
 deleteDatasources:
   - name: Prometheus
     orgId: 1
@@ -13,6 +20,12 @@ datasources:
   - name: VictoriaMetrics
     type: prometheus
     access: proxy
-    url: http://victoriametrics:8428
+    url: ${CATALOGUE_METRICS_QUERY_URL}
     isDefault: true
     editable: false
+    jsonData:
+      httpHeaderName1: CF-Access-Client-Id
+      httpHeaderName2: CF-Access-Client-Secret
+    secureJsonData:
+      httpHeaderValue1: ${CATALOGUE_METRICS_ACCESS_CLIENT_ID}
+      httpHeaderValue2: ${CATALOGUE_METRICS_ACCESS_CLIENT_SECRET}
