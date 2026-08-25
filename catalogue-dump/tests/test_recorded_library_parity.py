@@ -178,6 +178,7 @@ RECORDED_WOOCOMMERCE = _recorded_source_case("mayco")
 RECORDED_WIX = _recorded_source_case("e-cibas")
 RECORDED_STARWEB = _recorded_source_case("art4fun")
 RECORDED_NITROSELL = _recorded_source_case("the-ceramic-shop")
+RECORDED_SUMUP = _recorded_source_case("emily-alarcon")
 
 
 @pytest.mark.golden
@@ -467,4 +468,14 @@ def test_recorded_nitrosell_responses_have_legacy_library_projection_parity(
 ) -> None:
     _assert_recorded_keyed_projection_parity(
         source, "library_nitrosell_connector", lambda payload: payload
+    )
+
+
+@pytest.mark.golden
+@pytest.mark.parametrize("source", RECORDED_SUMUP)
+def test_recorded_sumup_responses_have_legacy_library_projection_parity(
+    source: str,
+) -> None:
+    _assert_recorded_keyed_projection_parity(
+        source, "library_sumup_connector", lambda payload: payload
     )

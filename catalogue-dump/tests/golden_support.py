@@ -52,6 +52,7 @@ REQUIRED_RECORDED_SOURCES = {
     "the-ceramic-shop": "nitrosell",
     "sio-2": "sio2",
     "speedball": "bigcommerce",
+    "emily-alarcon": "sumup",
 }
 CI_ARCHIVE_REQUIRED = "CATALOGUE_GOLDEN_ARCHIVE_REQUIRED"
 

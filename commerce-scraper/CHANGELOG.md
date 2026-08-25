@@ -59,6 +59,8 @@ based on Keep a Changelog, and releases follow the compatibility policy in
   JSON-LD image lists before neutral snapshot construction.
 - Preserved NitroSell strike-price locale semantics and legacy-compatible raw
   OpenGraph evidence in page-engine projection.
+- Preserved SumUp option attributes and legacy raw variant evidence, and allow
+  its product sitemap's non-product shop entry without truncating enumeration.
 - Consolidated runtime and routed-transport proxy configuration on
   `ProxyPolicyConfig`; the unreleased parallel routing model and legacy request
   and byte-cap parameters were removed.

@@ -163,6 +163,7 @@ def _sumup_page() -> str:
             "1f7ac7e9-8bb0-4998-b88f-077b7a249862": {
                 "uuid": "1f7ac7e9-8bb0-4998-b88f-077b7a249862",
                 "price": 2500,
+                "options": [{"name": "Option", "value": "Bleu"}],
                 "quantity": 3,
                 "isAvailable": True,
                 "isTrackingEnabled": True,
@@ -189,6 +190,51 @@ def test_sumup_parser_preserves_minor_units_variants_and_exact_stock() -> None:
     assert variant.stock is not None
     assert variant.stock.quantity == 3
     assert variant.stock.quantity_kind == "exact"
+    assert variant.options == {"Option": "Bleu"}
+    assert variant.platform_extensions["legacy_raw_variant"] == {
+        "uuid": "1f7ac7e9-8bb0-4998-b88f-077b7a249862",
+        "name": None,
+        "sku": None,
+        "price": 2500,
+        "basePrice": 3000,
+        "hasDiscount": True,
+        "options": [{"name": "Option", "value": "Bleu"}],
+        "quantity": 3,
+        "isAvailable": True,
+        "isTrackingEnabled": True,
+    }
+
+
+async def test_sumup_counts_and_skips_non_product_sitemap_entries() -> None:
+    transport = FakeTransport()
+    transport.add(
+        "https://shop.test/s.xml",
+        body="""<urlset>
+        <url><loc>https://shop.test/</loc></url>
+        <url><loc>https://shop.test/article/tasse-bleue</loc></url>
+        </urlset>""",
+    )
+    transport.add("https://shop.test/", body="<html>shop home</html>")
+    transport.add(
+        "https://shop.test/article/tasse-bleue",
+        body=_sumup_page(),
+    )
+    connector = SumUpConnector(
+        transport,
+        SumUpOptions(
+            discovery=DiscoveryOptions(
+                sitemaps=("/s.xml",), use_advertised_sitemaps=False
+            )
+        ),
+        _context(),
+    )
+
+    pages = await assert_connector_pages(connector.collect(_request()))
+
+    assert [page.discovered for page in pages] == [1, 1]
+    assert pages[0].items == ()
+    assert pages[-1].terminal and pages[-1].enumeration_intact
+    assert [item.title for page in pages for item in page.items] == ["Tasse bleue"]
 
 
 async def test_sumup_collection_runs_contextual_conformance_harness() -> None:

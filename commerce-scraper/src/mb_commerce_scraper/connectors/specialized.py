@@ -269,6 +269,9 @@ _CURRENCY = re.compile(r'"currency":"([A-Z]{3})"')
 class SumUpConnector(PageEngineConnector):
     name = "sumup"
     platform = "sumup"
+    # SumUp's own product sitemap also contains the shop home page. The retained
+    # scraper counts that URL as discovered, emits no row, and keeps crawling.
+    allows_non_product_sitemap_entries = True
 
     def __init__(
         self,
@@ -301,17 +304,18 @@ class SumUpConnector(PageEngineConnector):
         candidates = (
             [
                 {
-                    **value,
                     "uuid": value.get("uuid") or key,
                     "name": value.get("name"),
                     "sku": value.get("sku"),
                     "price": value.get("price", product.get("price")),
                     "basePrice": value.get("basePrice", product.get("basePrice")),
                     "hasDiscount": value.get("hasDiscount", product.get("hasDiscount")),
+                    "options": value.get("options"),
+                    "quantity": value.get("quantity"),
                     "isAvailable": value.get(
                         "isAvailable", product.get("isAvailable", True)
                     ),
-                    "options": value.get("options"),
+                    "isTrackingEnabled": value.get("isTrackingEnabled"),
                 }
                 for key, value in raw_variants.items()
                 if isinstance(value, dict) and value
@@ -320,7 +324,20 @@ class SumUpConnector(PageEngineConnector):
             else []
         )
         if not candidates:
-            candidates = [{**product, "uuid": product.get("id")}]
+            candidates = [
+                {
+                    "uuid": None,
+                    "name": None,
+                    "sku": product.get("sku"),
+                    "price": product.get("price"),
+                    "basePrice": product.get("basePrice"),
+                    "hasDiscount": product.get("hasDiscount"),
+                    "options": None,
+                    "quantity": None,
+                    "isAvailable": product.get("isAvailable", True),
+                    "isTrackingEnabled": product.get("isTrackingEnabled"),
+                }
+            ]
         variants: list[CommerceVariant] = []
         for candidate in candidates:
             amount = self._amount(candidate.get("price", product.get("price")))
@@ -377,6 +394,7 @@ class SumUpConnector(PageEngineConnector):
                     canonical_url=url,
                     title=clean(candidate.get("name")) or None,
                     sku=clean(candidate.get("sku") or product.get("sku")) or None,
+                    options=self._options(candidate),
                     offers=tuple(offers),
                     stock=stock,
                     platform_extensions={"legacy_raw_variant": candidate},
@@ -437,6 +455,22 @@ class SumUpConnector(PageEngineConnector):
         ):
             return quantity
         return None
+
+    @staticmethod
+    def _options(variant: dict[str, Any]) -> dict[str, str]:
+        options = variant.get("options")
+        if not isinstance(options, list):
+            return {}
+        attributes: dict[str, str] = {}
+        for index, option in enumerate(options):
+            if isinstance(option, dict):
+                key = clean(option.get("name") or option.get("label"))
+                value = clean(option.get("value") or option.get("choice"))
+                if key and value:
+                    attributes[key] = value
+            elif isinstance(option, str) and (value := clean(option)):
+                attributes[f"option_{index + 1}"] = value
+        return attributes
 
     @staticmethod
     def _product(payload: str, url: str) -> dict[str, Any] | None:

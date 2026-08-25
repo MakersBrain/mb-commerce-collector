@@ -206,23 +206,25 @@ architecture rules in the plan and are not separate scope-expansion goals.
     an all-source invariant now builds all 88 canonical connector/options pairs
     through the application registry instead.
 - [x] Recovered-cache migration checkpoint:
-  - The library gate passed Ruff, mypy over 77 source files, 360 tests, and the
+  - The library gate passed Ruff, mypy over 77 source files, 361 tests, and the
     frozen-schema check.
   - The catalogue gate passed Ruff, mypy over 240 source files, and 945 tests
-    with 2 expected skips, 281 deselections, and 284 subtests.
+    with 2 expected skips, 282 deselections, and 284 subtests.
+  - `main` branch protection requires the strict Python 3.11 and 3.12 CI matrix
+    checks, so either Ruff or mypy failing blocks merge.
   - `pytest -q -m golden tests/test_recorded_library_parity.py -rs` replayed
     independent legacy/library paths from 51,579 recovered production-response
-    entries: all 13 preflight, Shopify, Shopware, BigCommerce, PrestaShop,
-    Sio2, WooCommerce, Wix, Starweb, and NitroSell cases passed.
+    entries: all 14 preflight, Shopify, Shopware, BigCommerce, PrestaShop,
+    Sio2, WooCommerce, Wix, Starweb, NitroSell, and SumUp cases passed.
   - The recovered volume is newer and broader than the checked-in golden set.
     An archive-wide characterization produced 14 unrelated stale-baseline
     failures, 10 passes, and 67 sources without reviewed goldens; those 67
     provisional outputs were not added. Publishing a versioned archive and
     manifest remains an operational CI task.
   - Cache publication now accepts repeated `push --host` selectors. A local
-    deterministic build of the twelve reviewed hosts contains 7,934 files and
-    640,768,000 bytes with SHA-256
-    `dfd1f5650477968c3d34bbd2ef99cea78ad782b01183396cb54304eca2b85e83`;
+    deterministic build of the thirteen reviewed hosts contains 8,020 files and
+    643,112,960 bytes with SHA-256
+    `7c16b0f999de92831b4d316880c8e46b3c0ce9698b66cdbe7a0503bbdec74517`;
     it has not been uploaded or written into the checked-in manifest.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
   throwaway PostgreSQL 17 instance, covering concurrent authorization,
@@ -1177,7 +1179,7 @@ they do not reopen the Phase 5 library deliverables.
 | Shopware | Yes | Yes | Yes | No | No | No |
 | Starweb | Yes | Yes | Yes | Yes | No | No |
 | NitroSell | Yes | Yes | Yes | Yes | No | No |
-| SumUp | Yes | Yes | Yes | No | No | No |
+| SumUp | Yes | Yes | Yes | Yes | No | No |
 
 Cross-cutting work:
 
@@ -1259,6 +1261,10 @@ Cross-cutting work:
   - The Ceramic Shop NitroSell recording passes with all 245 rows, 288
     discoveries, and 295 requests. Strike-price grouping semantics and raw
     OpenGraph evidence match exactly.
+  - The Emily Alarcon SumUp recording passes with all 83 rows, 84 discoveries,
+    and 85 requests. Option attributes and raw variant evidence match exactly;
+    the product sitemap's shop-home entry is counted and skipped without
+    truncating enumeration.
 - [~] Review request counts and byte estimates.
   - Focused traffic profiles now pin exact logical request order, purpose,
     browser hint, and byte estimate for WooCommerce, PrestaShop/Sio2,

@@ -267,7 +267,13 @@ class SumUpConnector(PageCommerceConnector):
             if isinstance(value, dict) and value
         ] if isinstance(raw_variants, dict) else []
         if not candidates:
-            candidates = [product | {"uuid": product.get("id")}]
+            candidates = [{
+                "uuid": None, "name": None, "sku": product.get("sku"),
+                "price": product.get("price"), "basePrice": product.get("basePrice"),
+                "hasDiscount": product.get("hasDiscount"), "options": None,
+                "quantity": None, "isAvailable": product.get("isAvailable", True),
+                "isTrackingEnabled": product.get("isTrackingEnabled"),
+            }]
         for candidate in candidates:
             amount = self._amount(candidate.get("price", product.get("price")))
             if amount is None or currency is None:
@@ -297,6 +303,7 @@ class SumUpConnector(PageCommerceConnector):
                 external_id=str(candidate.get("uuid") or product.get("id")),
                 canonical_url=url, title=clean(candidate.get("name")) or None,
                 sku=clean(candidate.get("sku") or product.get("sku")) or None,
+                options=self._options(candidate),
                 offers=tuple(offers), stock=stock,
                 platform_extensions={"legacy_raw_variant": candidate},
             ))
@@ -337,6 +344,22 @@ class SumUpConnector(PageCommerceConnector):
         tracking = variant.get("isTrackingEnabled", product.get("isTrackingEnabled"))
         quantity = variant.get("quantity")
         return quantity if tracking is True and isinstance(quantity, int) and not isinstance(quantity, bool) and quantity >= 0 else None
+
+    @staticmethod
+    def _options(variant: dict[str, Any]) -> dict[str, str]:
+        options = variant.get("options")
+        if not isinstance(options, list):
+            return {}
+        attributes: dict[str, str] = {}
+        for index, option in enumerate(options):
+            if isinstance(option, dict):
+                key = clean(option.get("name") or option.get("label"))
+                value = clean(option.get("value") or option.get("choice"))
+                if key and value:
+                    attributes[key] = value
+            elif isinstance(option, str) and (value := clean(option)):
+                attributes[f"option_{index + 1}"] = value
+        return attributes
 
     @staticmethod
     def _product(payload: str, url: str) -> dict[str, Any] | None:

@@ -254,6 +254,7 @@ class PageEngineConnector(CommerceConnector):
     name = "specialized-pages"
     platform = "specialized"
     version = "1"
+    allows_non_product_sitemap_entries = False
     capabilities = ConnectorCapabilities(
         snapshot_fields=frozenset(SnapshotField),
         refresh_modes=frozenset({RefreshMode.FULL}),
@@ -459,6 +460,30 @@ class PageEngineConnector(CommerceConnector):
                 snapshots = self.parse(rendered.text(), url, request.source_id)
                 zero_gain = 0 if snapshots else zero_gain + 1
             if not snapshots:
+                if self.allows_non_product_sitemap_entries:
+                    has_more_pages = current + 1 < len(discovered_urls)
+                    yield EntityPage(
+                        page_id=f"product:{sequence}",
+                        partition_key=self._partition_key(),
+                        sequence=sequence,
+                        items=(),
+                        resume_after=(
+                            {
+                                "index": current + 1,
+                                "url": discovered_urls[current + 1],
+                                "snapshot_offset": 0,
+                                "sequence": sequence + 1,
+                            }
+                            if has_more_pages
+                            else None
+                        ),
+                        terminal=not has_more_pages,
+                        enumeration_intact=True,
+                        discovered=1,
+                    )
+                    sequence += 1
+                    snapshot_offset = 0
+                    continue
                 code = (
                     DiagnosticCode.BROWSER_REQUIRED
                     if shell and not browser_attempted
