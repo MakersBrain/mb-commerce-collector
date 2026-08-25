@@ -145,6 +145,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `9d5ba26` — centralize static process environment in deployment roles.
 - `a362166` — share browser session request dispatch.
 - `fb93b43` — consolidate application site-plugin support.
+- `f2cb149` — remove retired Fetcher telemetry traversal.
 
 ### Verification at last review
 
@@ -318,6 +319,11 @@ architecture rules in the plan and are not separate scope-expansion goals.
     of route/byte result totals, also used for zero-valued terminal-recovery
     summaries. The 43 focused worker/runtime tests and full 936-test catalogue
     suite passed with Ruff, mypy, and installed two-wheel composition.
+  - Webshare profile quarantine now has one provider-scoped SQL mutation for
+    rotation, failed installation, generation conflict, and unsafe-cycle
+    recovery. Operator actions update the audit actor while system recovery
+    preserves it. All 15 focused profile-import tests and the full 92-test
+    PostgreSQL control suite passed, alongside 34 static control tests.
   - The provider-neutral durable Webshare composition and existing Decodo and
     Webshare adapter suites passed 29 focused tests.
   - The strict Webshare gateway-secret contract passed 47 focused tests.

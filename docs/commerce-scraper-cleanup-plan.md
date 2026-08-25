@@ -514,7 +514,7 @@ the paid-traffic path and depend on Track 0.1.
   and mypy over 240 files passed; `pytest -q` -> 936 passed, 2 skipped, 187
   deselected, and 284 subtests; installed two-wheel composition passed.
 
-- [ ] **D6 One quarantine statement.**
+- [x] **D6 One quarantine statement.**
   `set enabled = false, lifecycle = 'pending', pending_action = null,
   updated_at = now()` appears four times in
   `catalogue-control/src/catalogue_control/webshare_profile_import.py` (398,
@@ -523,6 +523,15 @@ the paid-traffic path and depend on Track 0.1.
   invariant — a profile must never stay enabled after a failed install — and it
   has four places to keep in sync.
   One `_quarantine_profile(connection, provider, profile_id, *, actor=None)`.
+  **Completed.** All four rotation, failed-install, generation-conflict, and
+  unsafe-cycle paths now call one provider-scoped `_quarantine_profile` and one
+  SQL mutation. Operator-driven rotation records its actor; recovery-driven
+  quarantine passes no actor and preserves the profile's prior audit owner via
+  `coalesce`, while every path disables the profile, restores `pending`, clears
+  `pending_action`, and advances `updated_at` atomically.
+  *Verified:* all 15 focused Webshare import tests passed against throwaway
+  PostgreSQL 17. Control-service Ruff and mypy over 30 files passed; the full
+  suite passed with 34 static tests and 92 PostgreSQL tests.
 
 - [ ] **D7 One native-collection assembly.**
   `Worker._crawl_connector_canary` and `LocalLibraryScraper._collect`

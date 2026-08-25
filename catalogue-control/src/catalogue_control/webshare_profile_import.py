@@ -236,6 +236,24 @@ async def _database_now(connection: Any, cycle: dict[str, Any]) -> dict[str, Any
     return {**cycle, "database_now": row["database_now"]}
 
 
+async def _quarantine_profile(
+    connection: Any,
+    provider: str,
+    profile_id: UUID,
+    *,
+    actor: str | None = None,
+) -> None:
+    """Disable a profile while preserving system-recovery audit ownership."""
+
+    await connection.execute(
+        """update catalogue.proxy_profiles
+              set enabled = false, lifecycle = 'pending', pending_action = null,
+                  updated_at = now(), updated_by = coalesce(%(actor)s, updated_by)
+            where provider = %(provider)s and id = %(profile)s""",
+        {"provider": provider, "profile": profile_id, "actor": actor},
+    )
+
+
 async def _require_operation(connection: Any, operation_id: UUID, actor_id: str) -> None:
     cursor = await connection.execute(
         """select actor, action, state
@@ -393,12 +411,11 @@ async def _prepare(
                 {"provider": PROVIDER, "profile": profile["id"]},
             )
             active = await active_cursor.fetchall()
-            await connection.execute(
-                """update catalogue.proxy_profiles
-                      set enabled = false, lifecycle = 'pending', pending_action = null,
-                          updated_at = now(), updated_by = %(actor)s
-                    where id = %(profile)s""",
-                {"profile": profile["id"], "actor": actor_id},
+            await _quarantine_profile(
+                connection,
+                PROVIDER,
+                profile["id"],
+                actor=actor_id,
             )
             if active:
                 await connection.execute(
@@ -484,13 +501,7 @@ async def _install_secret(
 async def _mark_failed(connection: Any, intent: _Intent, code: str) -> WebshareProfileImportResult:
     async with connection.transaction():
         await _lock_cycle(connection, intent.cycle_start)
-        await connection.execute(
-            """update catalogue.proxy_profiles
-                  set enabled = false, lifecycle = 'pending', pending_action = null,
-                      updated_at = now()
-                where provider = %(provider)s and id = %(profile)s""",
-            {"provider": intent.provider, "profile": intent.profile_id},
-        )
+        await _quarantine_profile(connection, intent.provider, intent.profile_id)
         cursor = await connection.execute(
             """update catalogue.proxy_profile_secret_intents
                   set state = 'failed', error_code = %(code)s, updated_at = now(),
@@ -607,13 +618,7 @@ async def _finalize(connection: Any, intent: _Intent) -> WebshareProfileImportRe
             expected_database_generation,
             intent.target_generation,
         }:
-            await connection.execute(
-                """update catalogue.proxy_profiles
-                      set enabled = false, lifecycle = 'pending', pending_action = null,
-                          updated_at = now()
-                    where provider = %(provider)s and id = %(profile)s""",
-                {"provider": intent.provider, "profile": intent.profile_id},
-            )
+            await _quarantine_profile(connection, intent.provider, intent.profile_id)
             await connection.execute(
                 """update catalogue.proxy_profile_secret_intents
                       set state = 'failed', error_code = 'database_generation_conflict',
@@ -624,16 +629,7 @@ async def _finalize(connection: Any, intent: _Intent) -> WebshareProfileImportRe
             return _result(intent, "failed", error_code="database_generation_conflict")
 
         if not _cycle_is_safe(cycle) or not allocation_exists:
-            await connection.execute(
-                """update catalogue.proxy_profiles
-                      set enabled = false, lifecycle = 'pending', pending_action = null,
-                          updated_at = now()
-                    where provider = %(provider)s and id = %(profile)s""",
-                {
-                    "provider": intent.provider,
-                    "profile": intent.profile_id,
-                },
-            )
+            await _quarantine_profile(connection, intent.provider, intent.profile_id)
             await connection.execute(
                 """update catalogue.proxy_profile_secret_intents
                       set error_code = 'cycle_rebind_required', updated_at = now()

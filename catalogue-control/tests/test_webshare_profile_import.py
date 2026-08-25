@@ -304,12 +304,13 @@ async def test_rotation_drains_only_its_active_reservations_before_writing_inten
     reservation_row = await reservation.fetchone()
     assert reservation_row is not None
 
-    operation_id = await _operation(db)
+    rotation_actor = "rotator@example.test"
+    operation_id = await _operation(db, rotation_actor)
     result = await install_webshare_profile(
         db,
         store,
         operation_id=operation_id,
-        actor_id="operator@example.test",
+        actor_id=rotation_actor,
         secret=_secret(2, password="must-not-be-written"),
         expected_generation=1,
     )
@@ -321,13 +322,15 @@ async def test_rotation_drains_only_its_active_reservations_before_writing_inten
     )
     assert (await intent.fetchone())["count"] == 0
     profile = await db.execute(
-        "select enabled, lifecycle, pending_action from catalogue.proxy_profiles where id = %s",
+        """select enabled, lifecycle, pending_action, updated_by
+             from catalogue.proxy_profiles where id = %s""",
         (created.profile_id,),
     )
     assert await profile.fetchone() == {
         "enabled": False,
         "lifecycle": "pending",
         "pending_action": None,
+        "updated_by": rotation_actor,
     }
     revoked = await db.execute(
         "select state, revocation_requested from catalogue.proxy_reservations where id = %s",
@@ -956,7 +959,7 @@ async def test_installed_recovery_fails_closed_on_database_generation_conflict(
     assert repeated == recovered
     state = await db.execute(
         """select i.state, i.error_code, i.completed_at is not null as terminal,
-                  p.enabled, p.lifecycle, p.secret_generation
+                  p.enabled, p.lifecycle, p.secret_generation, p.updated_by
              from catalogue.proxy_profile_secret_intents i
              join catalogue.proxy_profiles p on p.id = i.profile_id
             where i.operation_id = %(operation)s""",
@@ -969,4 +972,5 @@ async def test_installed_recovery_fails_closed_on_database_generation_conflict(
         "enabled": False,
         "lifecycle": "pending",
         "secret_generation": 9,
+        "updated_by": "operator@example.test",
     }
