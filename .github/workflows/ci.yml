@@ -126,15 +126,6 @@ jobs:
           cache-dependency-glob: catalogue-dump/uv.lock
       - name: Sync
         run: uv --directory catalogue-dump sync --all-groups --extra archive
-      - name: Inspect non-secret OIDC binding claims
-        env:
-          OIDC_AUDIENCE: https://github.com/MakersBrain
-        run: |
-          response=$(curl -fsS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$OIDC_AUDIENCE")
-          payload=$(jq -r .value <<<"$response" | cut -d. -f2 | tr '_-' '/+')
-          case $((${#payload} % 4)) in 2) payload="${payload}==" ;; 3) payload="${payload}=" ;; esac
-          printf '%s' "$payload" | base64 -d | jq '{sub,aud,repository_id,repository_owner_id,environment}'
       # GitHub stores no standing Infisical or R2 credential. Its short-lived
       # OIDC assertion can read only the dedicated catalogue CI project, which
       # contains only this bucket-scoped reader and non-secret endpoint config.
