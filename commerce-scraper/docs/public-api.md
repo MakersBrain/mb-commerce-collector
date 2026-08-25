@@ -86,6 +86,13 @@ geography, provider preference, and collection caps. The same policy is passed
 to direct `RoutedTransport` composition, so low- and high-level routing use one
 validated configuration shape.
 
+`URLPolicy` validates every logical origin before DNS and every resolved
+address before connection. Successful public resolutions use a bounded,
+per-policy host LRU for 60 seconds by default; concurrent requests for one host
+share a lookup. Resolver errors, empty answers, malformed addresses, and
+non-public addresses are never cached. Applications constructing a policy
+directly may tune or disable the TTL and adjust the host bound.
+
 Every supported namespace remains importable from the base installation. The
 HTTP-facing factory symbols are still importable there, but constructing an
 HTTP transport requires the `http` extra.

@@ -458,6 +458,143 @@ async def test_url_policy_rejects_private_and_cross_origin_destinations() -> Non
         await public.validate("https://other.test/products")
 
 
+@pytest.mark.parametrize("resolver_ttl_seconds", (-1, float("nan")))
+def test_url_policy_validates_resolution_cache_ttl(
+    resolver_ttl_seconds: float,
+) -> None:
+    with pytest.raises(ValueError, match="resolver_ttl_seconds"):
+        URLPolicy(
+            ("https://shop.test",),
+            resolver_ttl_seconds=resolver_ttl_seconds,
+        )
+
+
+@pytest.mark.parametrize("maximum_resolved_hosts", (0, True))
+def test_url_policy_validates_resolution_cache_bound(
+    maximum_resolved_hosts: int,
+) -> None:
+    with pytest.raises(ValueError, match="maximum_resolved_hosts"):
+        URLPolicy(
+            ("https://shop.test",),
+            maximum_resolved_hosts=maximum_resolved_hosts,
+        )
+
+
+async def test_url_policy_reuses_resolution_until_ttl_expiry() -> None:
+    now = [1_000.0]
+    calls = 0
+
+    async def resolver(_host: str) -> tuple[str, ...]:
+        nonlocal calls
+        calls += 1
+        return (f"93.184.216.{calls}",)
+
+    policy = URLPolicy(
+        ("https://shop.test",),
+        resolver=resolver,
+        resolver_ttl_seconds=60,
+        clock=lambda: now[0],
+    )
+
+    for page in range(500):
+        _, addresses = await policy.validate_with_addresses(
+            f"https://shop.test/products/{page}"
+        )
+        assert addresses == ("93.184.216.1",)
+
+    assert calls == 1
+    now[0] += 60
+    _, refreshed = await policy.validate_with_addresses("https://shop.test/refreshed")
+    assert refreshed == ("93.184.216.2",)
+    assert calls == 2
+
+
+async def test_url_policy_resolution_cache_is_lru_bounded() -> None:
+    calls: dict[str, int] = {}
+
+    async def resolver(host: str) -> tuple[str, ...]:
+        calls[host] = calls.get(host, 0) + 1
+        return ("93.184.216.34",)
+
+    origins = tuple(f"https://{host}.test" for host in ("one", "two", "three"))
+    policy = URLPolicy(
+        origins,
+        resolver=resolver,
+        maximum_resolved_hosts=2,
+    )
+
+    await policy.validate("https://one.test/a")
+    await policy.validate("https://two.test/a")
+    await policy.validate("https://one.test/b")
+    await policy.validate("https://three.test/a")
+    await policy.validate("https://two.test/b")
+
+    assert calls == {"one.test": 1, "two.test": 2, "three.test": 1}
+    assert tuple(policy._resolutions) == ("three.test", "two.test")
+
+
+async def test_url_policy_shares_resolution_across_concurrent_cancellation() -> None:
+    calls = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def resolver(_host: str) -> tuple[str, ...]:
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return ("93.184.216.34",)
+
+    policy = URLPolicy(("https://shop.test",), resolver=resolver)
+    cancelled = asyncio.create_task(policy.validate("https://shop.test/one"))
+    await started.wait()
+    retained = asyncio.create_task(policy.validate("https://shop.test/two"))
+    cancelled.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled
+    release.set()
+
+    assert await retained == "https://shop.test/two"
+    assert await policy.validate("https://shop.test/three") == "https://shop.test/three"
+    assert calls == 1
+
+
+async def test_url_policy_does_not_cache_rejected_resolutions() -> None:
+    calls = 0
+
+    async def resolver(_host: str) -> tuple[str, ...]:
+        nonlocal calls
+        calls += 1
+        return ("127.0.0.1",) if calls == 1 else ("93.184.216.34",)
+
+    policy = URLPolicy(("https://shop.test",), resolver=resolver)
+
+    with pytest.raises(ValueError, match="non-public"):
+        await policy.validate("https://shop.test/one")
+
+    assert await policy.validate("https://shop.test/two") == "https://shop.test/two"
+    assert calls == 2
+
+
+async def test_url_policy_does_not_cache_resolver_failures() -> None:
+    calls = 0
+
+    async def resolver(_host: str) -> tuple[str, ...]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("temporary DNS failure")
+        return ("93.184.216.34",)
+
+    policy = URLPolicy(("https://shop.test",), resolver=resolver)
+
+    with pytest.raises(OSError, match="temporary DNS failure"):
+        await policy.validate("https://shop.test/one")
+
+    assert await policy.validate("https://shop.test/two") == "https://shop.test/two"
+    assert calls == 2
+
+
 async def test_http_transport_connects_to_the_validated_address_with_logical_host() -> None:
     requests: list[httpx.Request] = []
 

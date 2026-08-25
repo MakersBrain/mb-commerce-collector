@@ -434,11 +434,31 @@ behavioral consequences and should be scheduled on its own.**
   suite (938 passed, 2 skipped, 187 deselected, 284 subtests), and installed
   two-wheel composition passed.
 
-- [ ] **C5 Cache DNS resolution per host with a TTL.**
+- [x] **C5 Cache DNS resolution per host with a TTL.**
   `system_resolver` no longer blocks the event loop, but still resolves on
   every request and every redirect hop with no caching: a 500-URL crawl of one
   origin performs 500+ lookups. Add a small per-host TTL cache.
   *Depends on:* the async-resolver change already landed.
+  **Completed.** Each `URLPolicy` now retains up to 256 successful public DNS
+  resolutions in a host-keyed LRU for 60 seconds by default. TTL and capacity
+  are strictly validated and configurable (including a zero TTL to disable
+  reuse). Address validation happens before insertion, so resolver errors,
+  empty answers, malformed IPs, and non-public addresses are never cached.
+  Same-host concurrent requests share one shielded task; cancellation of one
+  waiter does not cancel resolution for the others, and completed task failures
+  are consumed without hiding them from active callers. Origin validation still
+  precedes DNS, every redirect still passes policy, and cached entries contain
+  only previously validated addresses.
+  *Verified:* 500 sequential same-host URLs resolve once within TTL and refresh
+  exactly at expiry; focused regressions also cover strict configuration,
+  host-LRU recency/eviction, concurrent cancellation, private-address rejection,
+  and retry after resolver failure. The focused HTTP/policy slice passed 76
+  tests. The complete scraper gate passed with 358 tests, Ruff, mypy over 76
+  files, schemas, package and installed-wheel contracts, custom-connector
+  verification, and release checks. The focused catalogue transport/browser/
+  runtime slice passed 54 tests plus 10 subtests; catalogue Ruff, mypy over 240
+  files, the full fast suite (938 passed, 2 skipped, 187 deselected, 284
+  subtests), and installed two-wheel composition passed.
 
 - [ ] **C6 Actually run requests concurrently.** *(schedule separately)*
   `_enrich_inventory` issues one HTTP request per product, strictly

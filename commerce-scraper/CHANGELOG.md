@@ -68,6 +68,8 @@ based on Keep a Changelog, and releases follow the compatibility policy in
   of rescanning and reparsing the document for every configured field.
 - Bounded owned HTTPX connection pools to 32 origin/address clients with
   concurrency-safe LRU eviction, active-stream draining, and prompt closure.
+- Added a bounded per-host DNS cache to `URLPolicy`, with successful public
+  resolutions retained for 60 seconds and concurrent lookups coalesced.
 
 Before tagging the first release, move these notes under
 `## [0.1.0] - YYYY-MM-DD` and retain an empty `## [Unreleased]` section above

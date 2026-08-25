@@ -151,13 +151,14 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `519791a` — scan Shopify inventory HTML once per supported encoding.
 - `0947bcc` — reuse request-scoped cache lookups.
 - `2f89a4a` — tokenize verified DOM products once.
+- `75fe31b` — bound owned HTTPX client pools.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 76 source and test files.
-  - 349 library tests passed. Version-0 checkpoint compatibility and its
+  - 358 library tests passed. Version-0 checkpoint compatibility and its
     library test suite were removed before the first release.
   - Wheel and source distribution built.
   - 5 dependency-boundary tests passed.
@@ -254,6 +255,11 @@ architecture rules in the plan and are not separate scope-expansion goals.
   migration/round-trip tests passed against a throwaway database.
 - [x] Current implementation batch passed the verification gates recorded
   below.
+  - `URLPolicy` now caches up to 256 successful public per-host resolutions for
+    60 seconds, coalesces concurrent lookups, and never caches failures or
+    rejected addresses. TTL, LRU, failure, and cancellation regressions passed
+    alongside the complete scraper gate (358 tests), full catalogue gate, and
+    installed two-wheel composition.
   - Owned HTTPX clients now use a strict 32-entry, concurrency-safe LRU.
     Eviction awaits closure of the idle least-recently-used pool; active pools
     are drained rather than evicted, and shutdown blocks new acquisition while
