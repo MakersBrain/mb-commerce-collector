@@ -50,12 +50,11 @@ nothing else. In particular it must not be able to read `/catalogue/cache`,
 which is CI's, or to write anywhere: an identity that can rewrite the secret it
 authenticates with is a way to lock yourself out of your own deployment.
 
-CI authenticates as a separate identity, scoped to `/catalogue/cache` in the
-`ci` environment, and can read the response-cache archive and nothing else. It
-calls the Infisical API with curl rather than using the published action: this
-repository allows a short list of actions and pins each to a SHA, and a
-third-party action in the supply chain buys nothing over two HTTP calls. See the
-`golden` job in `.github/workflows/ci.yml`.
+The golden CI job uses a dedicated Cloudflare R2 credential stored as GitHub
+Actions secrets. Its provider policy is scoped to object-read access on
+`mb-catalogue-cache`; it cannot publish, replace, or delete cache archives and
+cannot reach any other bucket. The bucket and endpoint are non-secret GitHub
+Actions variables. See the `golden` job in `.github/workflows/ci.yml`.
 
 ## Backups escrow
 
