@@ -50,11 +50,13 @@ nothing else. In particular it must not be able to read `/catalogue/cache`,
 which is CI's, or to write anywhere: an identity that can rewrite the secret it
 authenticates with is a way to lock yourself out of your own deployment.
 
-The golden CI job uses a dedicated Cloudflare R2 credential stored as GitHub
-Actions secrets. Its provider policy is scoped to object-read access on
-`mb-catalogue-cache`; it cannot publish, replace, or delete cache archives and
-cannot reach any other bucket. The bucket and endpoint are non-secret GitHub
-Actions variables. See the `golden` job in `.github/workflows/ci.yml`.
+The golden CI job uses GitHub OIDC to obtain a 15-minute Infisical token. The
+identity is bound to this repository's `catalogue-cache` environment and is a
+Viewer of the dedicated `makersbrain-catalogue-ci` project, whose only secrets
+are the bucket-scoped R2 reader. That reader can fetch objects from
+`mb-catalogue-cache`; it cannot publish, replace, or delete archives or reach
+another bucket. GitHub stores only the public Infisical identity ID. See the
+`golden` job in `.github/workflows/ci.yml`.
 
 ## Backups escrow
 

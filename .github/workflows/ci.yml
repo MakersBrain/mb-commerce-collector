@@ -109,7 +109,15 @@ jobs:
 
   golden:
     name: Replay the recorded catalogue
+    # The Infisical OIDC identity is bound to the protected catalogue-cache
+    # environment. Pull requests still run every deterministic unit/contract
+    # check, while the secret-bearing full replay runs only from trusted main.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    environment: catalogue-cache
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
@@ -118,16 +126,24 @@ jobs:
           cache-dependency-glob: catalogue-dump/uv.lock
       - name: Sync
         run: uv --directory catalogue-dump sync --all-groups --extra archive
-      # These credentials are an R2 token scoped to object-read access on the
-      # cache bucket. The manifest pins the immutable object and the pull
-      # verifies its digest before extracting anything. There is deliberately
-      # no feature gate: a missing credential or archive must fail CI.
+      # GitHub stores no standing Infisical or R2 credential. Its short-lived
+      # OIDC assertion can read only the dedicated catalogue CI project, which
+      # contains only this bucket-scoped reader and non-secret endpoint config.
+      - name: Fetch cache credentials from Infisical
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: 0cea834b-cf89-48bc-92f0-77ccb06a2932
+          oidc-audience: https://github.com/MakersBrain
+          project-slug: makersbrain-catalogue-ci
+          env-slug: prod
+          domain: https://infisical.mazenet.org
+          secret-path: /
+          include-imports: false
+          recursive: false
+      # The manifest pins the immutable object and the pull verifies its digest
+      # before extracting anything. Missing credentials or archive fail CI.
       - name: Fetch the recorded response cache
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          CATALOGUE_CACHE_BUCKET: ${{ vars.CATALOGUE_CACHE_BUCKET }}
-          CATALOGUE_CACHE_ENDPOINT: ${{ vars.CATALOGUE_CACHE_ENDPOINT }}
         run: |
           uv --directory catalogue-dump run -- catalogue-cache-archive pull --force
           echo "CATALOGUE_GOLDEN_ARCHIVE_REQUIRED=1" >> "$GITHUB_ENV"
