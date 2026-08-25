@@ -4,7 +4,7 @@ import asyncio
 from contextlib import suppress
 from dataclasses import dataclass
 from time import monotonic
-from typing import Literal, Protocol, runtime_checkable
+from typing import Protocol
 from urllib.parse import urlsplit
 
 from pydantic import JsonValue
@@ -22,7 +22,11 @@ from mb_commerce_scraper.transports import (
     estimated_transmitted_bytes,
     safe_telemetry,
 )
-from mb_commerce_scraper.transports.base import TelemetryHooks, transport_trace_fields
+from mb_commerce_scraper.transports.base import (
+    TelemetryHooks,
+    browser_subrequests_authorized,
+    transport_trace_fields,
+)
 
 from .base import (
     BrowserSubrequestAuthorization,
@@ -49,13 +53,6 @@ class ProxyBrowserTransportFactory(Protocol):
         lease: ProxyLease,
         authorizer: BrowserSubrequestAuthorizer,
     ) -> CommerceTransport: ...
-
-
-@runtime_checkable
-class BrowserSubrequestAuthorizedTransport(Protocol):
-    """Marker for transports whose browser traffic owns per-request tokens."""
-
-    browser_subrequests_authorized: Literal[True]
 
 
 @dataclass(slots=True)
@@ -232,14 +229,13 @@ class RoutedTransport(CommerceTransport):
     ) -> TransportResponse:
         route = await self._checkout_proxy_route(request)
         authorization = None
-        browser_subrequests_authorized = (
-            request.browser.value == "required"
-            and getattr(route.transport, "browser_subrequests_authorized", False) is True
+        owns_browser_authorization = request.browser.value == "required" and (
+            browser_subrequests_authorized(route.transport)
         )
         dispatched = False
         outcome: ProxyOutcome | None = None
         try:
-            if not browser_subrequests_authorized:
+            if not owns_browser_authorization:
                 authorization = await self._pool.authorize(
                     route.lease,
                     request.estimated_bytes + estimated_transmitted_bytes(request),

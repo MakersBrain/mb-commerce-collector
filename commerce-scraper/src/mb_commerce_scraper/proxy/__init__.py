@@ -1,3 +1,5 @@
+from mb_commerce_scraper.transports.base import BrowserSubrequestAuthorizedTransport
+
 from .base import (
     BrowserProxyCredentials,
     BrowserSubrequestAuthorization,
@@ -17,7 +19,6 @@ from .health import InMemoryProxyHealth, ProxyFailureReason, ProxyHealthState
 from .httpx import HttpxProxyTransportFactory
 from .static import StaticProxyLease, StaticProxyPool, StaticRoute
 from .transport import (
-    BrowserSubrequestAuthorizedTransport,
     PoolBrowserSubrequestAuthorizer,
     ProxyBrowserTransportFactory,
     ProxyTransportFactory,

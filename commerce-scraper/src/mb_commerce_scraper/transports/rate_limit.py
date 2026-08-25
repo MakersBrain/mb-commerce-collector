@@ -15,6 +15,7 @@ from .base import (
     RateLimiter,
     RotationReason,
     TelemetryHooks,
+    TransportCapabilityForwarder,
     TransportRequest,
     TransportResponse,
     transport_trace_fields,
@@ -97,7 +98,7 @@ class PerOriginRateLimiter:
         return state
 
 
-class RateLimitedTransport(CommerceTransport):
+class RateLimitedTransport(TransportCapabilityForwarder, CommerceTransport):
     """Apply one limiter to one physical route.
 
     Separate instances around direct and proxy backends prevent a paid route
@@ -116,6 +117,7 @@ class RateLimitedTransport(CommerceTransport):
         telemetry_context: dict[str, JsonValue] | None = None,
     ) -> None:
         self._backend = backend
+        self._forward_transport_capabilities(backend)
         self._limiter = limiter
         self._route = route
         self._telemetry = safe_telemetry(telemetry) if telemetry is not None else None
@@ -144,12 +146,6 @@ class RateLimitedTransport(CommerceTransport):
 
     async def rotate_identity(self, reason: RotationReason) -> None:
         await self._backend.rotate_identity(reason)
-
-    @property
-    def browser_subrequests_authorized(self) -> bool:
-        """Preserve an authoritative browser backend's accounting marker."""
-
-        return getattr(self._backend, "browser_subrequests_authorized", False) is True
 
     async def aclose(self) -> None:
         if hasattr(self._backend, "aclose"):

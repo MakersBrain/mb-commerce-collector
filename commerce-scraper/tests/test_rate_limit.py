@@ -9,8 +9,10 @@ from mb_commerce_scraper.testing import FakeTransport
 from mb_commerce_scraper.transports import (
     MiddlewareTransport,
     PerOriginRateLimiter,
+    RateLimitedTransport,
     RequestPriority,
     RequestPurpose,
+    RotationReason,
     TransportRequest,
 )
 
@@ -34,6 +36,21 @@ class RecordingTelemetry:
 
     def emit(self, event: str, fields: dict[str, JsonValue]) -> None:
         self.events.append((event, fields))
+
+
+class RequestScopedRotationTransport(FakeTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        self.request_rotations: list[tuple[RotationReason, TransportRequest]] = []
+
+    async def rotate_identity_for_request(
+        self, reason: RotationReason, request: TransportRequest
+    ) -> None:
+        self.request_rotations.append((reason, request))
+
+
+class AuthorizedBrowserTransport(FakeTransport):
+    browser_subrequests_authorized = True
 
 
 def request(url: str) -> TransportRequest:
@@ -170,3 +187,40 @@ async def test_middleware_releases_permit_after_backend_failure() -> None:
     response = await transport.request(value)
 
     assert response.text() == "recovered"
+
+
+async def test_rate_limited_wrapper_forwards_request_scoped_rotation() -> None:
+    backend = RequestScopedRotationTransport()
+    backend.add("https://shop.test/data", status=429)
+    backend.add("https://shop.test/data", body="ok")
+    wrapped = RateLimitedTransport(
+        backend,
+        PerOriginRateLimiter(),
+        route="proxy",
+    )
+    transport = MiddlewareTransport(
+        wrapped,
+        retries=1,
+        backoff=lambda _: 0,
+        telemetry=RecordingTelemetry(),
+    )
+
+    response = await transport.request(request("https://shop.test/data"))
+
+    assert response.text() == "ok"
+    [(reason, triggering_request)] = backend.request_rotations
+    assert reason is RotationReason.RATE_LIMITED
+    assert triggering_request.trace_request_id is not None
+    assert triggering_request.trace_attempt == 1
+    assert backend.rotations == []
+
+
+def test_rate_limited_wrapper_forwards_browser_authorization_marker() -> None:
+    limiter = PerOriginRateLimiter()
+    authorized = RateLimitedTransport(
+        AuthorizedBrowserTransport(), limiter, route="proxy"
+    )
+    ordinary = RateLimitedTransport(FakeTransport(), limiter, route="proxy")
+
+    assert authorized.browser_subrequests_authorized is True
+    assert ordinary.browser_subrequests_authorized is False

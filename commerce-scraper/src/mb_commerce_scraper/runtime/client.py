@@ -62,6 +62,8 @@ from mb_commerce_scraper.transports.base import (
     ResponseCache,
     RobotsChecker,
     TelemetryHooks,
+    TransportCapabilityForwarder,
+    browser_subrequests_authorized,
 )
 
 RobotsFactory = Callable[[CommerceTransport], RobotsChecker]
@@ -167,7 +169,7 @@ class _BrowserProxyTransportFactory:
         )
 
 
-class _OwnedProxyBrowserTransport:
+class _OwnedProxyBrowserTransport(TransportCapabilityForwarder):
     """Own both transports created for one proxy route generation."""
 
     def __init__(
@@ -180,18 +182,13 @@ class _OwnedProxyBrowserTransport:
         self._dispatch = dispatch
         self._http = http
         self._browser = browser
+        self._forward_transport_capabilities(
+            dispatch,
+            browser_backend=browser,
+        )
 
     async def request(self, request: TransportRequest) -> TransportResponse:
         return await self._dispatch.request(request)
-
-    @property
-    def browser_subrequests_authorized(self) -> bool:
-        """Only advertise the capability implemented by the browser backend."""
-
-        return (
-            self._browser is not None
-            and getattr(self._browser, "browser_subrequests_authorized", False) is True
-        )
 
     async def rotate_identity(self, reason: RotationReason) -> None:
         await self._dispatch.rotate_identity(reason)
@@ -408,12 +405,9 @@ class CommerceScraper:
             route_uses_proxy
             and self.require_proxy_browser_subrequest_authorization
             and self.proxy_browser_transport_factory is not None
-            and getattr(
-                self.proxy_browser_transport_factory,
-                "browser_subrequests_authorized",
-                False,
+            and not browser_subrequests_authorized(
+                self.proxy_browser_transport_factory
             )
-            is not True
         ):
             raise ProxyBrowserRoutingUnsupported(
                 "proxy browser factory must authorize every physical subrequest"

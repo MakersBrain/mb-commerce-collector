@@ -256,7 +256,7 @@ Independent of Tracks A, C and D. Safe to parallelize across B1-B5.
   936 passed, 2 skipped, 187 deselected, and 284 subtests; installed two-wheel
   catalogue composition passed.
 
-- [ ] **B4 Make optional transport capabilities explicit.**
+- [x] **B4 Make optional transport capabilities explicit.**
   Two capabilities propagate by duck-typed `getattr`:
   `rotate_identity_for_request` in the middleware, and
   `browser_subrequests_authorized` at four separate sites — the latter despite
@@ -270,6 +270,21 @@ Independent of Tracks A, C and D. Safe to parallelize across B1-B5.
   mechanism for both, and put wrapper forwarding in one shared base.
   *Touches:* `transports/middleware.py`, `transports/rate_limit.py`,
   `proxy/transport.py`, `runtime/client.py`.
+  **Completed.** Request-scoped rotation and browser-subrequest authorization
+  are runtime-checkable protocols rather than attribute-name guesses. One
+  `TransportCapabilityForwarder` preserves both capabilities through wrappers;
+  `RateLimitedTransport` and the owned proxy-browser wrapper configure it
+  instead of maintaining parallel properties. Routed transport and runtime
+  factory validation use the same explicit marker predicate, including its
+  fail-closed `is True` check. Focused tests prove request trace/attempt context
+  survives the rate-limit wrapper and marked/unmarked browser backends remain
+  distinct.
+  *Verified:* 70 focused rate-limit, proxy, and runtime tests passed. `make
+  scraper-check` -> 313 tests, Ruff, mypy over 75 files, schemas, build, 4
+  boundary tests, installed-wheel/public-API, external-consumer, and release
+  gates passed. Catalogue Ruff and mypy over 239 files passed; `pytest -q` ->
+  936 passed, 2 skipped, 187 deselected, and 284 subtests; installed two-wheel
+  catalogue composition passed.
 
 - [ ] **B5 One options model for the page engine, in its own module.**
   `SpecializedPageConnector` takes a flat `SpecializedPageOptions` while the

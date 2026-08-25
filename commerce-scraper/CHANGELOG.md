@@ -50,6 +50,9 @@ based on Keep a Changelog, and releases follow the compatibility policy in
 - Unified middleware cache-limit rejection and terminal attempt-failure
   telemetry, including a consistent failure stage across response limits,
   transport errors, cancellation, backend errors, cache writes, and cleanup.
+- Replaced duck-typed optional transport capabilities with runtime-checkable
+  request-scoped rotation and browser-authorization protocols, with shared
+  forwarding through transport wrappers.
 
 Before tagging the first release, move these notes under
 `## [0.1.0] - YYYY-MM-DD` and retain an empty `## [Unreleased]` section above

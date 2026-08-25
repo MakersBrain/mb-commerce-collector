@@ -138,13 +138,14 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `63c745b` — finalize the pre-1.0 public surface and typed telemetry contract.
 - `6ac428f` — consolidate connector parsing helpers.
 - `1c9c8eb` — unify checkpoint and connector-factory plumbing.
+- `517db89` — unify middleware failure telemetry.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 75 source and test files.
-  - 311 library tests passed. Version-0 checkpoint compatibility and its
+  - 313 library tests passed. Version-0 checkpoint compatibility and its
     library test suite were removed before the first release.
   - Wheel and source distribution built.
   - 4 dependency-boundary tests passed.
@@ -271,6 +272,12 @@ architecture rules in the plan and are not separate scope-expansion goals.
     cancellation, or accounting behavior. The complete scraper gate passed
     with 311 tests; catalogue lint/type/fast tests and installed composition
     remained green.
+  - Optional transport capabilities now use runtime-checkable protocols and a
+    shared wrapper-forwarding implementation. Request-scoped rotation keeps
+    attempt context through rate limiting, while browser subrequest accounting
+    remains fail-closed through runtime and routed composition. The complete
+    scraper gate passed with 313 tests; catalogue lint/type/fast tests and
+    installed composition remained green.
   - The provider-neutral durable Webshare composition and existing Decodo and
     Webshare adapter suites passed 29 focused tests.
   - The strict Webshare gateway-secret contract passed 47 focused tests.

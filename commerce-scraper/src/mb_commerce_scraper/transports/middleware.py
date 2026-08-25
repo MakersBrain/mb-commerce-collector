@@ -16,6 +16,7 @@ from .base import (
     RequestBudget,
     RequestObservation,
     RequestObservationPhase,
+    RequestScopedIdentityRotation,
     ResponseBodyTooLarge,
     ResponseCache,
     RobotsChecker,
@@ -509,13 +510,8 @@ class MiddlewareTransport(CommerceTransport):
         reason: RotationReason,
         request: TransportRequest,
     ) -> None:
-        traced_rotation = getattr(
-            self._backend,
-            "rotate_identity_for_request",
-            None,
-        )
-        if traced_rotation is not None:
-            await traced_rotation(reason, request)
+        if isinstance(self._backend, RequestScopedIdentityRotation):
+            await self._backend.rotate_identity_for_request(reason, request)
             return
         await self._backend.rotate_identity(reason)
 

@@ -318,6 +318,60 @@ class CommerceTransport(Protocol):
     async def rotate_identity(self, reason: RotationReason) -> None: ...
 
 
+@runtime_checkable
+class RequestScopedIdentityRotation(Protocol):
+    """Optional rotation capability retaining the triggering request context."""
+
+    async def rotate_identity_for_request(
+        self, reason: RotationReason, request: TransportRequest
+    ) -> None: ...
+
+
+@runtime_checkable
+class BrowserSubrequestAuthorizedTransport(Protocol):
+    """Marker for transports whose browser traffic owns per-request tokens."""
+
+    browser_subrequests_authorized: Literal[True]
+
+
+def browser_subrequests_authorized(value: object) -> bool:
+    return (
+        isinstance(value, BrowserSubrequestAuthorizedTransport)
+        and value.browser_subrequests_authorized is True
+    )
+
+
+class TransportCapabilityForwarder:
+    """Forward optional capabilities through a transport wrapper in one place."""
+
+    _rotation_capability_backend: CommerceTransport
+    _browser_capability_backend: object | None
+
+    def _forward_transport_capabilities(
+        self,
+        rotation_backend: CommerceTransport,
+        *,
+        browser_backend: object | None = None,
+    ) -> None:
+        self._rotation_capability_backend = rotation_backend
+        self._browser_capability_backend = (
+            rotation_backend if browser_backend is None else browser_backend
+        )
+
+    async def rotate_identity_for_request(
+        self, reason: RotationReason, request: TransportRequest
+    ) -> None:
+        backend = self._rotation_capability_backend
+        if isinstance(backend, RequestScopedIdentityRotation):
+            await backend.rotate_identity_for_request(reason, request)
+            return
+        await backend.rotate_identity(reason)
+
+    @property
+    def browser_subrequests_authorized(self) -> bool:
+        return browser_subrequests_authorized(self._browser_capability_backend)
+
+
 class ResponseCache(Protocol):
     async def get(self, request: TransportRequest) -> TransportResponse | None: ...
     async def put(self, request: TransportRequest, response: TransportResponse) -> None: ...
