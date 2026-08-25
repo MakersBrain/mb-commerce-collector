@@ -70,6 +70,7 @@ from mb_commerce_scraper.transports import (
     TransportRequest,
 )
 
+from ._request_profiles import LEGACY_BROWSER_USER_AGENT
 from .base import (
     BrowserRequirement,
     CommerceConnector,
@@ -126,7 +127,14 @@ class _WixTransport:
         response = await self.transport.request(
             TransportRequest(
                 url=url,
-                headers={"Accept": accept} if accept else {},
+                headers={
+                    **({"Accept": accept} if accept else {}),
+                    **(
+                        {}
+                        if rendered or accept is not None
+                        else {"user-agent": LEGACY_BROWSER_USER_AGENT}
+                    ),
+                },
                 purpose=(RequestPurpose.DISCOVERY if accept else RequestPurpose.ENTITY),
                 priority=(RequestPriority.DISCOVERY if accept else RequestPriority.IDENTITY),
                 estimated_bytes=2_000_000,

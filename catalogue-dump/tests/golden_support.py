@@ -44,6 +44,7 @@ REQUIRED_RECORDED_SOURCES = {
     "amaco": "bigcommerce",
     "ceradel": "shopify",
     "ceramique-peinture": "shopify",
+    "e-cibas": "wix",
     "penguin-pottery": "shopify",
     "keramikbedarf-online": "shopware",
     "mayco": "woocommerce",

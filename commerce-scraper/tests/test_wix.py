@@ -8,6 +8,9 @@ import pytest
 from pydantic import ValidationError
 
 from mb_commerce_scraper import CollectionRequest, DiagnosticCode, SnapshotField
+from mb_commerce_scraper.connectors._request_profiles import (
+    LEGACY_BROWSER_USER_AGENT,
+)
 from mb_commerce_scraper.connectors.base import ConnectorContext
 from mb_commerce_scraper.connectors.wix import WixConnector, WixFactory, WixOptions
 from mb_commerce_scraper.proxy import ProxyBudgetExhausted
@@ -138,6 +141,9 @@ async def test_warmup_payload_emits_neutral_price_stock_and_documents() -> None:
     assert [offer.price.amount for offer in first.offers] == [11, 14]
     assert first.stock is not None and first.stock.quantity == 3
     assert second.stock is not None and second.stock.quantity == 0
+    assert transport.requests[1].headers == {
+        "user-agent": LEGACY_BROWSER_USER_AGENT
+    }
     assert [
         (item.url, item.purpose, item.browser, item.estimated_bytes)
         for item in transport.requests

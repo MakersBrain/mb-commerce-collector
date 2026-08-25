@@ -107,6 +107,29 @@ def _bounded_woocommerce_legacy(payload: dict[str, Any]) -> dict[str, Any]:
     return {**payload, "records": records}
 
 
+def _bounded_wix_legacy(payload: dict[str, Any]) -> dict[str, Any]:
+    """Project Wix product/variant raw values through neutral extensions."""
+    records: list[dict[str, Any]] = []
+    for original in payload["records"]:
+        raw = original["raw"]
+        product: Any = {"legacy_raw_product": raw["product"]}
+        variant: Any = {"legacy_raw_variant": raw["variant"]}
+        product = sanitize_json_value(sanitize_json_value(product))
+        variant = sanitize_json_value(sanitize_json_value(variant))
+        assert isinstance(product, dict)
+        assert isinstance(variant, dict)
+        records.append(
+            {
+                **original,
+                "raw": {
+                    "product": product["legacy_raw_product"],
+                    "variant": variant["legacy_raw_variant"],
+                },
+            }
+        )
+    return {**payload, "records": records}
+
+
 def _recorded_shopify_sources() -> list[str]:
     configured = support.sources()
     return [
@@ -152,6 +175,7 @@ RECORDED_BIGCOMMERCE = [
 RECORDED_SIO2 = _recorded_source_case("sio-2")
 RECORDED_PRESTASHOP = _recorded_source_case("1240-design")
 RECORDED_WOOCOMMERCE = _recorded_source_case("mayco")
+RECORDED_WIX = _recorded_source_case("e-cibas")
 
 
 @pytest.mark.golden
@@ -374,4 +398,14 @@ def test_recorded_woocommerce_responses_have_legacy_library_projection_parity(
 ) -> None:
     _assert_recorded_keyed_projection_parity(
         source, "library_woocommerce_connector", _bounded_woocommerce_legacy
+    )
+
+
+@pytest.mark.golden
+@pytest.mark.parametrize("source", RECORDED_WIX)
+def test_recorded_wix_responses_have_legacy_library_projection_parity(
+    source: str,
+) -> None:
+    _assert_recorded_keyed_projection_parity(
+        source, "library_wix_connector", _bounded_wix_legacy
     )
