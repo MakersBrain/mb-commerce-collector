@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, cast
 from urllib.parse import urljoin
@@ -94,6 +96,13 @@ _KEYED_INVENTORY = re.compile(
     r'["\']inventory_quantity["\']\s*:\s*(?P<quantity>-?\d+)',
     re.DOTALL,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _InventoryResult:
+    detail: dict[str, Any] | None = None
+    failed: bool = False
+    deferred: bool = False
 
 
 class ShopifyOptions(BaseModel):
@@ -317,43 +326,41 @@ class ShopifyConnector(CommerceConnector):
         batch_size = self.options.inventory_batch_size
         for offset in range(0, len(products), batch_size):
             batch = products[offset : offset + batch_size]
-            for index, product in enumerate(batch):
+            pending: list[tuple[dict[str, Any], TransportRequest]] = []
+            for product in batch:
                 request = self._inventory_request(product, origin)
                 if request is None:
                     failures += 1
                     continue
-                if not self._optional_affordable(request, discovery_url):
-                    deferred += len(products) - offset - index
+                pending.append((product, request))
+
+            while pending:
+                admitted = self._inventory_admission_count(
+                    [request for _, request in pending], discovery_url
+                )
+                if admitted == 0:
+                    deferred += len(pending) + len(products) - offset - len(batch)
                     break
-                try:
-                    response = await self.transport.request(request)
-                    if response.status >= 400:
-                        raise RuntimeError(
-                            f"inventory request failed with status {response.status}"
-                        )
-                    if self.options.inventory_method == "product_json":
-                        detail = response.json_value()
-                        detail = detail if isinstance(detail, dict) else {}
-                    else:
-                        variant_ids = {
-                            str(item.get("id"))
-                            for item in product.get("variants") or []
-                            if isinstance(item, dict) and item.get("id")
-                        }
-                        detail = {
-                            "variants": list(
-                                self._inventory_from_html(
-                                    response.text(), variant_ids
-                                ).values()
-                            )
-                        }
-                except BudgetExhausted:
-                    deferred += len(products) - offset - index
+                wave = pending[:admitted]
+                pending = pending[admitted:]
+                results = await asyncio.gather(
+                    *(
+                        self._inventory_detail(product, request)
+                        for product, request in wave
+                    )
+                )
+                exhausted = False
+                for (product, _), result in zip(wave, results, strict=True):
+                    if result.deferred:
+                        deferred += 1
+                        exhausted = True
+                    elif result.failed:
+                        failures += 1
+                    elif result.detail is not None:
+                        self._merge_inventory(product, result.detail)
+                if exhausted:
+                    deferred += len(pending) + len(products) - offset - len(batch)
                     break
-                except (RuntimeError, ValueError):
-                    failures += 1
-                else:
-                    self._merge_inventory(product, detail)
             if deferred:
                 break
             if offset + batch_size < len(products):
@@ -372,6 +379,74 @@ class ShopifyConnector(CommerceConnector):
                 affects_completeness=False,
             ),
         )
+
+    async def _inventory_detail(
+        self, product: dict[str, Any], request: TransportRequest
+    ) -> _InventoryResult:
+        try:
+            response = await self.transport.request(request)
+            if response.status >= 400:
+                raise RuntimeError(
+                    f"inventory request failed with status {response.status}"
+                )
+            if self.options.inventory_method == "product_json":
+                value = response.json_value()
+                detail = value if isinstance(value, dict) else {}
+            else:
+                variant_ids = {
+                    str(item.get("id"))
+                    for item in product.get("variants") or []
+                    if isinstance(item, dict) and item.get("id")
+                }
+                detail = {
+                    "variants": list(
+                        self._inventory_from_html(
+                            response.text(), variant_ids
+                        ).values()
+                    )
+                }
+        except BudgetExhausted:
+            return _InventoryResult(deferred=True)
+        except (RuntimeError, ValueError):
+            return _InventoryResult(failed=True)
+        return _InventoryResult(detail=detail)
+
+    def _inventory_admission_count(
+        self, requests: list[TransportRequest], discovery_url: str
+    ) -> int:
+        budget = self.context.budget
+        if budget is None:
+            return len(requests)
+
+        missing = object()
+        maximum_requests = getattr(budget, "maximum_requests", missing)
+        used_requests = getattr(budget, "requests", missing)
+        if maximum_requests is None:
+            capacity = len(requests)
+        elif isinstance(maximum_requests, int) and isinstance(used_requests, int):
+            capacity = max(0, maximum_requests - used_requests - 1)
+        else:
+            # An opaque budget cannot reserve several concurrent authorizations
+            # atomically, so admit one request and reassess after it settles.
+            capacity = 1
+
+        admitted = 0
+        estimated_bytes = self.options.discovery_request_estimated_bytes
+        for request in requests[:capacity]:
+            estimated_bytes += request.estimated_bytes
+            reserve = request.model_copy(
+                update={
+                    "url": discovery_url,
+                    "purpose": RequestPurpose.DISCOVERY,
+                    "priority": RequestPriority.DISCOVERY,
+                    "required": True,
+                    "estimated_bytes": estimated_bytes,
+                }
+            )
+            if not budget.affordable(reserve):
+                break
+            admitted += 1
+        return admitted
 
     def _inventory_request(
         self, product: dict[str, Any], origin: str

@@ -1,7 +1,10 @@
+import asyncio
+import json
 import re
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import cast
 
 import pytest
 
@@ -14,7 +17,14 @@ from mb_commerce_scraper.testing import (
     assert_checkpoint_matches,
     assert_connector_pages,
 )
-from mb_commerce_scraper.transports import MemoryRequestBudget, MiddlewareTransport
+from mb_commerce_scraper.transports import (
+    MemoryRequestBudget,
+    MiddlewareTransport,
+    PerOriginRateLimiter,
+    RotationReason,
+    TransportRequest,
+    TransportResponse,
+)
 
 NOW = datetime(2026, 8, 15, tzinfo=UTC)
 
@@ -289,6 +299,124 @@ async def test_inventory_batches_rotate_between_configured_groups() -> None:
     assert all(stock is not None for stock in stocks)
     assert [stock.quantity for stock in stocks if stock is not None] == [1, 2, 3]
     assert [reason.value for reason in transport.rotations] == ["explicit"]
+
+
+async def test_inventory_batches_run_concurrently_and_merge_in_product_order() -> None:
+    class CoordinatedTransport:
+        def __init__(self) -> None:
+            self.active = 0
+            self.maximum_active = 0
+            self.first_started = asyncio.Event()
+            self.second_finished = asyncio.Event()
+            self.completions: list[int] = []
+            self.rotations: list[RotationReason] = []
+
+        async def request(self, request: TransportRequest) -> TransportResponse:
+            identifier = int(request.url.removesuffix(".js").rsplit("-", 1)[-1])
+            self.active += 1
+            self.maximum_active = max(self.maximum_active, self.active)
+            try:
+                if identifier == 1:
+                    self.first_started.set()
+                    await self.second_finished.wait()
+                elif identifier == 2:
+                    await self.first_started.wait()
+                    self.second_finished.set()
+                self.completions.append(identifier)
+                return TransportResponse(
+                    status=200,
+                    content=json.dumps(
+                        {
+                            "variants": [
+                                {
+                                    "id": identifier * 10,
+                                    "inventory_quantity": identifier,
+                                    "inventory_management": "shopify",
+                                    "inventory_policy": "deny",
+                                }
+                            ]
+                        }
+                    ).encode(),
+                    final_url=request.url,
+                )
+            finally:
+                self.active -= 1
+
+        async def rotate_identity(self, reason: RotationReason) -> None:
+            assert self.active == 0
+            self.rotations.append(reason)
+
+    backend = CoordinatedTransport()
+    transport = MiddlewareTransport(
+        backend,
+        rate_limiter=PerOriginRateLimiter(concurrency=2),
+        retries=0,
+    )
+    connector = ShopifyConnector(
+        transport,
+        ShopifyOptions(
+            currency="EUR", inventory_method="product_json", inventory_batch_size=2
+        ),
+    )
+    products = [product(index) for index in range(1, 4)]
+
+    diagnostics = await connector._enrich_inventory(
+        products, "https://shop.test", "https://shop.test/products.json"
+    )
+
+    assert diagnostics == ()
+    assert backend.maximum_active == 2
+    assert backend.completions == [2, 1, 3]
+    assert backend.rotations == [RotationReason.EXPLICIT]
+    assert [
+        cast(list[dict[str, object]], item["variants"])[0]["inventory_quantity"]
+        for item in products
+    ] == [1, 2, 3]
+
+
+async def test_inventory_batch_cancellation_cancels_in_flight_requests() -> None:
+    class BlockingTransport:
+        def __init__(self) -> None:
+            self.started = 0
+            self.cancelled = 0
+            self.all_started = asyncio.Event()
+            self.block = asyncio.Event()
+
+        async def request(self, request: TransportRequest) -> TransportResponse:
+            self.started += 1
+            if self.started == 3:
+                self.all_started.set()
+            try:
+                await self.block.wait()
+            except asyncio.CancelledError:
+                self.cancelled += 1
+                raise
+            raise AssertionError("blocking request unexpectedly released")
+
+        async def rotate_identity(self, reason: RotationReason) -> None:
+            raise AssertionError(f"unexpected rotation: {reason}")
+
+    transport = BlockingTransport()
+    connector = ShopifyConnector(
+        transport,
+        ShopifyOptions(
+            currency="EUR", inventory_method="product_json", inventory_batch_size=3
+        ),
+    )
+    task = asyncio.create_task(
+        connector._enrich_inventory(
+            [product(index) for index in range(1, 4)],
+            "https://shop.test",
+            "https://shop.test/products.json",
+        )
+    )
+    await transport.all_started.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert transport.cancelled == 3
 
 
 async def test_inventory_budget_reserves_the_next_discovery_page() -> None:

@@ -460,7 +460,7 @@ behavioral consequences and should be scheduled on its own.**
   files, the full fast suite (938 passed, 2 skipped, 187 deselected, 284
   subtests), and installed two-wheel composition passed.
 
-- [ ] **C6 Actually run requests concurrently.** *(schedule separately)*
+- [x] **C6 Actually run requests concurrently.** *(schedule separately)*
   `_enrich_inventory` issues one HTTP request per product, strictly
   sequentially — for a 250-product `products.json` page, 250 serialized round
   trips. The requests are independent, and `PerOriginRateLimiter` already has a
@@ -476,6 +476,25 @@ behavioral consequences and should be scheduled on its own.**
   ordering within a batch become non-deterministic; that accounting needs
   reworking, and D8 is the matching ceiling on the application side. Treat this
   as a feature with its own tests, not a cleanup.
+  **Completed.** Shopify inventory requests now run concurrently within each
+  configured batch, leaving `PerOriginRateLimiter` to enforce the effective
+  in-flight ceiling. Completed details are merged in original product order,
+  and identity rotation occurs only after the whole batch settles. Budgeted
+  collections use deterministic prefix admission: cumulative estimated bytes
+  and request slots reserve one following discovery request, then admission is
+  reassessed after each wave against reconciled usage. Opaque third-party
+  budgets admit one request per wave because they cannot reserve concurrent
+  authorizations atomically. Expected request and decode failures are reduced
+  in product order; parent cancellation propagates to every in-flight request.
+  *Verified:* focused Shopify coverage passed 18 tests, including forced
+  overlap under a concurrency ceiling of two, out-of-order completion with
+  ordered projection, post-settlement rotation, cancellation of three active
+  requests, and discovery-budget preservation. `make scraper-check` passed
+  with 360 tests, Ruff, mypy over 76 files, schemas, package and
+  installed-wheel contracts, custom-connector verification, and release
+  checks. Catalogue Ruff, mypy over 240 files, the full fast suite (938 passed,
+  2 skipped, 187 deselected, 284 subtests), and installed two-wheel composition
+  passed.
 
 ---
 

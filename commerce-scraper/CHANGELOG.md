@@ -70,6 +70,10 @@ based on Keep a Changelog, and releases follow the compatibility policy in
   concurrency-safe LRU eviction, active-stream draining, and prompt closure.
 - Added a bounded per-host DNS cache to `URLPolicy`, with successful public
   resolutions retained for 60 seconds and concurrent lookups coalesced.
+- Shopify inventory enrichment now runs each configured batch concurrently,
+  with the per-origin limiter enforcing the in-flight ceiling. Budget-aware
+  admission retains capacity for the next discovery page, results merge in
+  product order, and identity rotation waits for the batch to settle.
 
 Before tagging the first release, move these notes under
 `## [0.1.0] - YYYY-MM-DD` and retain an empty `## [Unreleased]` section above
