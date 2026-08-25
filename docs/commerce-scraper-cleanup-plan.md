@@ -439,7 +439,7 @@ the paid-traffic path and depend on Track 0.1.
   `tests/test_commerce_scraper_proxy.py` moves onto the shared pool.
   *Depends on:* 0.1. *Pairs with:* D1.
 
-- [ ] **D3 Share the browser transport dispatch.**
+- [x] **D3 Share the browser transport dispatch.**
   `BorrowedBrowserTransport.request` and `CamoufoxProxyBrowserTransport.request`
   share ~55 identical lines — query-merged endpoint, `_browser_page_url`, both
   `_origin_policy.validate` calls, and the three-way evaluation /
@@ -450,6 +450,20 @@ the paid-traffic path and depend on Track 0.1.
   once in the free path, once in the paid-proxy path.
   Extract a module-level `_dispatch(...)`; each transport keeps its own
   try/except and accounting. Behavior-preserving.
+  **Completed.** One `_dispatch(...)` now owns query merging, referer-derived
+  page selection, both pre-I/O origin checks, lazy session acquisition, the
+  evaluation/render/fetch branch, final-origin validation, and neutral response
+  assembly. `_BrowserSessionOwner` also replaces both copies of lazy session
+  entry and cleanup while retaining the optional application job binding.
+  Borrowed transport still owns conservative logical-request accounting,
+  response-size enforcement, rotation, and placement-error preservation;
+  proxy transport still owns callback deltas, cancellation accounting,
+  provider error detachment, and backend shutdown. A new proxy regression
+  mirrors the borrowed-path test for a denied post-dispatch final origin and
+  proves its accounted failure remains secret-free.
+  *Verified:* all 15 focused browser composition tests passed. Catalogue Ruff
+  and mypy over 239 files passed; `pytest -q` -> 937 passed, 2 skipped, 187
+  deselected, and 284 subtests; installed two-wheel composition passed.
 
 - [ ] **D4 One support module for the site plugins.**
   `commerce_scraper_axner.py`, `commerce_scraper_keramik_kraft.py` and

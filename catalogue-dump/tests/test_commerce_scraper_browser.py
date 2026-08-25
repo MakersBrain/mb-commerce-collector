@@ -395,6 +395,7 @@ class FakeSession:
         self.resume = asyncio.Event()
         self.gated = False
         self.browser_requests: list[dict[str, Any]] = []
+        self.final_url: str | None = None
 
     async def render(
         self, url: str, wait_ms: int = 1500, wait_for: str | None = None
@@ -417,7 +418,9 @@ class FakeSession:
     ) -> BrowserEvaluationResult:
         del script, wait_ms, wait_for
         self.accounting.record(100, 200, 2)
-        return BrowserEvaluationResult(value={"ok": True}, final_url=url)
+        return BrowserEvaluationResult(
+            value={"ok": True}, final_url=self.final_url or url
+        )
 
     async def request(
         self,
@@ -442,7 +445,7 @@ class FakeSession:
             status=201,
             headers={"content-type": "application/json"},
             content=b'{"data":{"ok":true}}',
-            final_url=endpoint,
+            final_url=self.final_url or endpoint,
         )
 
     async def request_json(self, *_args: Any, **_kwargs: Any) -> Any:
@@ -622,6 +625,28 @@ async def test_proxy_browser_rejects_unapproved_referer_before_session_io() -> N
 
     assert caught.value.accounting.physical_requests == 0
     assert backends[0].opened == 0
+    await transport.aclose()
+
+
+async def test_proxy_browser_rejects_off_origin_final_url_after_dispatch() -> None:
+    transport, _captured, backends = await build_transport()
+    backends[0].session.final_url = "https://other.test/private"
+
+    with pytest.raises(TransportFailure, match="BrowserOriginDenied") as caught:
+        await transport.request(
+            TransportRequest(
+                method="POST",
+                url="https://shop.test/graphql",
+                json_body={"query": "products"},
+                purpose=RequestPurpose.DISCOVERY,
+                priority=RequestPriority.DISCOVERY,
+                browser=BrowserHint.REQUIRED,
+            )
+        )
+
+    assert "other.test" not in str(caught.value)
+    assert caught.value.accounting is not None
+    assert caught.value.accounting.physical_requests == 2
     await transport.aclose()
 
 

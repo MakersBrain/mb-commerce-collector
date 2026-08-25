@@ -142,6 +142,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `f99d757` — make optional transport capabilities explicit.
 - `edcc179` — extract the shared page engine and nested options model.
 - `ad8f399` — derive canary routes from connector factory plans.
+- `9d5ba26` — centralize static process environment in deployment roles.
 
 ### Verification at last review
 
@@ -185,7 +186,7 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - [x] Full catalogue verification:
   - Ruff passed.
   - Mypy passed for 239 source and test files.
-  - 936 tests passed, 2 skipped, 187 deselected, and 284 subtests passed in the
+  - 937 tests passed, 2 skipped, 187 deselected, and 284 subtests passed in the
     latest fast-suite run; the wider repository fast gate also passed 32
     control-plane tests, 14 service tests, and 2 explorer tests.
   - The lower fast-test count reflects deletion of the obsolete specialized
@@ -298,6 +299,11 @@ architecture rules in the plan and are not separate scope-expansion goals.
     table column; the renderer has no control/worker process-name branches.
     Exact generated environment assertions and the complete 32-test Podman
     deployment suite passed with deployment-tree Ruff.
+  - Borrowed and paid-proxy browser transports now share one origin-safe
+    session dispatch and lazy session owner while retaining separate lifecycle,
+    accounting, response-limit, cancellation, and error-mapping policy. All 15
+    focused browser tests and the full 937-test catalogue suite passed with
+    Ruff, mypy, and installed two-wheel composition.
   - The provider-neutral durable Webshare composition and existing Decodo and
     Webshare adapter suites passed 29 focused tests.
   - The strict Webshare gateway-secret contract passed 47 focused tests.
