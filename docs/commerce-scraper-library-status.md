@@ -152,13 +152,15 @@ architecture rules in the plan and are not separate scope-expansion goals.
 - `0947bcc` — reuse request-scoped cache lookups.
 - `2f89a4a` — tokenize verified DOM products once.
 - `75fe31b` — bound owned HTTPX client pools.
+- `7c3b9e8` — cache validated DNS resolutions per host.
+- `4b666d7` — enrich Shopify inventory concurrently within bounded batches.
 
 ### Verification at last review
 
 - [x] `make scraper-check`
   - Ruff passed.
   - Mypy passed for 76 source and test files.
-  - 358 library tests passed. Version-0 checkpoint compatibility and its
+  - 360 library tests passed. Version-0 checkpoint compatibility and its
     library test suite were removed before the first release.
   - Wheel and source distribution built.
   - 5 dependency-boundary tests passed.
