@@ -684,7 +684,7 @@ remains a Phase 7 cutover gate rather than a Phase 1 contract-extraction gap.
   - Catalogue compatibility adapters bound rendered text, browser JSON, and
     compressed/decompressed sitemap content, while durable worker errors are
     centrally redacted and bounded.
-- [~] Demonstrate recorded-response parity with the legacy direct path.
+- [x] Demonstrate recorded-response parity with the legacy direct path.
   - A golden-marked Shopify gate opens independent replay-only legacy and
     library sessions over the production `ResponseCache`, anchors legacy output
     to the frozen golden, and compares complete normalized output, coverage,
@@ -712,14 +712,18 @@ remains a Phase 7 cutover gate rather than a Phase 1 contract-extraction gap.
   - Mayco stable/library WooCommerce replay matches all 1,266 identity rows,
     882 discoveries, 21 direct requests, zero renders, and exact
     completion/error semantics.
+  - Wix, Starweb, NitroSell, and SumUp complete the recovered framework matrix.
+    All 14 preflight/source cases pass together; connector-specific discovery
+    differences are explicitly pinned where neutral entity accounting is more
+    precise than flattened legacy URL accounting.
   - CI sets `CATALOGUE_GOLDEN_ARCHIVE_REQUIRED=1` only after the configured
     archive pull succeeds. In that mode, missing manifests, source hosts,
     recordings, or frozen outputs fail before the parity cases can silently
     skip. Local archive-free runs retain their explicit skips.
 
-Exit criterion: **not met**. Selected direct-path replay parity is demonstrated,
-but the versioned CI archive and migration-wide application composition remain
-incomplete.
+Exit criterion: **not met**. Direct-path replay parity is demonstrated across
+every reviewed recovered framework recording, but the versioned CI archive and
+production migration evidence remain incomplete.
 
 ## Phase 3 — Shopify vertical slice
 
@@ -1230,10 +1234,10 @@ Cross-cutting work:
     Shopware, Starweb, NitroSell, and SumUp paths use the contextual harness.
     Focused specialized cases also prove pre-I/O cancellation and rejection of
     unsupported incremental collection without an exhaustive low-value matrix.
-- [~] Run recorded-response replay and ceramics projection comparisons.
+- [x] Run recorded-response replay and ceramics projection comparisons.
   - The first page-based gate passes for `keramikbedarf-online` and Shopware:
     both paths discover and project 72 rows with identical normalized output,
-    coverage, errors, and terminal semantics. Other framework families remain.
+    coverage, errors, and terminal semantics.
   - Recovered Amaco and Speedball recordings pass the BigCommerce gate with
     1,008 projected rows, 1,383 discovered products, and 31 replay requests.
     Semantic output is exact after preserving the legacy configured-brand
@@ -1265,13 +1269,13 @@ Cross-cutting work:
     and 85 requests. Option attributes and raw variant evidence match exactly;
     the product sitemap's shop-home entry is counted and skipped without
     truncating enumeration.
-- [~] Review request counts and byte estimates.
+- [x] Review request counts and byte estimates.
   - Focused traffic profiles now pin exact logical request order, purpose,
     browser hint, and byte estimate for WooCommerce, PrestaShop/Sio2,
     BigCommerce, Wix, Shopware, Starweb, NitroSell, and SumUp. BigCommerce also
     proves an origin-equal token page does not multiply direct/rendered probes.
-    The compact five-module slice passed 56 tests. Empirical recorded-response
-    totals remain pending with the external archive.
+    The compact five-module slice passed 56 tests. Recovered-response replay
+    now pins the empirical request totals for every reviewed framework source.
 - [~] Review direct, browser, and proxy behavior.
   - The same profiles prove direct-only WooCommerce, PrestaShop/Sio2,
     Shopware, Starweb, NitroSell, and SumUp paths; BigCommerce direct-to-rendered
@@ -1281,9 +1285,9 @@ Cross-cutting work:
 - [ ] Canary representative sources.
 - [ ] Document intentional differences and switch stable source keys.
 
-Exit criterion: **not met**. Code extraction and native synthetic worker gates
-cover every listed framework connector; recorded replay and real source
-canaries have not run.
+Exit criterion: **not met**. Code extraction, native synthetic worker gates,
+and recorded replay cover every listed framework connector; real source
+canaries and stable-source promotions have not run.
 
 ## Phase 7 — Catalogue cutover
 
