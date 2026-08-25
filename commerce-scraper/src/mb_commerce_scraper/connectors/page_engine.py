@@ -17,6 +17,7 @@ from mb_commerce_scraper.discovery import (
     advertised_sitemaps,
 )
 from mb_commerce_scraper.models import (
+    CategoryRef,
     CollectionRequest,
     CommerceProductSnapshot,
     ConnectorCheckpoint,
@@ -37,6 +38,7 @@ from mb_commerce_scraper.parsing import JsonLdProductParser
 from mb_commerce_scraper.parsing._structured import (
     DomFieldSelector,
     VerifiedDomRules,
+    breadcrumbs,
     dom_product,
     jsonld_products,
     microdata_products,
@@ -64,6 +66,17 @@ from .base import (
     validate_connector_request,
 )
 from .factory import ConnectorPlan
+
+PAGE_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+)
+
+
+def _page_request_headers(browser: BrowserHint) -> dict[str, str]:
+    if browser is BrowserHint.REQUIRED:
+        return {}
+    return {"user-agent": PAGE_BROWSER_USER_AGENT}
 
 
 class DiscoveryOptions(BaseModel):
@@ -288,18 +301,18 @@ class PageEngineConnector(CommerceConnector):
                 return
             url = discovered_urls[current]
             initial_browser = self.options.render is True
+            browser = (
+                BrowserHint.REQUIRED if initial_browser else BrowserHint.NEVER
+            )
             try:
                 response = await self.transport.request(
                     TransportRequest(
                         url=url,
+                        headers=_page_request_headers(browser),
                         purpose=RequestPurpose.ENTITY,
                         priority=RequestPriority.IDENTITY,
                         estimated_bytes=500_000,
-                        browser=(
-                            BrowserHint.REQUIRED
-                            if initial_browser
-                            else BrowserHint.NEVER
-                        ),
+                        browser=browser,
                     )
                 )
             except (BudgetExhausted, ResponseBodyTooLarge, TransportFailure) as error:
@@ -614,6 +627,9 @@ class PageEngineConnector(CommerceConnector):
     ) -> tuple[CommerceProductSnapshot, ...]:
         method: Literal["jsonld", "html"] = "jsonld" if parser == "jsonld" else "html"
         specifications = cast(dict[str, JsonValue], specification_table(document))
+        page_categories = tuple(
+            CategoryRef(name=name) for name in breadcrumbs(document)
+        )
         output: list[CommerceProductSnapshot] = []
         for snapshot in self._retag(snapshots):
             platform_extensions = dict(snapshot.platform_extensions)
@@ -686,6 +702,7 @@ class PageEngineConnector(CommerceConnector):
                 snapshot.model_copy(
                     update={
                         "variants": tuple(variants),
+                        "categories": snapshot.categories or page_categories,
                         "documents": (*snapshot.documents, *documents),
                         "platform_extensions": {
                             **platform_extensions,
@@ -745,6 +762,7 @@ class PageEngineConnector(CommerceConnector):
             response = await self.transport.request(
                 TransportRequest(
                     url=url,
+                    headers=_page_request_headers(BrowserHint.NEVER),
                     purpose=RequestPurpose.DISCOVERY,
                     priority=RequestPriority.DISCOVERY,
                     estimated_bytes=500_000,

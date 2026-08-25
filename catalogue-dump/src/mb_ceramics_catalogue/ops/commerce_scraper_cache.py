@@ -172,7 +172,7 @@ class CatalogueResponseCache:
             method=request.method,
             params=request.query or None,
             body=request.json_body,
-            agent=False,
+            agent=_has_user_agent(request.headers),
         )
 
     @staticmethod
@@ -198,3 +198,7 @@ class CatalogueResponseCache:
             if request.browser is BrowserHint.REQUIRED
             else "http"
         )
+
+
+def _has_user_agent(headers: dict[str, str]) -> bool:
+    return any(name.casefold() == "user-agent" for name in headers)

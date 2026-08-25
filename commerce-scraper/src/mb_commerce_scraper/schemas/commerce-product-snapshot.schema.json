@@ -3,9 +3,11 @@
     "Availability": {
       "enum": [
         "in_stock",
+        "limited",
         "out_of_stock",
         "backorder",
         "preorder",
+        "discontinued",
         "unknown"
       ],
       "title": "Availability",

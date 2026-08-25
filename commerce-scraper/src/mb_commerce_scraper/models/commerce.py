@@ -29,9 +29,11 @@ class ContractModel(BaseModel):
 
 class Availability(StrEnum):
     IN_STOCK = "in_stock"
+    LIMITED = "limited"
     OUT_OF_STOCK = "out_of_stock"
     BACKORDER = "backorder"
     PREORDER = "preorder"
+    DISCONTINUED = "discontinued"
     UNKNOWN = "unknown"
 
 

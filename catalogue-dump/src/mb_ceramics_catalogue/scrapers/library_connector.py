@@ -61,13 +61,19 @@ class _CountingFetcher:
         method: str = "GET",
         json_body: Any = None,
         headers: dict[str, str] | None = None,
+        browser_user_agent: bool = False,
     ) -> httpx.Response:
+        fetch_options: dict[str, Any] = {
+            "params": params,
+            "method": method,
+            "json_body": json_body,
+            "headers": headers,
+        }
+        if browser_user_agent:
+            fetch_options["browser_user_agent"] = True
         response = await self.fetcher.response(
             url,
-            params=params,
-            method=method,
-            json_body=json_body,
-            headers=headers,
+            **fetch_options,
         )
         self.requests += 1
         return response

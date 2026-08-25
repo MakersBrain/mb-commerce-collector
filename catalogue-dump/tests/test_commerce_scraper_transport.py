@@ -179,6 +179,17 @@ async def test_maps_http_request_response_and_safe_trace_fields() -> None:
 
 
 @pytest.mark.asyncio
+async def test_explicit_user_agent_selects_legacy_browser_profile() -> None:
+    fetcher = Fetcher()
+
+    await LegacyFetcherTransport(fetcher).request(
+        request(headers={"User-Agent": "browser-profile"})
+    )
+
+    assert fetcher.calls[0][1]["browser_user_agent"] is True
+
+
+@pytest.mark.asyncio
 async def test_base_allowed_but_denied_request_path_stops_before_fetcher_io() -> None:
     fetcher = Fetcher()
     transport = LegacyFetcherTransport(fetcher, obey_robots=True)

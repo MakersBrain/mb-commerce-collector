@@ -1,6 +1,6 @@
 # Commerce scraper connector and transport inventory
 
-Reviewed: 2026-08-22
+Reviewed: 2026-08-25
 Authoritative source configuration: `catalogue-dump/sources.json`
 Target architecture: [commerce-scraper-library-plan.md](commerce-scraper-library-plan.md)
 
@@ -12,13 +12,13 @@ they are not production-success or replay-parity claims.
 
 | Legacy scraper key | Sources | Neutral connector | Classification | Current execution status |
 |---|---:|---|---|---|
-| `shopify` | 19 | `shopify` v1 | Library built-in | Native library worker canary; stable route remains legacy |
+| `shopify` | 19 | `shopify` v1 | Library built-in | Recorded parity passes for 3 sources; native canary available; stable route remains legacy |
 | `woocommerce` | 25 | `woocommerce` v1 | Library built-in | Library implementation available; migration gates pending |
 | `prestashop` | 11 | `prestashop` v1 | Library built-in | Library implementation available; migration gates pending |
 | `sio2` | 1 | `prestashop` v1 plus catalogue projection policy | Library built-in | Library implementation available; migration gates pending |
 | `bigcommerce` | 2 | `bigcommerce` v1 | Library built-in | Library implementation available; migration gates pending |
 | `wix` | 2 | `wix` v1 | Library built-in | Library implementation available; migration gates pending |
-| `shopware` | 1 | `shopware` v1 | Library built-in | Library implementation available; migration gates pending |
+| `shopware` | 1 | `shopware` v1 | Library built-in | Recorded parity passes for the configured source; canary and stable switch pending |
 | `starweb` | 1 | `starweb` v1 | Library built-in | Library implementation available; migration gates pending |
 | `nitrosell` | 1 | `nitrosell` v1 | Library built-in | Library implementation available; migration gates pending |
 | `sumup` | 1 | `sumup` v1 | Library built-in | Library implementation available; migration gates pending |
@@ -74,6 +74,6 @@ source-owned restriction.
 Library construction is not migration. Every stable source switch still needs
 the same raw-response replay, neutral and ceramics projection comparison,
 request/byte review, limited production canary, rollback proof, and observation
-window tracked in the implementation status. The first Shopify and Shopware
-replay gates are implemented and skip explicitly; the repository currently
-lacks the raw response archive required to produce parity evidence.
+window tracked in the implementation status. Recovered production recordings
+now prove three Shopify sources and the configured Shopware source; a reviewed,
+versioned archive manifest must still be published for reproducible CI replay.

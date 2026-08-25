@@ -205,6 +205,19 @@ architecture rules in the plan and are not separate scope-expansion goals.
     middleware guarantees remain covered at the library/runtime boundaries;
     an all-source invariant now builds all 88 canonical connector/options pairs
     through the application registry instead.
+- [x] Recovered-cache migration checkpoint:
+  - The library gate passed Ruff, mypy over 76 source files, 360 tests, and the
+    frozen-schema check.
+  - The catalogue gate passed Ruff, mypy over 240 source files, and 940 tests
+    with 2 expected skips, 273 deselections, and 284 subtests.
+  - `pytest -q -m golden tests/test_recorded_library_parity.py -rs` replayed
+    independent legacy/library paths from 51,579 recovered production-response
+    entries: all 5 preflight, Shopify, and Shopware cases passed.
+  - The recovered volume is newer and broader than the checked-in golden set.
+    An archive-wide characterization produced 14 unrelated stale-baseline
+    failures, 10 passes, and 67 sources without reviewed goldens; those 67
+    provisional outputs were not added. Publishing a versioned archive and
+    manifest remains an operational CI task.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
   throwaway PostgreSQL 17 instance, covering concurrent authorization,
   capacity exclusion, and exactly-once reconciliation.
@@ -664,24 +677,26 @@ remains a Phase 7 cutover gate rather than a Phase 1 contract-extraction gap.
     compressed/decompressed sitemap content, while durable worker errors are
     centrally redacted and bounded.
 - [~] Demonstrate recorded-response parity with the legacy direct path.
-  - A golden-marked Shopify gate now opens independent replay-only legacy and
+  - A golden-marked Shopify gate opens independent replay-only legacy and
     library sessions over the production `ResponseCache`, anchors legacy output
     to the frozen golden, and compares complete normalized output, coverage,
-    completeness, errors, and request/render counts. It skips explicitly when
-    the external raw-response archive is absent; therefore the gate exists but
-    recorded parity evidence is still pending.
+    completeness, errors, and request/render counts. Three recovered production
+    recordings (`ceradel`, `ceramique-peinture`, and `penguin-pottery`) pass.
+    Library raw extensions are compared to the exact twice-sanitized projection
+    of legacy raw values; semantic fields remain byte-equivalent.
   - A second bounded gate covers `keramikbedarf-online` through the stable and
     `library_shopware_connector` paths. It anchors the legacy result to the
     frozen golden and compares projected count, coverage, sample, full digest,
-    errors, truncation, and interruption semantics. Request/discovery totals
-    remain review evidence until the archive is restored and observed.
+    errors, truncation, and interruption semantics. The recovered production
+    recording passes with 72 legacy and 72 library rows.
   - CI sets `CATALOGUE_GOLDEN_ARCHIVE_REQUIRED=1` only after the configured
     archive pull succeeds. In that mode, missing manifests, source hosts,
     recordings, or frozen outputs fail before the parity cases can silently
     skip. Local archive-free runs retain their explicit skips.
 
-Exit criterion: **not met**. Native policy/cache execution works, but recorded
-direct-path parity and migration-wide application composition are incomplete.
+Exit criterion: **not met**. Selected direct-path replay parity is demonstrated,
+but the versioned CI archive and migration-wide application composition remain
+incomplete.
 
 ## Phase 3 — Shopify vertical slice
 
@@ -713,9 +728,10 @@ direct-path parity and migration-wide application composition are incomplete.
     now enters the same application-owned native runtime as the worker and
     probe. It constructs no legacy Fetcher/session and uses direct-only local
     policy while preserving the stable source identity and result contract.
-- [~] Run the same recorded responses through legacy and library connectors.
-  - The replay-only dual-path gate is implemented and fails closed against the
-    production cache, but currently skips because the archive is absent.
+- [x] Run the same recorded responses through legacy and library connectors.
+  - Three real Shopify recordings pass the replay-only dual-path gate. The gate
+    anchors the legacy run to reviewed goldens and proves the library's complete
+    output after applying the public bounded-raw contract.
 - [x] Compare projected ceramics output for the deterministic synthetic replay.
   Recorded production-output comparison remains part of the unchecked replay
   gate above.
@@ -1192,8 +1208,9 @@ Cross-cutting work:
     Focused specialized cases also prove pre-I/O cancellation and rejection of
     unsupported incremental collection without an exhaustive low-value matrix.
 - [~] Run recorded-response replay and ceramics projection comparisons.
-  - The first page-based gate is implemented for `keramikbedarf-online` and
-    Shopware, but cannot produce evidence until the raw archive is restored.
+  - The first page-based gate passes for `keramikbedarf-online` and Shopware:
+    both paths discover and project 72 rows with identical normalized output,
+    coverage, errors, and terminal semantics. Other framework families remain.
 - [~] Review request counts and byte estimates.
   - Focused traffic profiles now pin exact logical request order, purpose,
     browser hint, and byte estimate for WooCommerce, PrestaShop/Sio2,
@@ -1459,17 +1476,13 @@ Exit criterion: **not met**.
 
 ## Immediate implementation queue
 
-1. Restore or supply the absent raw Shopify response archive, then run the new
-   cache-conditional legacy/library replay gate and projected-output shadow
-   comparison. The checkout currently contains output goldens, only two
-   synthetic `shop.test` cache entries, and no
-   `catalogue-dump/cache-archive.json`; this is not production replay evidence,
-   and its explicit skip must not be reported as recorded parity.
+1. Publish a reviewed, versioned subset of the recovered response archive to
+   the configured cache bucket and generate `catalogue-dump/cache-archive.json`
+   so CI can reproduce the now-passing Shopify and Shopware parity cases.
 2. Execute a limited production Shopify canary using the tested per-source
    rollback selector after recorded parity passes.
-3. Restore the `keramikbedarf-online` archive, run its implemented Shopware
-   projected-output parity gate, review request/discovery totals, and then run
-   a limited page-based canary.
+3. Run a limited `keramikbedarf-online` Shopware canary with the tested
+   configuration-only rollback route.
 4. Run a limited, explicitly approved routed Shopify production canary. The
    local gates now cover the real outer worker, native runtime, Shopify,
    middleware, immutable Webshare route, durable attempt accounting, summary
@@ -1504,6 +1517,13 @@ After each implementation batch:
 5. Update `Last reviewed` and add the implementing commit to the baseline.
 
 ## Accepted plan deviations
+
+- Shopify preserves upstream `raw` data subject to the library's public
+  extension-sanitization bounds instead of copying the legacy scraper's
+  unbounded objects byte-for-byte. Recorded parity therefore compares the
+  library result to the exact twice-sanitized legacy projection while retaining
+  exact equality for every semantic catalogue field. This keeps the published
+  memory/redaction contract without weakening migration evidence.
 
 - B1 resolves the previously documented parsing drift in favor of the shared
   helper behavior: specification names may contain up to 99 characters, the

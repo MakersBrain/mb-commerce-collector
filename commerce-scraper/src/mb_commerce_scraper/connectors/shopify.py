@@ -33,7 +33,7 @@ from mb_commerce_scraper.models import (
     build_checkpoint,
     result_limit_diagnostic,
 )
-from mb_commerce_scraper.parsing._structured import decimal_amount, origin_of
+from mb_commerce_scraper.parsing._structured import clean, decimal_amount, origin_of
 from mb_commerce_scraper.transports import (
     BudgetExhausted,
     CommerceTransport,
@@ -716,7 +716,7 @@ class ShopifyConnector(CommerceConnector):
         return CommerceProductSnapshot(
             connector=self.name, source_id=source_id, external_id=external_id,
             canonical_url=url, title=title, observed_at=observed,
-            description=body_html or None,
+            description=clean(body_html) or None,
             vendor=str(raw.get("vendor") or "") or None,
             categories=tuple(CategoryRef(name=value) for value in (partition if partition != "main" else "", str(raw.get("product_type") or "")) if value),
             images=tuple(

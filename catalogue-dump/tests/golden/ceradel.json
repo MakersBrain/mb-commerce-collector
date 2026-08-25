@@ -1,139 +1,126 @@
 {
-  "digest": "f189a45d3193c5f7ff23dd17a6c0c010d2482e60681b59c5f86fd568c2df1a5c",
-  "discovered": 4662,
+  "digest": "32d442fd0c55e39313a6e744fa6f310edd05eec1c014f82ec794cd29d09031b3",
+  "discovered": 4667,
   "error_count": 0,
   "errors": [],
   "extraction_method": "api_json",
   "field_coverage": {
-    "all_image_urls": 4275,
-    "brand": 4277,
+    "all_image_urls": 4303,
+    "brand": 4305,
     "category_path": 0,
-    "claims": 2151,
-    "colour": 1758,
-    "description": 4239,
+    "claims": 2173,
+    "colour": 1760,
+    "description": 4267,
     "documents": 0,
     "effects": 668,
-    "family": 4277,
-    "firing": 3688,
+    "family": 4305,
+    "firing": 3715,
     "form": 34,
     "gtin": 0,
-    "manufacturer_sku": 1055,
-    "package_size": 3966,
+    "manufacturer_sku": 1080,
+    "package_size": 3994,
     "stock_quantity": 0,
-    "supplier_reference": 4270,
-    "surface": 401,
-    "unit_price": 3966,
-    "vat_status": 4277
+    "supplier_reference": 4298,
+    "surface": 402,
+    "unit_price": 3994,
+    "vat_status": 4305
   },
   "notes": [],
-  "records": 4277,
+  "records": 4305,
   "rendered_pages": 0,
   "requests": 20,
   "sample": [
     {
       "all_image_urls": [
-        "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/MK_9826_00.jpg?v=1784125008",
-        "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/PD_9826_01.jpg?v=1784125011",
-        "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/PD_9821_9820_9826_042028129.jpg?v=1784125010"
+        "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/Spectrum-Curry-Floating-Brush-on-Glaze.jpg?v=1787300158"
       ],
       "application_methods": [
         "pouring"
       ],
-      "availability": "https://schema.org/InStock",
-      "brand": "Botz",
+      "availability": "https://schema.org/OutOfStock",
+      "brand": "Spectrum",
       "brand_basis": "named_in_title",
       "category_path": null,
       "claims": [
         {
           "basis": "published_text",
           "claim": true,
-          "evidence": "Recouvert d'un émail transparent (par exemple BOTZ 9300 ou BOTZ 9870), il révèle des couleurs vives, une finition brillante et, selon l'émail utilisé, convient à un usage alimentaire.",
+          "evidence": "Il est sans plomb et convient aux pièces destinées à un usage alimentaire.",
           "type": "food_contact_suitability"
+        },
+        {
+          "basis": "published_text",
+          "claim": true,
+          "evidence": "Il est sans plomb et convient aux pièces destinées à un usage alimentaire.",
+          "type": "lead_free"
         }
       ],
-      "coats": null,
-      "colour": null,
+      "coats": {
+        "evidence": "2 à 3 couches",
+        "maximum": 3,
+        "minimum": 2
+      },
+      "colour": {
+        "basis": "product_name",
+        "name": "ÉMAIL 1432 CURRY ("
+      },
       "currency": "EUR",
-      "description": "Notes / Application BOTZ Édition Engobe pour grès de haute qualité. Très stable à la cuisson entre 1180 et 1280 °C (cônes 4 à 9). Peut être mélangé avec les autres couleurs de la gamme BOTZ Édition. Sans émail, il offre une finition mate à l'aspect naturel, une excellente couvrance et des contours précis. Recouvert d'un émail transparent (par exemple BOTZ 9300 ou BOTZ 9870), il révèle des couleurs vives, une finition brillante et, selon l'émail utilisé, convient à un usage alimentaire. Propriétés Mat",
+      "description": "Spectrum Curry L’émail Spectrum Curry est un émail haute température à effet flottant, conçu pour une cuisson entre les cônes 4 et 6 (1 185 °C à 1 220 °C). Il est sans plomb et convient aux pièces destinées à un usage alimentaire. Veuillez respecter les instructions du fabricant. Pour obtenir une couverture complète, il est recommandé d’appliquer 2 à 3 couches. Cette gamme d’émaux est appelée « Floating Glazes » en raison de son aspect particulier : après cuisson, une couche semble flotter au-dessus d’une autre, sans qu’il soit nécessaire de superposer plusieurs émaux différents. Ces émaux réagissent particulièrement bien sur les surfaces texturées, où ils mettent en valeur les reliefs et les creux. Curry développe une teinte jaune légèrement assourdie, accompagnée de nuances sable clair dans les creux. Pour obtenir le résultat souhaité, il est recommandé d’expérimenter avec différentes épaisseurs d’application. Ces émaux peuvent être très coulants pendant la cuisson : veillez à prendre les précautions nécessaires pour protéger les plaques d’enfournement. Les visuels présentés correspondent à une cuisson au cône 5. Le rendu peut varier en fonction de la température de cuisson. L’appellation « Floating Glazes » est un terme descriptif et non un terme technique.",
       "documents": null,
       "effects": null,
-      "external_id": "ceradel:https://ceradel.fr/products/b9825-botz-edition-engobe-bamboo-1180-1280-c-1#65260880331101",
+      "external_id": "ceradel:https://ceradel.fr/products/email-1432-curry-473ml-1160-c-1220-c-spectrum#65644777242973",
       "extraction_method": "api_json",
-      "family": "engobe",
+      "family": "glaze",
       "fetched_at": "<volatile>",
       "firing": {
         "basis": "published_text",
-        "evidence": "1180° - 1280°C",
-        "max_celsius": 1280,
-        "min_celsius": 1180
+        "evidence": "1160°C - 1220°C",
+        "max_celsius": 1220,
+        "min_celsius": 1160
       },
       "form": null,
       "format": "ceramics.catalogue_item.v2",
       "gtin": null,
-      "image_url": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/MK_9826_00.jpg?v=1784125008",
+      "image_url": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/Spectrum-Curry-Floating-Brush-on-Glaze.jpg?v=1787300158",
       "list_price": null,
-      "manufacturer_sku": "B9826",
-      "manufacturer_sku_basis": "manufacturer_pattern",
+      "manufacturer_sku": null,
+      "manufacturer_sku_basis": null,
       "min_order_quantity": null,
-      "name": "BOTZ EDITION ENGOBE FLORIDA",
+      "name": "ÉMAIL 1432 CURRY (473ML) 1160°C - 1220°C",
       "name_parsed_from": [
-        "200",
-        "1180° - 1280°C",
-        "BOTZ",
-        "B9826"
+        "473",
+        "SPECTRUM"
       ],
-      "name_raw": "B9826 BOTZ EDITION ENGOBE FLORIDA 1180° - 1280°C 200",
+      "name_raw": "ÉMAIL 1432 CURRY (473ML) 1160°C - 1220°C SPECTRUM 473",
       "package_size": {
         "dimension": "volume",
-        "evidence": "200 ml",
-        "millilitres": 200.0,
+        "evidence": "473 ml",
+        "millilitres": 473.0,
         "unit": "ml",
-        "value": 200.0
+        "value": 473.0
       },
-      "parent_external_id": "ceradel:https://ceradel.fr/products/b9825-botz-edition-engobe-bamboo-1180-1280-c-1",
-      "price": 11.8,
-      "price_text": "11.80 EUR",
-      "product_name": "B9826 BOTZ EDITION ENGOBE FLORIDA 1180° - 1280°C",
-      "product_url": "https://ceradel.fr/products/b9825-botz-edition-engobe-bamboo-1180-1280-c-1",
+      "parent_external_id": "ceradel:https://ceradel.fr/products/email-1432-curry-473ml-1160-c-1220-c-spectrum",
+      "price": 23.4,
+      "price_text": "23.40 EUR",
+      "product_name": "ÉMAIL 1432 CURRY (473ML) 1160°C - 1220°C SPECTRUM",
+      "product_url": "https://ceradel.fr/products/email-1432-curry-473ml-1160-c-1220-c-spectrum",
       "raw": {
         "product": {
-          "body_html": "<p data-pasted=\"true\"><strong><u>Notes / Application</u></strong></p><p>BOTZ Édition</p><ul>\n<li>Engobe pour grès de haute qualité.</li>\n<li>Très stable à la cuisson entre 1180 et 1280 °C (cônes 4 à 9).</li>\n<li>Peut être mélangé avec les autres couleurs de la gamme BOTZ Édition.</li>\n<li>Sans émail, il offre une finition mate à l'aspect naturel, une excellente couvrance et des contours précis.</li>\n<li>Recouvert d'un émail transparent (par exemple BOTZ 9300 ou BOTZ 9870), il révèle des couleurs vives, une finition brillante et, selon l'émail utilisé, convient à un usage alimentaire.</li>\n</ul><p><strong><u>Propriétés</u></strong></p><p>Mat</p>",
-          "created_at": "2026-07-15T16:14:07+02:00",
-          "handle": "b9825-botz-edition-engobe-bamboo-1180-1280-c-1",
-          "id": 16317983785309,
+          "body_html": "<p>Spectrum Curry</p><p><br></p><p>L’émail Spectrum Curry est un émail haute température à effet flottant, conçu pour une cuisson entre les cônes 4 et 6 (1 185 °C à 1 220 °C). Il est sans plomb et convient aux pièces destinées à un usage alimentaire. Veuillez respecter les instructions du fabricant.</p><p>Pour obtenir une couverture complète, il est recommandé d’appliquer 2 à 3 couches.</p><p>Cette gamme d’émaux est appelée « Floating Glazes » en raison de son aspect particulier : après cuisson, une couche semble flotter au-dessus d’une autre, sans qu’il soit nécessaire de superposer plusieurs émaux différents. Ces émaux réagissent particulièrement bien sur les surfaces texturées, où ils mettent en valeur les reliefs et les creux.</p><p>Curry développe une teinte jaune légèrement assourdie, accompagnée de nuances sable clair dans les creux.</p><p>Pour obtenir le résultat souhaité, il est recommandé d’expérimenter avec différentes épaisseurs d’application. Ces émaux peuvent être très coulants pendant la cuisson : veillez à prendre les précautions nécessaires pour protéger les plaques d’enfournement.</p><p>Les visuels présentés correspondent à une cuisson au cône 5. Le rendu peut varier en fonction de la température de cuisson.</p><p><br></p><p><em>L’appellation « Floating Glazes » est un terme descriptif et non un terme technique.</em></p>",
+          "created_at": "2026-08-21T10:14:14+02:00",
+          "handle": "email-1432-curry-473ml-1160-c-1220-c-spectrum",
+          "id": 16442576011613,
           "images": [
             {
-              "created_at": "2026-07-15T16:16:46+02:00",
-              "height": 900,
-              "id": 84774262538589,
+              "created_at": "2026-08-21T10:15:56+02:00",
+              "height": 720,
+              "id": 96067549659485,
               "position": 1,
-              "product_id": 16317983785309,
-              "src": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/MK_9826_00.jpg?v=1784125008",
-              "updated_at": "2026-07-15T16:16:48+02:00",
+              "product_id": 16442576011613,
+              "src": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/Spectrum-Curry-Floating-Brush-on-Glaze.jpg?v=1787300158",
+              "updated_at": "2026-08-21T10:15:58+02:00",
               "variant_ids": [],
-              "width": 900
-            },
-            {
-              "created_at": "2026-07-15T16:16:46+02:00",
-              "height": 3024,
-              "id": 84774262571357,
-              "position": 2,
-              "product_id": 16317983785309,
-              "src": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/PD_9826_01.jpg?v=1784125011",
-              "updated_at": "2026-07-15T16:16:51+02:00",
-              "variant_ids": [],
-              "width": 3024
-            },
-            {
-              "created_at": "2026-07-15T16:16:46+02:00",
-              "height": 2380,
-              "id": 84774262604125,
-              "position": 3,
-              "product_id": 16317983785309,
-              "src": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/PD_9821_9820_9826_042028129.jpg?v=1784125010",
-              "updated_at": "2026-07-15T16:16:50+02:00",
-              "variant_ids": [],
-              "width": 2380
+              "width": 720
             }
           ],
           "options": [
@@ -141,64 +128,67 @@
               "name": "Volume (ml)",
               "position": 1,
               "values": [
-                "200"
+                "473"
               ]
             }
           ],
           "product_type": "",
-          "published_at": "2026-07-29T16:22:37+02:00",
+          "published_at": "2026-08-21T10:14:36+02:00",
           "tags": [
             "NOUVEAUTÉ"
           ],
-          "title": "B9826 BOTZ EDITION ENGOBE FLORIDA 1180° - 1280°C",
-          "updated_at": "2026-08-05T20:26:32+02:00",
+          "title": "ÉMAIL 1432 CURRY (473ML) 1160°C - 1220°C SPECTRUM",
+          "updated_at": "2026-08-25T03:00:46+02:00",
           "vendor": "Ceradel"
         },
         "variant": {
-          "available": true,
+          "available": false,
           "compare_at_price": null,
-          "created_at": "2026-07-15T16:14:07+02:00",
+          "created_at": "2026-08-21T10:14:14+02:00",
           "featured_image": null,
-          "grams": 300,
-          "id": 65260880331101,
-          "option1": "200",
+          "grams": 500,
+          "id": 65644777242973,
+          "option1": "473",
           "option2": null,
           "option3": null,
           "position": 1,
-          "price": "11.80",
-          "product_id": 16317983785309,
+          "price": "23.40",
+          "product_id": 16442576011613,
           "requires_shipping": true,
-          "sku": "2371701",
+          "sku": "2312201",
           "taxable": true,
-          "title": "200",
-          "updated_at": "2026-08-05T20:26:32+02:00"
+          "title": "473",
+          "updated_at": "2026-08-25T03:00:46+02:00"
         }
       },
       "source": "ceradel",
       "source_detail_level": "api",
-      "source_updated_at": "2026-08-05T20:26:32+02:00",
-      "stock_quantity": null,
-      "supplier_reference": "2371701",
+      "source_updated_at": "2026-08-25T03:00:46+02:00",
+      "stock_quantity": 0,
+      "supplier_reference": "2312201",
       "surface": null,
       "technical_attributes": {
-        "Volume (ml)": "200",
-        "shipping_weight_g": 300
+        "Volume (ml)": "473",
+        "shipping_weight_g": 500
       },
       "unit_price": {
         "currency": "EUR",
         "per": "l",
-        "value": 59.0
+        "value": 49.4715
       },
-      "variant_title": "200",
+      "variant_title": "473",
       "vat_rate": null,
       "vat_status": "inclusive"
     },
     {
       "all_image_urls": [
-        "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/MK_9825_00_4cc20684-257f-4b86-afde-f4aa7301bb2c.jpg?v=1785334926",
-        "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/PD_9825_9802_9823_01_aa6727cb-e3b8-40b3-933c-07ce64bfa262.jpg?v=1785334927"
+        "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/b9868-botz-glacier-200ml-1220-1280c.jpg?v=1747321824",
+        "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/PD_9868_1250_with-9020-white-clay.jpg?v=1752758886",
+        "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/PD_9868_1250_relief-wihte-clay.jpg?v=1752758886",
+        "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/PD_9868_1250_with-9869-white-clay.jpg?v=1752758887"
       ],
       "application_methods": [
+        "brushing",
         "pouring"
       ],
       "availability": "https://schema.org/InStock",
@@ -209,42 +199,50 @@
         {
           "basis": "published_text",
           "claim": true,
-          "evidence": "Recouvert d'un émail transparent (par exemple BOTZ 9300 ou BOTZ 9870), il révèle des couleurs vives, une finition brillante et, selon l'émail utilisé, convient à un usage alimentaire.",
+          "evidence": "Leur fabrication sans plomb permet de les utiliser sur des pièces à usage alimentaire**.",
           "type": "food_contact_suitability"
+        },
+        {
+          "basis": "published_text",
+          "claim": true,
+          "evidence": "Leur fabrication sans plomb permet de les utiliser sur des pièces à usage alimentaire**.",
+          "type": "lead_free"
         }
       ],
-      "coats": null,
+      "coats": {
+        "evidence": "3 couches",
+        "maximum": 3,
+        "minimum": 3
+      },
       "colour": null,
       "currency": "EUR",
-      "description": "Notes / Application BOTZ Édition Engobe pour grès de haute qualité. Très stable à la cuisson entre 1180 et 1280 °C (cônes 4 à 9). Peut être mélangé avec les autres couleurs de la gamme BOTZ Édition. Sans émail, il offre une finition mate à l'aspect naturel, une excellente couvrance et des contours précis. Recouvert d'un émail transparent (par exemple BOTZ 9300 ou BOTZ 9870), il révèle des couleurs vives, une finition brillante et, selon l'émail utilisé, convient à un usage alimentaire. Propriétés Mat",
+      "description": "ÉMAIL MAT B9868 GLACIER (1220°-1280°C) CARACTÉRISTIQUES Email à effet, liquide et prêt à l'emploi. Il s'utilise sur toutes les références de pâtes grès et porcelaines. UTILISATION Ces émaux s'utilisent sur grès et porcelaines*. Leur fabrication sans plomb permet de les utiliser sur des pièces à usage alimentaire**. APPLICATION Remuer le pot vigoureusement avant utilisation. Il s'applique au pinceau en 3 couches. CUISSON Cuisson entre 1220°C et 1280° L’intensité des effets variera en fonction de la température. * Il est recommandé de faire un test préalable avant toute production. ** Pour la revente d’articles à usage alimentaire, il est obligatoire de faire tester la vaisselle par un laboratoire spécialisé afin de valider la conformité avec les normes actuelles.",
       "documents": null,
       "effects": null,
-      "external_id": "ceradel:https://ceradel.fr/products/b9825-botz-edition-engobe-bamboo-1180-1280-c#65260867158365",
+      "external_id": "ceradel:https://ceradel.fr/products/email-mat-botz-b9868-glacier#57598042997085",
       "extraction_method": "api_json",
-      "family": "engobe",
+      "family": "glaze",
       "fetched_at": "<volatile>",
       "firing": {
         "basis": "published_text",
-        "evidence": "1180° - 1280°C",
+        "evidence": "1220°-1280°C",
         "max_celsius": 1280,
-        "min_celsius": 1180
+        "min_celsius": 1220
       },
       "form": null,
       "format": "ceramics.catalogue_item.v2",
       "gtin": null,
-      "image_url": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/MK_9825_00_4cc20684-257f-4b86-afde-f4aa7301bb2c.jpg?v=1785334926",
+      "image_url": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/b9868-botz-glacier-200ml-1220-1280c.jpg?v=1747321824",
       "list_price": null,
-      "manufacturer_sku": "B9825",
+      "manufacturer_sku": "B9868",
       "manufacturer_sku_basis": "manufacturer_pattern",
       "min_order_quantity": null,
-      "name": "BOTZ EDITION ENGOBE BAMBOO",
+      "name": "Glacier",
       "name_parsed_from": [
         "200",
-        "1180° - 1280°C",
-        "BOTZ",
-        "B9825"
+        "Botz"
       ],
-      "name_raw": "B9825 BOTZ EDITION ENGOBE BAMBOO 1180° - 1280°C 200",
+      "name_raw": "Émail Mat Botz - B9868 Glacier 200",
       "package_size": {
         "dimension": "volume",
         "evidence": "200 ml",
@@ -252,39 +250,61 @@
         "unit": "ml",
         "value": 200.0
       },
-      "parent_external_id": "ceradel:https://ceradel.fr/products/b9825-botz-edition-engobe-bamboo-1180-1280-c",
-      "price": 11.8,
-      "price_text": "11.80 EUR",
-      "product_name": "B9825 BOTZ EDITION ENGOBE BAMBOO 1180° - 1280°C",
-      "product_url": "https://ceradel.fr/products/b9825-botz-edition-engobe-bamboo-1180-1280-c",
+      "parent_external_id": "ceradel:https://ceradel.fr/products/email-mat-botz-b9868-glacier",
+      "price": 12.5,
+      "price_text": "12.50 EUR",
+      "product_name": "Émail Mat Botz - B9868 Glacier",
+      "product_url": "https://ceradel.fr/products/email-mat-botz-b9868-glacier",
       "raw": {
         "product": {
-          "body_html": "<p data-pasted=\"true\"><strong><u>Notes / Application</u></strong></p><p>BOTZ Édition</p><ul>\n<li>Engobe pour grès de haute qualité.</li>\n<li>Très stable à la cuisson entre 1180 et 1280 °C (cônes 4 à 9).</li>\n<li>Peut être mélangé avec les autres couleurs de la gamme BOTZ Édition.</li>\n<li>Sans émail, il offre une finition mate à l'aspect naturel, une excellente couvrance et des contours précis.</li>\n<li>Recouvert d'un émail transparent (par exemple BOTZ 9300 ou BOTZ 9870), il révèle des couleurs vives, une finition brillante et, selon l'émail utilisé, convient à un usage alimentaire.</li>\n</ul><p><strong><u>Propriétés</u></strong></p><p>Mat</p>",
-          "created_at": "2026-07-15T16:05:53+02:00",
-          "handle": "b9825-botz-edition-engobe-bamboo-1180-1280-c",
-          "id": 16317973627229,
+          "body_html": "<p>ÉMAIL MAT B9868 GLACIER (1220°-1280°C) </p><p><br></p><p style=\"line-height:1.38;background-color:#ffffff;margin-top:0pt;margin-bottom:0pt;\" id=\"isPasted\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:700;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">CARACTÉRISTIQUES</span></p><ul style=\"margin-top:0;margin-bottom:0;padding-inline-start:48px;\">\n<li style=\"list-style-type:disc;font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;\"><p style=\"line-height:1.38;background-color:#ffffff;margin-top:11pt;margin-bottom:0pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">Email à effet, liquide et prêt à l'emploi.</span></p></li>\n<li style=\"list-style-type:disc;font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;\"><p style=\"line-height:1.38;background-color:#ffffff;margin-top:0pt;margin-bottom:11pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">Il s'utilise sur toutes les références de pâtes grès et porcelaines.</span></p></li>\n</ul><p style=\"line-height:1.38;background-color:#ffffff;margin-top:0pt;margin-bottom:0pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:700;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">UTILISATION </span></p><ul style=\"margin-top:0;margin-bottom:0;padding-inline-start:48px;\">\n<li style=\"list-style-type:disc;font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;\"><p style=\"line-height:1.38;background-color:#ffffff;margin-top:11pt;margin-bottom:0pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">Ces émaux s'utilisent sur grès et porcelaines*.</span></p></li>\n<li style=\"list-style-type:disc;font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;\"><p style=\"line-height:1.38;background-color:#ffffff;margin-top:0pt;margin-bottom:11pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">Leur fabrication sans plomb permet de les utiliser sur des pièces à usage alimentaire**.</span></p></li>\n</ul><p style=\"line-height:1.38;background-color:#ffffff;margin-top:0pt;margin-bottom:0pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:700;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">APPLICATION </span></p><ul style=\"margin-top:0;margin-bottom:0;padding-inline-start:48px;\">\n<li style=\"list-style-type:disc;font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;\"><p style=\"line-height:1.38;background-color:#ffffff;margin-top:11pt;margin-bottom:0pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">Remuer le pot vigoureusement avant utilisation.</span></p></li>\n<li style=\"list-style-type:disc;font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;\"><p style=\"line-height:1.38;background-color:#ffffff;margin-top:0pt;margin-bottom:11pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">Il s'applique au pinceau en 3 couches.</span></p></li>\n</ul><p style=\"line-height:1.38;background-color:#ffffff;margin-top:0pt;margin-bottom:0pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:700;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">CUISSON </span></p><ul style=\"margin-top:0;margin-bottom:0;padding-inline-start:48px;\">\n<li style=\"list-style-type:disc;font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;\"><p style=\"line-height:1.2;background-color:#ffffff;margin-top:11pt;margin-bottom:0pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">Cuisson entre 1220°C et 1280°</span></p></li>\n<li style=\"list-style-type:disc;font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;\"><p style=\"line-height:1.2;background-color:#ffffff;margin-top:0pt;margin-bottom:0pt;padding:11pt 0pt 0pt 0pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">L’intensité des effets variera en fonction de la température.</span></p></li>\n</ul><p style=\"line-height:1.38;background-color:#ffffff;margin-top:0pt;margin-bottom:0pt;\"><br></p><p style=\"line-height:1.38;background-color:#ffffff;margin-top:0pt;margin-bottom:0pt;padding:11pt 0pt 0pt 0pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:700;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">*</span><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">Il est recommandé de faire un test préalable avant toute production.</span></p><p style=\"line-height:1.38;background-color:#ffffff;margin-top:0pt;margin-bottom:11pt;padding:11pt 0pt 0pt 0pt;\"><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:700;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">**</span><span style=\"font-size:10.5pt;font-family:Arial,sans-serif;color:#414141;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;\">Pour la revente d’articles à usage alimentaire, il est obligatoire de faire tester la vaisselle par un laboratoire spécialisé afin de valider la conformité avec les normes actuelles. </span></p>",
+          "created_at": "2025-05-15T17:10:21+02:00",
+          "handle": "email-mat-botz-b9868-glacier",
+          "id": 15403227382109,
           "images": [
             {
-              "created_at": "2026-07-29T16:22:04+02:00",
-              "height": 900,
-              "id": 86790747160925,
+              "created_at": "2025-05-15T17:10:21+02:00",
+              "height": 800,
+              "id": 75418555482461,
               "position": 1,
-              "product_id": 16317973627229,
-              "src": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/MK_9825_00_4cc20684-257f-4b86-afde-f4aa7301bb2c.jpg?v=1785334926",
-              "updated_at": "2026-07-29T16:22:06+02:00",
+              "product_id": 15403227382109,
+              "src": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/b9868-botz-glacier-200ml-1220-1280c.jpg?v=1747321824",
+              "updated_at": "2025-05-15T17:10:24+02:00",
               "variant_ids": [],
-              "width": 900
+              "width": 800
             },
             {
-              "created_at": "2026-07-29T16:22:04+02:00",
-              "height": 2961,
-              "id": 86790747193693,
+              "created_at": "2025-07-17T15:28:03+02:00",
+              "height": 3024,
+              "id": 77112290574685,
               "position": 2,
-              "product_id": 16317973627229,
-              "src": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/PD_9825_9802_9823_01_aa6727cb-e3b8-40b3-933c-07ce64bfa262.jpg?v=1785334927",
-              "updated_at": "2026-07-29T16:22:07+02:00",
+              "product_id": 15403227382109,
+              "src": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/PD_9868_1250_with-9020-white-clay.jpg?v=1752758886",
+              "updated_at": "2025-07-17T15:28:06+02:00",
               "variant_ids": [],
-              "width": 2961
+              "width": 3024
+            },
+            {
+              "created_at": "2025-07-17T15:28:03+02:00",
+              "height": 4000,
+              "id": 77112290541917,
+              "position": 3,
+              "product_id": 15403227382109,
+              "src": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/PD_9868_1250_relief-wihte-clay.jpg?v=1752758886",
+              "updated_at": "2025-07-17T15:28:06+02:00",
+              "variant_ids": [],
+              "width": 3000
+            },
+            {
+              "created_at": "2025-07-17T15:28:03+02:00",
+              "height": 4000,
+              "id": 77112290705757,
+              "position": 4,
+              "product_id": 15403227382109,
+              "src": "https://cdn.shopify.com/s/files/1/0941/5586/6461/files/PD_9868_1250_with-9869-white-clay.jpg?v=1752758887",
+              "updated_at": "2025-07-17T15:28:07+02:00",
+              "variant_ids": [],
+              "width": 3000
             }
           ],
           "options": [
@@ -297,48 +317,46 @@
             }
           ],
           "product_type": "",
-          "published_at": "2026-07-29T16:22:36+02:00",
-          "tags": [
-            "NOUVEAUTÉ"
-          ],
-          "title": "B9825 BOTZ EDITION ENGOBE BAMBOO 1180° - 1280°C",
-          "updated_at": "2026-08-05T20:26:32+02:00",
-          "vendor": "Ceradel"
+          "published_at": "2026-08-18T13:57:05+02:00",
+          "tags": [],
+          "title": "Émail Mat Botz - B9868 Glacier",
+          "updated_at": "2026-08-25T03:00:46+02:00",
+          "vendor": "Harry-Ceradel"
         },
         "variant": {
           "available": true,
           "compare_at_price": null,
-          "created_at": "2026-07-15T16:08:45+02:00",
+          "created_at": "2025-05-15T17:10:21+02:00",
           "featured_image": null,
-          "grams": 300,
-          "id": 65260867158365,
+          "grams": 200,
+          "id": 57598042997085,
           "option1": "200",
           "option2": null,
           "option3": null,
           "position": 1,
-          "price": "11.80",
-          "product_id": 16317973627229,
+          "price": "12.50",
+          "product_id": 15403227382109,
           "requires_shipping": true,
-          "sku": "2371601",
+          "sku": "1376601",
           "taxable": true,
           "title": "200",
-          "updated_at": "2026-08-05T20:26:32+02:00"
+          "updated_at": "2026-08-25T03:00:46+02:00"
         }
       },
       "source": "ceradel",
       "source_detail_level": "api",
-      "source_updated_at": "2026-08-05T20:26:32+02:00",
+      "source_updated_at": "2026-08-25T03:00:46+02:00",
       "stock_quantity": null,
-      "supplier_reference": "2371601",
-      "surface": null,
+      "supplier_reference": "1376601",
+      "surface": "matte",
       "technical_attributes": {
         "Volume (ml)": "200",
-        "shipping_weight_g": 300
+        "shipping_weight_g": 200
       },
       "unit_price": {
         "currency": "EUR",
         "per": "l",
-        "value": 59.0
+        "value": 62.5
       },
       "variant_title": "200",
       "vat_rate": null,
@@ -424,7 +442,7 @@
           "published_at": "2025-05-16T15:42:09+02:00",
           "tags": [],
           "title": "CARBONATE DE BARYUM (BARITE)",
-          "updated_at": "2026-08-05T20:29:03+02:00",
+          "updated_at": "2026-08-25T03:01:09+02:00",
           "vendor": "Harry-Ceradel"
         },
         "variant": {
@@ -444,12 +462,12 @@
           "sku": "1636403",
           "taxable": true,
           "title": "25",
-          "updated_at": "2026-08-05T20:29:03+02:00"
+          "updated_at": "2026-08-25T03:01:09+02:00"
         }
       },
       "source": "ceradel",
       "source_detail_level": "api",
-      "source_updated_at": "2026-08-05T20:29:03+02:00",
+      "source_updated_at": "2026-08-25T03:01:09+02:00",
       "stock_quantity": null,
       "supplier_reference": "1636403",
       "surface": null,

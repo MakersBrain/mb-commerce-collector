@@ -18,6 +18,7 @@ from mb_commerce_scraper.connectors import (
     GenericPagesOptions,
 )
 from mb_commerce_scraper.connectors.base import ConnectorContext
+from mb_commerce_scraper.connectors.page_engine import PAGE_BROWSER_USER_AGENT
 from mb_commerce_scraper.parsing import JsonLdProductParser
 from mb_commerce_scraper.testing import FakeTransport, assert_connector_pages
 from mb_commerce_scraper.transports import RequestPurpose, TransportFailure
@@ -97,6 +98,9 @@ async def test_sitemap_jsonld_collection_finishes_with_complete_terminal_page() 
     assert pages[0].sequence == 0
     assert pages[0].terminal and pages[0].enumeration_intact
     assert pages[0].resume_after is None
+    assert transport.requests[-1].headers == {
+        "user-agent": PAGE_BROWSER_USER_AGENT
+    }
 
 
 async def test_robots_advertised_sitemap_enters_shared_discovery() -> None:
@@ -430,6 +434,10 @@ async def test_category_and_pagination_discovery_feed_the_shared_engine() -> Non
         "https://shop.test/products/red",
         "https://shop.test/products/blue",
     ]
+    assert all(
+        request.headers == {"user-agent": PAGE_BROWSER_USER_AGENT}
+        for request in transport.requests
+    )
 
 
 async def test_verified_dom_rules_collect_without_executable_selectors() -> None:
@@ -515,6 +523,7 @@ async def test_browser_http_failure_is_typed_with_stage_metadata() -> None:
     assert diagnostic.code == DiagnosticCode.ENTITY_FETCH_FAILED
     assert diagnostic.retryable
     assert diagnostic.metadata == {"stage": "browser"}
+    assert transport.requests[-1].headers == {}
 
 
 async def test_entity_transport_failure_is_typed_with_http_stage() -> None:

@@ -41,6 +41,9 @@ based on Keep a Changelog, and releases follow the compatibility policy in
 
 ### Changed
 
+- Expanded neutral availability to preserve limited and discontinued published
+  states, and aligned page connectors with legacy browser-profile requests,
+  breadcrumb projection, JSON-LD entity decoding, and cleaned descriptions.
 - Consolidated runtime and routed-transport proxy configuration on
   `ProxyPolicyConfig`; the unreleased parallel routing model and legacy request
   and byte-cap parameters were removed.

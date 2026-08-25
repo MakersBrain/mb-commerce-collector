@@ -85,7 +85,10 @@ class JsonLdProductParser:
         normalized = str(value or "").rsplit("/", 1)[-1].casefold()
         return {
             "instock": Availability.IN_STOCK,
+            "limitedavailability": Availability.LIMITED,
             "outofstock": Availability.OUT_OF_STOCK,
+            "soldout": Availability.OUT_OF_STOCK,
             "backorder": Availability.BACKORDER,
             "preorder": Availability.PREORDER,
+            "discontinued": Availability.DISCONTINUED,
         }.get(normalized, Availability.UNKNOWN)

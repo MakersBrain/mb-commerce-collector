@@ -1,5 +1,5 @@
 {
-  "digest": "d38297608e983ff28182c20c570790bd8a4f765dc5a50b5c4546383934e23d78",
+  "digest": "24dd86d4d1ea934bf0311ad7ef2056031366d864c3f4a2e24944299ff31aa83e",
   "discovered": 175,
   "error_count": 0,
   "errors": [],
@@ -214,7 +214,7 @@
             "Mid Fire"
           ],
           "title": "Vermont Frost Series - Glaze Set (8 x 4 fl.oz jars)",
-          "updated_at": "2026-08-14T16:31:41-04:00",
+          "updated_at": "2026-08-24T21:02:08-04:00",
           "vendor": "Penguin Pottery"
         },
         "variant": {
@@ -234,12 +234,12 @@
           "sku": "PP-GZ-MH-SET7",
           "taxable": true,
           "title": "Default Title",
-          "updated_at": "2026-08-14T16:31:41-04:00"
+          "updated_at": "2026-08-24T21:02:08-04:00"
         }
       },
       "source": "penguin-pottery",
       "source_detail_level": "api",
-      "source_updated_at": "2026-08-14T16:31:41-04:00",
+      "source_updated_at": "2026-08-24T21:02:08-04:00",
       "stock_quantity": null,
       "supplier_reference": "PP-GZ-MH-SET7",
       "surface": null,
@@ -268,7 +268,7 @@
         "brushing",
         "dipping"
       ],
-      "availability": "https://schema.org/InStock",
+      "availability": "https://schema.org/OutOfStock",
       "brand": "Penguin Pottery",
       "brand_basis": "named_in_title",
       "category_path": [
@@ -431,11 +431,11 @@
             "MCF"
           ],
           "title": "Penguin Pottery - Matte Clear Glaze - Mid Fire - Cone 5 Cone 6 (Dry Glaze | 3 lbs | 1.4 kg)",
-          "updated_at": "2026-08-14T16:31:41-04:00",
+          "updated_at": "2026-08-24T21:02:08-04:00",
           "vendor": "Penguin Pottery"
         },
         "variant": {
-          "available": true,
+          "available": false,
           "compare_at_price": null,
           "created_at": "2025-11-29T15:31:58-05:00",
           "featured_image": null,
@@ -451,13 +451,13 @@
           "sku": "PP-GZ-MH-CLR-M-DRY-3LB",
           "taxable": true,
           "title": "Default Title",
-          "updated_at": "2026-08-14T16:31:41-04:00"
+          "updated_at": "2026-08-24T21:02:08-04:00"
         }
       },
       "source": "penguin-pottery",
       "source_detail_level": "api",
-      "source_updated_at": "2026-08-14T16:31:41-04:00",
-      "stock_quantity": null,
+      "source_updated_at": "2026-08-24T21:02:08-04:00",
+      "stock_quantity": 0,
       "supplier_reference": "PP-GZ-MH-CLR-M-DRY-3LB",
       "surface": "matte",
       "technical_attributes": {
@@ -661,7 +661,7 @@
             "Mid Fire"
           ],
           "title": "Penguin Pottery - Clear Glaze. Mid Fire Glaze for Clay, Pottery Glaze, Cone 5 and Cone 6 - Ceramic Glaze for Pottery (1 Pint | 16 oz | 473 ml)",
-          "updated_at": "2026-08-14T16:31:41-04:00",
+          "updated_at": "2026-08-24T21:02:08-04:00",
           "vendor": "Penguin Pottery"
         },
         "variant": {
@@ -681,12 +681,12 @@
           "sku": "PP-GZ-MH-CLR",
           "taxable": true,
           "title": "Default Title",
-          "updated_at": "2026-08-14T16:31:41-04:00"
+          "updated_at": "2026-08-24T21:02:08-04:00"
         }
       },
       "source": "penguin-pottery",
       "source_detail_level": "api",
-      "source_updated_at": "2026-08-14T16:31:41-04:00",
+      "source_updated_at": "2026-08-24T21:02:08-04:00",
       "stock_quantity": null,
       "supplier_reference": "PP-GZ-MH-CLR",
       "surface": null,

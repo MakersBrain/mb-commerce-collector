@@ -1,5 +1,5 @@
 {
-  "digest": "a81e8978ac44c84ae2371a4562e92824782e19a0e27664fb1f79f76c922e0c6f",
+  "digest": "d878de9b07155571f4ccf3e589e70027ef180832c5977cb14d355490d633389d",
   "discovered": 72,
   "error_count": 0,
   "errors": [],
@@ -12,14 +12,14 @@
     "colour": 61,
     "description": 72,
     "documents": 0,
-    "effects": 2,
+    "effects": 3,
     "family": 72,
     "firing": 72,
     "form": 39,
     "gtin": 0,
     "manufacturer_sku": 17,
     "package_size": 10,
-    "stock_quantity": 46,
+    "stock_quantity": 40,
     "supplier_reference": 72,
     "surface": 23,
     "unit_price": 10,
@@ -39,7 +39,7 @@
         "https://shop.keramikbedarf-online.de/media/db/02/e8/1709642168/2-W122_VATER_03.jpeg?ts=1709642168"
       ],
       "application_methods": null,
-      "availability": "https://schema.org/LimitedAvailability",
+      "availability": "https://schema.org/OutOfStock",
       "brand": "Paint-it",
       "brand_basis": "published",
       "category_path": [
@@ -104,11 +104,11 @@
         "offers": [
           {
             "@type": "Offer",
-            "availability": "https://schema.org/LimitedAvailability",
+            "availability": "https://schema.org/SoldOut",
             "itemCondition": "https://schema.org/NewCondition",
             "price": 7.35,
             "priceCurrency": "EUR",
-            "priceValidUntil": "2026-08-06",
+            "priceValidUntil": "2026-08-25",
             "url": "https://shop.keramikbedarf-online.de/Paint-it-Vario-Streichglasur-Frozen-Mint/2-W122"
           }
         ],
@@ -117,7 +117,7 @@
       "source": "keramikbedarf-online",
       "source_detail_level": "product_page",
       "source_updated_at": null,
-      "stock_quantity": 3,
+      "stock_quantity": 0,
       "supplier_reference": "2-W122",
       "surface": "gloss",
       "technical_attributes": {
@@ -212,7 +212,7 @@
             "itemCondition": "https://schema.org/NewCondition",
             "price": 7.35,
             "priceCurrency": "EUR",
-            "priceValidUntil": "2026-08-06",
+            "priceValidUntil": "2026-08-25",
             "url": "https://shop.keramikbedarf-online.de/Paint-it-Vario-Streichglasur-Lagune-glaenzend/2-W151"
           }
         ],
@@ -221,7 +221,7 @@
       "source": "keramikbedarf-online",
       "source_detail_level": "product_page",
       "source_updated_at": null,
-      "stock_quantity": 11,
+      "stock_quantity": 7,
       "supplier_reference": "2-W151",
       "surface": "gloss",
       "technical_attributes": {
@@ -315,7 +315,7 @@
             "itemCondition": "https://schema.org/NewCondition",
             "price": 6.77,
             "priceCurrency": "EUR",
-            "priceValidUntil": "2026-08-06",
+            "priceValidUntil": "2026-08-25",
             "url": "https://shop.keramikbedarf-online.de/Botz-Edition-Weiss/3-9801"
           }
         ],
@@ -324,7 +324,7 @@
       "source": "keramikbedarf-online",
       "source_detail_level": "product_page",
       "source_updated_at": null,
-      "stock_quantity": 9,
+      "stock_quantity": 5,
       "supplier_reference": "3-9801",
       "surface": null,
       "technical_attributes": {

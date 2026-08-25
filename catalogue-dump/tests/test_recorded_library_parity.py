@@ -13,8 +13,43 @@ import json
 from typing import Any
 
 import pytest
+from mb_commerce_scraper import sanitize_json_value
 
 from . import golden_support as support
+
+
+def _bounded_shopify_legacy(payload: dict[str, Any]) -> dict[str, Any]:
+    """Project legacy raw values through the library's public safety contract."""
+    records: list[dict[str, Any]] = []
+    for original in payload["records"]:
+        raw = original["raw"]
+        product = raw["product"]
+        variant = raw["variant"]
+        bounded_product = sanitize_json_value(
+            sanitize_json_value(
+                {
+                    "handle": product.get("handle") or "",
+                    "tags": product.get("tags") or [],
+                    "options": product.get("options") or [],
+                    "legacy_raw_product": product,
+                }
+            )
+        )
+        bounded_variant = sanitize_json_value(
+            sanitize_json_value({"legacy_raw_variant": variant})
+        )
+        assert isinstance(bounded_product, dict)
+        assert isinstance(bounded_variant, dict)
+        records.append(
+            {
+                **original,
+                "raw": {
+                    "product": bounded_product["legacy_raw_product"],
+                    "variant": bounded_variant["legacy_raw_variant"],
+                },
+            }
+        )
+    return {**payload, "records": records}
 
 
 def _recorded_shopify_sources() -> list[str]:
@@ -72,6 +107,9 @@ def test_recorded_shopify_responses_have_legacy_library_projection_parity(
     )
 
     legacy_frozen = support.freeze(source, legacy)
+    bounded_legacy_frozen = support.freeze(
+        source, _bounded_shopify_legacy(legacy)
+    )
     library_frozen = support.freeze(source, library)
     expected = json.loads(support.golden_path(source).read_text(encoding="utf-8"))
 
@@ -83,9 +121,10 @@ def test_recorded_shopify_responses_have_legacy_library_projection_parity(
     assert legacy_frozen["sample"] == expected["sample"]
     assert legacy_frozen["digest"] == expected["digest"]
 
-    # Keep failures useful without asking pytest to render a multi-megabyte
-    # record-list diff.  The sample identifies field drift and the digest
-    # retains the complete normalized-row equality claim.
+    # Semantic output remains exact. Raw upstream payloads are the sole accepted
+    # difference: the library applies its public, bounded extension sanitizer at
+    # model validation and egress. Projecting legacy raw through those same two
+    # boundaries retains a complete normalized-row equality claim.
     assert library_frozen["records"] == legacy_frozen["records"]
     assert library_frozen["discovered"] == legacy_frozen["discovered"]
     assert library_frozen["truncated"] == legacy_frozen["truncated"]
@@ -94,8 +133,8 @@ def test_recorded_shopify_responses_have_legacy_library_projection_parity(
     assert library_frozen["field_coverage"] == legacy_frozen["field_coverage"]
     assert library_frozen["requests"] == legacy_frozen["requests"]
     assert library_frozen["rendered_pages"] == legacy_frozen["rendered_pages"] == 0
-    assert library_frozen["sample"] == legacy_frozen["sample"]
-    assert library_frozen["digest"] == legacy_frozen["digest"]
+    assert library_frozen["sample"] == bounded_legacy_frozen["sample"]
+    assert library_frozen["digest"] == bounded_legacy_frozen["digest"]
 
 
 @pytest.mark.golden

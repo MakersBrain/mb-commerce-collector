@@ -1,5 +1,5 @@
 {
-  "digest": "fc891a8c28189c13d32c763dc3e0982af7e99a040a0f89689551dd5727f376ba",
+  "digest": "e2451a27884f8c7c47db84d3e95d2b5848dd46b06c0640d56fe18829fc538779",
   "discovered": 19,
   "error_count": 0,
   "errors": [],
@@ -448,7 +448,7 @@
             "Foundations"
           ],
           "title": "Mayco Foundations",
-          "updated_at": "2026-08-06T07:12:20+02:00",
+          "updated_at": "2026-08-25T03:02:10+02:00",
           "vendor": "Mayco"
         },
         "variant": {
@@ -482,12 +482,12 @@
           "sku": "KFN001",
           "taxable": true,
           "title": "White FN001 / 118 ml",
-          "updated_at": "2026-08-06T07:12:20+02:00"
+          "updated_at": "2026-08-25T03:02:10+02:00"
         }
       },
       "source": "ceramique-peinture",
       "source_detail_level": "api",
-      "source_updated_at": "2026-08-06T07:12:20+02:00",
+      "source_updated_at": "2026-08-25T03:02:10+02:00",
       "stock_quantity": null,
       "supplier_reference": "KFN001",
       "surface": null,
@@ -922,7 +922,7 @@
             "Foundations"
           ],
           "title": "Mayco Foundations",
-          "updated_at": "2026-08-06T07:12:20+02:00",
+          "updated_at": "2026-08-25T03:02:10+02:00",
           "vendor": "Mayco"
         },
         "variant": {
@@ -956,12 +956,12 @@
           "sku": "FN001",
           "taxable": true,
           "title": "White FN001 / 473 ml",
-          "updated_at": "2026-08-06T07:12:20+02:00"
+          "updated_at": "2026-08-25T03:02:10+02:00"
         }
       },
       "source": "ceramique-peinture",
       "source_detail_level": "api",
-      "source_updated_at": "2026-08-06T07:12:20+02:00",
+      "source_updated_at": "2026-08-25T03:02:10+02:00",
       "stock_quantity": null,
       "supplier_reference": "FN001",
       "surface": null,
@@ -1392,7 +1392,7 @@
             "Colorobbia"
           ],
           "title": "Colorobbia Fairy Dust - effet métallique",
-          "updated_at": "2026-08-06T07:35:03+02:00",
+          "updated_at": "2026-08-25T03:02:11+02:00",
           "vendor": "Colorobbia"
         },
         "variant": {
@@ -1425,12 +1425,12 @@
           "sku": "HSS119",
           "taxable": true,
           "title": "Violette HSS119 / 236 ml",
-          "updated_at": "2026-08-06T07:35:03+02:00"
+          "updated_at": "2026-08-25T03:02:11+02:00"
         }
       },
       "source": "ceramique-peinture",
       "source_detail_level": "api",
-      "source_updated_at": "2026-08-06T07:35:03+02:00",
+      "source_updated_at": "2026-08-25T03:02:11+02:00",
       "stock_quantity": null,
       "supplier_reference": "HSS119",
       "surface": "metallic",

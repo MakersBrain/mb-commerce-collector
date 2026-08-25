@@ -56,8 +56,19 @@ def _context(*, cancelled: bool = False) -> ConnectorContext:
 
 def test_shopware_parser_preserves_platform_fields() -> None:
     document = JSONLD.replace(
+        '"name":"Clay",',
+        '"name":"Clay","description":"Smooth&nbsp;body",',
+    ).replace(
+        '"availability":"InStock"',
+        '"availability":"LimitedAvailability"',
+    ).replace(
         "</html>",
         """
+        <script type="application/ld+json">{
+          "@type":"BreadcrumbList","itemListElement":[
+            {"item":{"name":"Glazes"}}, {"name":"1020 °C - 1100 °C"}
+          ]
+        }</script>
         <dl><dt class="properties-label">Firing:</dt>
         <dd class="properties-value">1200 C</dd></dl>
         <span class="product-detail-ordernumber">CL-99</span>
@@ -71,6 +82,12 @@ def test_shopware_parser_preserves_platform_fields() -> None:
     snapshot = connector.parse(document, "https://shop.test/a", "shop")[0]
     variant = snapshot.variants[0]
     assert snapshot.connector == "shopware"
+    assert [category.name for category in snapshot.categories] == [
+        "Glazes",
+        "1020 °C - 1100 °C",
+    ]
+    assert snapshot.description == "Smooth\N{NO-BREAK SPACE}body"
+    assert variant.offers[0].availability == "limited"
     assert variant.sku == "CL-1"
     assert variant.published_attributes == {
         "price_text": "12.50 EUR",

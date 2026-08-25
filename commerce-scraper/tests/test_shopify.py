@@ -121,6 +121,7 @@ async def test_product_json_inventory_produces_exact_stock_and_full_snapshot() -
     ]
     assert variant.options == {"Size": "10 kg"}
     assert variant.published_attributes["shipping_weight_g"] == 10_000
+    assert snapshot.description == "Body Spec"
     assert snapshot.documents[0].url == "https://shop.test/files/spec.pdf"
     assert snapshot.images[0].external_id == "5"
     assert snapshot.source_updated_at == datetime(2026, 8, 14, 12, tzinfo=UTC)

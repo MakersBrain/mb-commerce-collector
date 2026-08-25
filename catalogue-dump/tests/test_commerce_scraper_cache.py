@@ -65,6 +65,39 @@ async def test_native_http_cache_reads_the_existing_legacy_key(tmp_path) -> None
     assert response.json_value() == {"products": []}
 
 
+async def test_explicit_user_agent_reads_the_legacy_browser_profile_key(
+    tmp_path,
+) -> None:
+    legacy = ResponseCache(tmp_path, mode="auto")
+    attempted = request().model_copy(
+        update={"headers": {"User-Agent": "browser-profile"}}
+    )
+    key = legacy.key(
+        "http",
+        attempted.url,
+        method=attempted.method,
+        params=attempted.query,
+        body=attempted.json_body,
+        agent=True,
+    )
+    legacy.write(
+        key,
+        CachedResponse(
+            status=200,
+            url=attempted.url,
+            body='{"profile":"browser"}',
+            headers={"content-type": "application/json"},
+            fetched_at=time.time(),
+        ),
+    )
+    legacy.mode = "replay"
+
+    response = await CatalogueResponseCache(legacy).get(attempted)
+
+    assert response is not None
+    assert response.json_value() == {"profile": "browser"}
+
+
 async def test_native_browser_write_uses_the_existing_render_key(tmp_path) -> None:
     legacy = ResponseCache(tmp_path, mode="auto")
     attempted = request(browser=BrowserHint.REQUIRED).model_copy(

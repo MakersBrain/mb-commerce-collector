@@ -51,6 +51,7 @@ class LegacyFetcher(Protocol):
         method: str = "GET",
         json_body: JsonValue | None = None,
         headers: dict[str, str] | None = None,
+        browser_user_agent: bool = False,
     ) -> httpx.Response: ...
 
     async def render(
@@ -149,12 +150,17 @@ class LegacyFetcherTransport:
         proxy_before = self._proxy_requests()
         failure: TransportFailure | None = None
         try:
+            fetch_options: dict[str, Any] = {
+                "params": request.query or None,
+                "method": request.method,
+                "json_body": request.json_body,
+                "headers": request.headers or None,
+            }
+            if _has_user_agent(request.headers):
+                fetch_options["browser_user_agent"] = True
             response = await self._fetcher.response(
                 request.url,
-                params=request.query or None,
-                method=request.method,
-                json_body=request.json_body,
-                headers=request.headers or None,
+                **fetch_options,
             )
         except httpx.HTTPStatusError as error:
             # Fetcher raises a final status after applying its retry/fallback
@@ -358,6 +364,10 @@ def _safe_transport_failure(error: BaseException) -> TransportFailure:
         max_length=2_048,
     )
     return TransportFailure(message)
+
+
+def _has_user_agent(headers: dict[str, str]) -> bool:
+    return any(name.casefold() == "user-agent" for name in headers)
 
 
 def _cache_provenance(response: httpx.Response) -> Literal["fresh", "replayed", "stale"] | None:

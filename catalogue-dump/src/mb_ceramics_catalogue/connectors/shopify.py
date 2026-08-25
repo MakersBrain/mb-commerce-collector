@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
@@ -537,7 +538,18 @@ class ShopifyConnector(CommerceConnector):
             canonical_url=product_url,
             title=title,
             observed_at=observed_at,
-            description=str(product.get("body_html") or "") or None,
+            description=(
+                " ".join(
+                    html.unescape(
+                        re.sub(
+                            r"<[^>]+>",
+                            " ",
+                            str(product.get("body_html") or ""),
+                        )
+                    ).split()
+                )
+                or None
+            ),
             vendor=str(product.get("vendor") or "") or None,
             categories=categories,
             images=images,

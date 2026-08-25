@@ -154,8 +154,8 @@ def jsonld_products(document: str) -> list[dict[str, Any]]:
         re.IGNORECASE | re.DOTALL,
     ):
         try:
-            walk(json.loads(body))
-        except json.JSONDecodeError:
+            walk(json.loads(html.unescape(body.strip()), strict=False))
+        except (json.JSONDecodeError, TypeError):
             continue
     return found
 

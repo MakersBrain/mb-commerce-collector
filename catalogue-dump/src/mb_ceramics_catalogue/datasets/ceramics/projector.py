@@ -357,9 +357,11 @@ def _availability(value: Availability | None) -> str | None:
         return None
     return {
         Availability.IN_STOCK: "https://schema.org/InStock",
+        Availability.LIMITED: "https://schema.org/LimitedAvailability",
         Availability.OUT_OF_STOCK: "https://schema.org/OutOfStock",
         Availability.BACKORDER: "https://schema.org/BackOrder",
         Availability.PREORDER: "https://schema.org/PreOrder",
+        Availability.DISCONTINUED: "https://schema.org/Discontinued",
     }[value]
 
 
