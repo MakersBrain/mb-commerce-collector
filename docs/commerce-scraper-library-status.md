@@ -2,7 +2,7 @@
 
 Plan: [commerce-scraper-library-plan.md](commerce-scraper-library-plan.md)
 Branch: `feat/commerce-scraper-library`
-Last reviewed: 2026-08-25
+Last reviewed: 2026-08-26
 Overall status: **in progress — library foundation implemented, production cutover pending**
 
 This document tracks implementation and migration against the refactor plan. It
@@ -223,13 +223,19 @@ architecture rules in the plan and are not separate scope-expansion goals.
   - The recovered volume is newer and broader than the checked-in golden set.
     An archive-wide characterization produced 14 unrelated stale-baseline
     failures, 10 passes, and 67 sources without reviewed goldens; those 67
-    provisional outputs were not added. Publishing a versioned archive and
-    manifest remains an operational CI task.
-  - Cache publication now accepts repeated `push --host` selectors. A local
-    deterministic build of the thirteen reviewed hosts contains 8,020 files and
-    643,112,960 bytes with SHA-256
-    `7c16b0f999de92831b4d316880c8e46b3c0ce9698b66cdbe7a0503bbdec74517`;
-    it has not been uploaded or written into the checked-in manifest.
+    provisional outputs were not added.
+  - Cache publication now accepts repeated `push --host` selectors. The
+    deterministic thirteen-host archive is published as
+    `cache/7c16b0f999de9283.tar` and recorded in
+    `catalogue-dump/cache-archive.json`: 8,020 files, 643,112,960 bytes, and
+    SHA-256
+    `7c16b0f999de92831b4d316880c8e46b3c0ce9698b66cdbe7a0503bbdec74517`.
+  - The protected-branch `main` workflow run
+    [32900282922](https://github.com/MakersBrain/mb-commerce-collector/actions/runs/32900282922)
+    obtained short-lived cache credentials through Infisical GitHub OIDC,
+    verified and unpacked that exact archive, and passed all 28 golden tests
+    (14 output goldens plus 14 independent legacy/library parity cases) with
+    archive presence required.
 - [x] Durable proxy-attempt PostgreSQL integration test passed against a
   throwaway PostgreSQL 17 instance, covering concurrent authorization,
   capacity exclusion, and exactly-once reconciliation.
@@ -480,8 +486,8 @@ architecture rules in the plan and are not separate scope-expansion goals.
 |---|---|---|
 | 0. Baseline and decisions | Complete | Baselines, grouped source/transport inventory, bespoke classifications, ADR, frozen schemas, Python policy, and known skips/failures are recorded. |
 | 1. Distribution and contracts | Complete | Package, contracts, compatibility decoding, durable lineage composition, public import boundaries, workspace integration, typing, builds, and installed-wheel proof pass. |
-| 2. HTTP transport and runtime | Partial | HTTP/fake transports, hardened middleware, conditional archive revalidation, per-request legacy robots/cache projection, and native Shopify policy composition exist; recorded direct-path parity and wider application rollout remain. |
-| 3. Shopify vertical slice | Partial | Registry/Fetcher/projection synthetic parity exists; recorded replay, production canary, and stable source switch remain. |
+| 2. HTTP transport and runtime | Partial | HTTP/fake transports, hardened middleware, conditional archive revalidation, per-request legacy robots/cache projection, native Shopify policy composition, and immutable CI replay exist; wider application rollout remains. |
+| 3. Shopify vertical slice | Partial | Registry/Fetcher/projection parity, immutable recorded replay, and a bounded live native-library canary pass; production-worker canary and stable source switch remain. |
 | 4. Generic custom shops | Partial | Composable versioned discovery/parser strategies, sitemap/category/robots discovery, structured-page parsing, safe resume, current pagecrawl option translation, and a native worker gate exist; replay and production migration remain. |
 | 5. Proxy data plane | Implementation complete, activation pending | The plan's failover, sticky identity, byte-cap, credential-containment, provider-adapter, and PostgreSQL safety criteria pass locally. Durable default-off Webshare control and live Camoufox callback gates also exist; real Quadlet activation and production routed canaries remain operational cutover gates. |
 | 6. Remaining frameworks | Implementation complete, migration pending | Eight framework connectors are extracted; replay, canary, and stable source switching remain. |
@@ -772,7 +778,14 @@ production migration evidence remain incomplete.
     emitted cursor and proves the next page does not repeat the bounded entity.
     The PostgreSQL worker gate proves sealed limited publication and recovery;
     production-recording evidence is still absent, so this item remains open.
-- [ ] Canary at least one real Shopify source through the installed library.
+- [x] Canary at least one real Shopify source through the installed library.
+  - On 2026-08-26, `catalogue-probe` ran Ceradel through the installed
+    `connector_canary` route with a 25-record limit, a one-second delay,
+    `robots=obey`, and browser use disabled. It returned 25 records from three
+    requests with 250 products discovered, intentional `truncated=true`, zero
+    errors, and zero rendered pages. The probe writes no catalogue artifact;
+    this is live native-library evidence, not the still-pending production
+    worker canary or stable source promotion.
 - [x] Add a configuration-only rollback route.
   - Per-source pipeline overrides select the canary without changing the source
     mapping; explicit `legacy` or removing the override restores the legacy
@@ -1538,33 +1551,30 @@ Exit criterion: **not met**.
 
 ## Immediate implementation queue
 
-1. Publish a reviewed, versioned subset of the recovered response archive to
-   the configured cache bucket and generate `catalogue-dump/cache-archive.json`
-   so CI can reproduce the now-passing Shopify and Shopware parity cases.
-2. Execute a limited production Shopify canary using the tested per-source
+1. Execute a limited production Shopify canary using the tested per-source
    rollback selector after recorded parity passes.
-3. Run a limited `keramikbedarf-online` Shopware canary with the tested
+2. Run a limited `keramikbedarf-online` Shopware canary with the tested
    configuration-only rollback route.
-4. Run a limited, explicitly approved routed Shopify production canary. The
+3. Run a limited, explicitly approved routed Shopify production canary. The
    local gates now cover the real outer worker, native runtime, Shopify,
    middleware, immutable Webshare route, durable attempt accounting, summary
    and artifact persistence, cleanup, and terminal recovery without legacy
    lease ownership. The live Camoufox callback gate independently covers
    physical browser authorization because Shopify declares browser capability
    `never`.
-5. Run a limited browser-capable BigCommerce canary with the tested
+4. Run a limited browser-capable BigCommerce canary with the tested
    source-level rollback route; recorded replay and projected-output parity now
    pass for Amaco and Speedball.
-6. Run limited PrestaShop and Sio2 canaries with independent rollback; recorded
+5. Run limited PrestaShop and Sio2 canaries with independent rollback; recorded
    replay and projected-output parity now pass for `1240-design` and Sio2.
-7. Run a real rootless Podman/Quadlet activation/readability smoke, then a
+6. Run a real rootless Podman/Quadlet activation/readability smoke, then a
    default-off native worker integration and explicitly approved Webshare
    canary. The recent-admin import/rotation endpoint, durable replay,
    control-exclusive write mount, worker read mounts, HTTP resolver-to-wire
    integration, Docker rootless-identity fallback, and live Camoufox callback
    gate now pass. Keep Webshare out of production composite selection until
    those remaining operational gates pass.
-8. Migrate configured production sources incrementally through the existing
+7. Migrate configured production sources incrementally through the existing
    library registry route, and remove legacy implementations only after their
    observation windows.
 
