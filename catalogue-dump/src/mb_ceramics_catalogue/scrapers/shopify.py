@@ -61,12 +61,19 @@ class ShopifyScraper(Scraper):
         self.currency = self.config.get("currency")
         if self.currency:
             return
+        endpoint = f"{self.origin()}/meta.json"
         try:
-            payload = await self.fetcher.json(f"{self.origin()}/meta.json")
+            payload = await self.fetcher.json(endpoint)
             self.result.requests += 1
             self.currency = domain.clean(payload.get("currency")) or None
         except (httpx.HTTPError, Blocked, AttributeError) as error:
             self.note(f"shop currency unavailable from meta.json ({error})")
+            # Currency is required to interpret every amount in products.json.
+            # Record this as a failed enumeration, not merely a note: the worker
+            # can then retry a transient 429/5xx and must treat any exhausted
+            # zero-record attempt as adds-only instead of retiring the previous
+            # catalogue against a meaningless empty artifact.
+            self.fail(endpoint, error)
             self.currency = None
 
     async def _scrape_collections(self, collections: list[str], limit: int | None) -> None:
