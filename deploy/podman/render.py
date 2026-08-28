@@ -17,6 +17,7 @@ IMAGE_NAMES = {
 }
 HOST = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 DATABASE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")
+OTLP_TRACE_PROCESSES = {"worker", "worker-browser"}
 
 
 def load_values(path: Path) -> dict:
@@ -46,6 +47,24 @@ def load_values(path: Path) -> dict:
         or len(workers) != len(set(workers))
     ):
         raise ValueError("worker_instances must contain one to three unique integers from 1 to 9")
+    traces_enabled = values.get("otlp_traces_enabled")
+    if not isinstance(traces_enabled, bool):
+        raise ValueError("otlp_traces_enabled must be a boolean")
+    trace_processes = values.get("otlp_trace_processes")
+    if (
+        not isinstance(trace_processes, list)
+        or any(
+            not isinstance(process, str) or process not in OTLP_TRACE_PROCESSES
+            for process in trace_processes
+        )
+        or len(trace_processes) != len(set(trace_processes))
+    ):
+        raise ValueError("otlp_trace_processes must be a unique subset of worker, worker-browser")
+    if traces_enabled != bool(trace_processes):
+        raise ValueError(
+            "otlp_traces_enabled requires a non-empty otlp_trace_processes list; "
+            "disabled traces require an empty list"
+        )
     return values
 
 

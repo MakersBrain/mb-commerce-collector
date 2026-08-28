@@ -137,12 +137,15 @@ async def run(options: argparse.Namespace) -> int:
 def main() -> int:
     options = build_parser().parse_args()
     try:
-        return asyncio.run(run(options))
-    except KeyboardInterrupt:  # pragma: no cover
-        return 130
-    except ValueError as error:
-        print(f"catalogue-probe: {error}", file=sys.stderr)
-        return 2
+        try:
+            return asyncio.run(run(options))
+        except KeyboardInterrupt:  # pragma: no cover
+            return 130
+        except ValueError as error:
+            print(f"catalogue-probe: {error}", file=sys.stderr)
+            return 2
+    finally:
+        tracing.shutdown()
 
 
 if __name__ == "__main__":

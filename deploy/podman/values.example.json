@@ -13,5 +13,7 @@
     "nats": "registry.example.test/catalogue/nats@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     "database_transfer": "registry.example.test/catalogue/database-transfer@sha256:9999999999999999999999999999999999999999999999999999999999999999"
   },
-  "worker_instances": [1, 2]
+  "worker_instances": [1, 2],
+  "otlp_traces_enabled": false,
+  "otlp_trace_processes": []
 }
