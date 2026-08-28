@@ -381,6 +381,7 @@ def load_source(
     *,
     whole: bool,
     run_id: UUID | None = None,
+    stock_trends_enabled: bool = False,
 ) -> SourceReport:
     """Stage, load and (if the file is whole) retire, in one transaction.
 
@@ -396,6 +397,13 @@ def load_source(
     report = SourceReport(source=source)
 
     with connection.transaction(), connection.cursor() as cursor:
+        # A transaction-local custom setting lets the database function keep
+        # raw records intact while gating only relational stock history. It
+        # cannot leak through a pooled connection after this source commits.
+        cursor.execute(
+            "select set_config('catalogue.stock_trends_enabled', %(enabled)s, true)",
+            {"enabled": "true" if stock_trends_enabled else "false"},
+        )
         cursor.execute("truncate import_staging")
 
         # One row per record, the JSON sent as text. Binary would need the jsonb
@@ -464,6 +472,7 @@ def load_dump(
     *,
     keep_stale: bool = False,
     run_id: UUID | None = None,
+    stock_trends_enabled: bool = False,
 ) -> LoadReport:
     """Load every planned source, stepping over the ones that fail.
 
@@ -498,6 +507,7 @@ def load_dump(
                     read_ndjson(plan.path),
                     whole=plan.whole and not keep_stale,
                     run_id=report.run_id,
+                    stock_trends_enabled=stock_trends_enabled,
                 )
             )
         except (psycopg.Error, json.JSONDecodeError) as failure:

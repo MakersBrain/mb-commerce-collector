@@ -220,6 +220,8 @@ export type Offer = {
 	price_eur: number | null;
 	vat_status: string | null;
 	availability: string | null;
+	stock_quantity: number | null;
+	stock_quantity_kind: 'exact' | 'lower_bound' | 'upper_bound' | 'order_limit' | 'unknown';
 	quantity: number | null;
 	unit: string | null;
 	unit_price: number | null;
@@ -253,7 +255,14 @@ export async function searchOffers(query: string, limit = 200, rates: Rates | nu
 			limit 40
 		)
 		select p.id, upper(p.manufacturer_sku) as code, p.source_id as supplier, p.name, p.brand, p.family,
-		       p.product_url as url, p.availability,
+		       p.product_url as url, o.availability,
+		       case when o.context_version >= 2 then o.stock_quantity::float8
+		            else nullif(p.attributes->>'stock_quantity', '')::float8
+		       end as stock_quantity,
+		       case when o.context_version >= 2 then o.stock_quantity_kind
+		            when nullif(p.attributes->>'stock_quantity', '') is not null then 'exact'
+		            else 'unknown'
+		       end as stock_quantity_kind,
 		       o.price::float8 as price, o.currency, o.vat_status,
 		       (o.price / ${fx})::float8 as price_eur,
 		       o.quantity::float8 as quantity, o.unit,
@@ -264,7 +273,8 @@ export async function searchOffers(query: string, limit = 200, rates: Rates | nu
 		from catalogue.source_products p
 		join matched m on m.code = upper(p.manufacturer_sku)
 		join lateral (
-			select price, currency, vat_status, quantity, unit, unit_price, unit_price_per, observed_at
+			select price, currency, vat_status, quantity, unit, unit_price, unit_price_per,
+			       availability, stock_quantity, stock_quantity_kind, context_version, observed_at
 			from catalogue.offer_observations o
 			where o.source_product_id = p.id
 			order by o.observed_at desc

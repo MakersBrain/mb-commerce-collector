@@ -68,6 +68,15 @@ def secret_export(root: Path) -> Path:
     return root
 
 
+def trace_secret_export(root: Path) -> Path:
+    access_id = root / runtime_stage.OTLP_ACCESS_CLIENT_ID_EXPORT
+    access_id.parent.mkdir(parents=True, exist_ok=True)
+    access_id.write_text("client/id+for,staging==", encoding="utf-8")
+    access_secret = root / runtime_stage.OTLP_ACCESS_CLIENT_SECRET_EXPORT
+    access_secret.write_text("secret/value+for,staging==", encoding="utf-8")
+    return root
+
+
 def test_builds_scoped_environments_and_credentials(tmp_path: Path) -> None:
     output = tmp_path / "output"
     runtime_stage.build(ROOT / "values.example.json", secret_export(tmp_path / "input"), output)
@@ -101,9 +110,11 @@ def test_builds_scoped_environments_and_credentials(tmp_path: Path) -> None:
             + f"CATALOGUE_CONTROL_TOKEN={'t' * 40}\n"
         ),
         "worker": database_env("catalogue_worker")
-        + "".join(f"{entry}\n" for entry in WORKER_ENV),
+        + "".join(f"{entry}\n" for entry in WORKER_ENV)
+        + "CATALOGUE_STOCK_TRENDS_ENABLED=false\n",
         "worker-browser": database_env("catalogue_worker")
-        + "".join(f"{entry}\n" for entry in WORKER_ENV),
+        + "".join(f"{entry}\n" for entry in WORKER_ENV)
+        + "CATALOGUE_STOCK_TRENDS_ENABLED=false\n",
     }
     assert "catalogue_service" in service
     assert "sslmode=verify-full" in service
@@ -115,6 +126,13 @@ def test_builds_scoped_environments_and_credentials(tmp_path: Path) -> None:
     assert "CATALOGUE_CACHE_DIR=" not in dispatcher
     assert "CATALOGUE_CONTROL_TOKEN=" not in worker
     assert "CATALOGUE_CONTROL_TOKEN=" in (output / "config/explorer.env").read_text()
+    assert "CATALOGUE_STOCK_TRENDS_ENABLED=false" in worker
+    assert "CATALOGUE_STOCK_TRENDS_ENABLED=false" in worker_browser
+    explorer = (output / "config/explorer.env").read_text()
+    assert "CATALOGUE_EXPLORER_TRENDS_ENABLED=false" in explorer
+    assert "CATALOGUE_TRACKED_PRODUCTS_FILE=/srv/config/tracked-products.json" in explorer
+    tracked = json.loads((output / "config/tracked-products.json").read_text())
+    assert len(tracked["products"]) == 29
     assert (output / "secrets/nats-server.conf").stat().st_mode & 0o777 == 0o400
     stats = json.loads((output / "secrets/nats-stats-credentials.json").read_text())
     assert stats["user"] == "catalogue-stats"
@@ -127,6 +145,60 @@ def test_builds_scoped_environments_and_credentials(tmp_path: Path) -> None:
     ).read_text(encoding="utf-8")
     for process in ("service", "dispatcher", "worker", "worker-browser"):
         assert "WEBSHARE" not in (output / f"config/{process}.env").read_text(encoding="utf-8")
+        assert "OTEL_EXPORTER_OTLP" not in (
+            output / f"config/{process}.env"
+        ).read_text(encoding="utf-8")
+
+
+def test_trace_rollout_injects_only_selected_traced_process(tmp_path: Path) -> None:
+    values = json.loads((ROOT / "values.example.json").read_text(encoding="utf-8"))
+    values["otlp_traces_enabled"] = True
+    values["otlp_trace_processes"] = ["worker-browser"]
+    values_path = tmp_path / "values.json"
+    values_path.write_text(json.dumps(values), encoding="utf-8")
+    secrets = trace_secret_export(secret_export(tmp_path / "input"))
+
+    output = tmp_path / "output"
+    runtime_stage.build(values_path, secrets, output)
+
+    browser = (output / "config/worker-browser.env").read_text(encoding="utf-8")
+    assert (
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="
+        "https://otlp-makersbrain.mazenet.org/v1/traces\n"
+    ) in browser
+    assert "OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf\n" in browser
+    assert (
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS="
+        "CF-Access-Client-Id=client%2Fid%2Bfor%2Cstaging%3D%3D,"
+        "CF-Access-Client-Secret=secret%2Fvalue%2Bfor%2Cstaging%3D%3D\n"
+    ) in browser
+    assert "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT=5\n" in browser
+    assert "OTEL_TRACES_SAMPLER=parentbased_traceidratio\n" in browser
+    assert "OTEL_TRACES_SAMPLER_ARG=0.01\n" in browser
+    assert "OTEL_RESOURCE_ATTRIBUTES=deployment.environment=staging\n" in browser
+    assert "OTEL_BSP_MAX_QUEUE_SIZE=512\n" in browser
+    assert "OTEL_BSP_MAX_EXPORT_BATCH_SIZE=64\n" in browser
+    assert "OTEL_BSP_SCHEDULE_DELAY=5000\n" in browser
+    assert "OTEL_BSP_EXPORT_TIMEOUT=5000\n" in browser
+    for process in ("service", "control", "dispatcher", "worker"):
+        assert "OTEL_" not in (
+            output / f"config/{process}.env"
+        ).read_text(encoding="utf-8")
+
+
+def test_enabled_trace_rollout_requires_separate_access_secrets(tmp_path: Path) -> None:
+    values = json.loads((ROOT / "values.example.json").read_text(encoding="utf-8"))
+    values["otlp_traces_enabled"] = True
+    values["otlp_trace_processes"] = ["worker"]
+    values_path = tmp_path / "values.json"
+    values_path.write_text(json.dumps(values), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="OTLP_TRACES_ACCESS_CLIENT_ID"):
+        runtime_stage.build(
+            values_path,
+            secret_export(tmp_path / "input"),
+            tmp_path / "output",
+        )
 
 
 def test_stages_webshare_gateway_secret_byte_exact_without_enabling_it(

@@ -159,12 +159,15 @@ async def configure_browser_backends(
 def main() -> int:
     options = build_parser().parse_args()
     try:
-        return asyncio.run(run(options))
-    except KeyboardInterrupt:  # pragma: no cover - the signal handler normally wins
-        return 130
-    except ValueError as error:
-        print(f"catalogue-worker: {error}", file=sys.stderr)
-        return 2
+        try:
+            return asyncio.run(run(options))
+        except KeyboardInterrupt:  # pragma: no cover - the signal handler normally wins
+            return 130
+        except ValueError as error:
+            print(f"catalogue-worker: {error}", file=sys.stderr)
+            return 2
+    finally:
+        tracing.shutdown()
 
 
 if __name__ == "__main__":

@@ -24,6 +24,20 @@ PostgreSQL and no credentials reach the client.
 | `/` | Dashboard: totals, products per supplier, family mix, median EUR/L per supplier, widest cross-supplier spread. Filters: pack size, brand. |
 | `/explore` | Faceted browse: product type, brand, product line, colour, surface, firing, application, form, supplier, in-stock only, plus a name search. Grid or sortable table, both paged. Every state - filters, view, sort - is a shareable URL. |
 | `/compare?q=` | Offers for one manufacturer code across suppliers, one chart per pack band. |
+| `/trends` | Reviewed purchased products across providers, with bounded price, exact-stock, availability, and numerical histories. Disabled by default. |
+
+## Price and stock trends
+
+Set `CATALOGUE_EXPLORER_TRENDS_ENABLED=true` to expose `/trends`. The reviewed
+list lives in `config/tracked-products.json`; production mounts the same file
+read-only. Its purchase references are provenance for review, while queries use
+only canonical UUIDs. Duplicate IDs, malformed entries, unknown products, and
+products without active provider variants fail closed.
+
+The default range is 30 days. The page allows 7, 30, 90, or 365 days and reads
+at most 500 observations per provider variant. A capped series is labelled.
+Listed currencies are not converted or compared across currencies. Missing
+stock stays unknown, and only `exact` quantities are drawn as inventory.
 
 ## The honest-comparison rules, in code
 

@@ -80,6 +80,9 @@ export type Observation = {
 	unit_price: number | null;
 	unit_price_per: string | null;
 	availability: string | null;
+	stock_quantity: number | null;
+	stock_quantity_kind: 'exact' | 'lower_bound' | 'upper_bound' | 'order_limit' | 'unknown';
+	context_version: number;
 	attributes: Record<string, unknown> | null;
 };
 

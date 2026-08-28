@@ -66,14 +66,21 @@ def compact_offers(connection: Connection, limit: int, *, execute: bool) -> int:
     with connection.cursor() as cursor:
         cursor.execute(
             """
-            with previous as (
-              select id, source_product_id, observed_at, last_seen_at, context_sha256,
-                     lag(context_sha256) over (
-                       partition by source_product_id order by observed_at, id
-                     ) previous_hash
+            with states as (
+              select id, source_product_id, observed_at, last_seen_at,
+                     jsonb_build_array(
+                       price, currency, price_text, vat_status, quantity, unit,
+                       unit_price, unit_price_per, availability,
+                       stock_quantity, stock_quantity_kind
+                     ) state
                 from catalogue.offer_observations
+            ), previous as (
+              select *, lag(state) over (
+                       partition by source_product_id order by observed_at, id
+                     ) previous_state
+                from states
             ), islands as (
-              select *, sum(case when previous_hash is distinct from context_sha256 then 1 else 0 end)
+              select *, sum(case when previous_state is distinct from state then 1 else 0 end)
                            over (partition by source_product_id order by observed_at, id) island
                 from previous
             )

@@ -1,0 +1,33 @@
+{
+	"products": [
+		{ "canonical_product_id": "ad37674d-e735-4b2f-aaa5-9baaf2d7df8a", "label": "AMACO C-1 Obsidian", "purchase_references": ["39401A", "CELADON C 1 OBSIDIAN 0.472K"] },
+		{ "canonical_product_id": "1d25f09a-0b1a-4b81-a26d-828f9ffcf31b", "label": "AMACO C-10 Snow", "purchase_references": ["39402B", "CELADON C 10 SNOW 0.472L"] },
+		{ "canonical_product_id": "7e5e4fb7-d740-4713-91df-cc3f83d2ed48", "label": "AMACO C-27 Storm", "purchase_references": ["39408L"] },
+		{ "canonical_product_id": "cbf0622c-1bab-4114-8247-55f7ca6a9bed", "label": "AMACO C-5 Charcoal", "purchase_references": ["39426F"] },
+		{ "canonical_product_id": "ad503f4e-9238-41cb-ac5c-a4aa810b1af5", "label": "AMACO KI-11 Snow Drift", "purchase_references": ["34024A"] },
+		{ "canonical_product_id": "90e051d2-1849-4198-ba13-68367131662c", "label": "AMACO PC-12 Blue Midnight", "purchase_references": ["35429N"] },
+		{ "canonical_product_id": "14b8da5e-5187-4c50-a22d-ff8e3147e70b", "label": "AMACO PC-17 Honey Flux", "purchase_references": ["35534S", "PC 17 HONEY FLUX [472ML] 0.472L"] },
+		{ "canonical_product_id": "9eded823-c922-4b5f-aa02-a9f6d8ffe1f5", "label": "AMACO PC-19 Moon River", "purchase_references": ["34039R"] },
+		{ "canonical_product_id": "b9ccbf3e-632e-4af5-9992-6efc7a256ce6", "label": "AMACO PC-20 Blue Rutile", "purchase_references": ["35401D", "PC 20 BLUE RUTILE [472ML] 0.472L"] },
+		{ "canonical_product_id": "1418a4c5-68d4-4aa4-b8ce-4462138aac65", "label": "AMACO PC-33 Iron Lustre", "purchase_references": ["35434V", "PC 33 IRON LUSTRE [472ML] 0.472L"] },
+		{ "canonical_product_id": "dbfb8abc-0058-4935-8fdc-5b42ecbc5b21", "label": "AMACO PC-55 Chun Plum", "purchase_references": ["35424G"] },
+		{ "canonical_product_id": "7d2a52a8-a4df-4d9b-b772-4cd7d8d8e786", "label": "AMACO SH-22 Acai Matte", "purchase_references": ["39704D"] },
+		{ "canonical_product_id": "3da49c1b-297c-430b-8aa9-0d184d6bc26d", "label": "AMACO V-361 Jet Black", "purchase_references": ["37437W"] },
+		{ "canonical_product_id": "57cb2dc6-b482-4fcd-badf-e05ccf626bfe", "label": "AMACO CO-6 Supernova", "purchase_references": ["CO-06 SUPERNOVA (472ML)"] },
+		{ "canonical_product_id": "cf45dc2b-3965-4c99-bd7c-157b983bdb65", "label": "AMACO PC-25 Textured Turquoise", "purchase_references": ["PC 25 TEXTURED TURQUOISE [472ML] 0.472L"] },
+		{ "canonical_product_id": "9669a81c-f75e-4322-908f-9bd324f39bcd", "label": "AMACO PC-31 Oatmeal", "purchase_references": ["PC 31 OATMEAL [472ML] 0.472K"] },
+		{ "canonical_product_id": "94a71511-a3f2-45fc-a2d8-f378c19bb667", "label": "AMACO PC-42 Seaweed", "purchase_references": ["PC 42 SEAWEED [472ML] 0.472L"] },
+		{ "canonical_product_id": "779007c4-7840-4f1d-94db-31d319a66616", "label": "AMACO PCF-74 River Birch", "purchase_references": ["PCF-74 RIVER BIRCH (472ML)"] },
+		{ "canonical_product_id": "a1d2db83-1502-4cfa-9e80-39cd554a4dfa", "label": "AMACO PC-23 Indigo Float", "purchase_references": ["PC_23-0_472"] },
+		{ "canonical_product_id": "31e265bf-7d12-50f0-9b3f-a806b1594996", "label": "Laguna WC-108 Power Turquoise", "purchase_references": ["GWC108LP"] },
+		{ "canonical_product_id": "e58d08d6-1b75-40d1-8b11-14ee0eb81314", "label": "Mayco SW-137 Storm Gray", "purchase_references": ["SW137P"] },
+		{ "canonical_product_id": "d9e11a11-a103-402a-a914-5bfcbee21d5a", "label": "Mayco SW-166 Norse Blue", "purchase_references": ["SW166P"] },
+		{ "canonical_product_id": "6b35ad6f-83e3-4f3c-b0f4-a2edc869ecc2", "label": "Mayco SW-214 Micro Pearl", "purchase_references": ["SW214P"] },
+		{ "canonical_product_id": "3ae90730-7430-4ccc-a4a8-2d1faa3d3712", "label": "Mayco SW-420 White Melt Gloop", "purchase_references": ["SW420P"] },
+		{ "canonical_product_id": "e017016e-0966-42c3-9cb2-17f18475ee48", "label": "Mayco SW-503 Orange Gloss", "purchase_references": ["SW503/50"] },
+		{ "canonical_product_id": "325de33d-cbbe-4935-ab6c-d8b03ea0549b", "label": "Spectrum 1431 Pearl White", "purchase_references": ["1431P"] },
+		{ "canonical_product_id": "5d00a862-7e20-4ef3-8d14-37f8220cf880", "label": "Spectrum 1447 Bougainvillea", "purchase_references": ["1447P"] },
+		{ "canonical_product_id": "5ea47fba-087e-4db3-a685-bb8c1a5ce734", "label": "SIO-2 PRAI white stoneware", "purchase_references": ["PRAI"] },
+		{ "canonical_product_id": "01080544-6570-51c8-ad41-c6358ba36252", "label": "SIO-2 LUNA speckled stoneware", "purchase_references": ["LUNA"] }
+	]
+}

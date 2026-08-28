@@ -779,8 +779,10 @@ class Worker:
                 await log_handler.flush_to(connection)
 
             # The same question `plan_load` asks of a manifest entry, asked of
-            # the source this worker has just collected.
-            whole, why_not = postgres.may_retire(artifact.status, outcome.summary.get("truncated"))
+            # the source this worker has just collected. Decide the terminal
+            # error before loading: a zero-record extraction failure is not a
+            # complete empty catalogue and must never retire the last good run.
+            whole, why_not, error = _legacy_load_plan(outcome.summary, artifact.status)
             if why_not:
                 outcome.summary["retirement_withheld"] = why_not
                 LOGGER.warning("job.adds_only", source=job.source_id, reason=why_not)
@@ -793,11 +795,6 @@ class Worker:
                 outcome.summary["rejected"] = loaded.rejected
                 outcome.summary["rejects"] = loaded.rejects
 
-            error = None
-            if outcome.summary["error_count"] and not outcome.summary["records"]:
-                error = _first_error(outcome.summary)
-            elif nothing := run_source_barren(outcome.summary):
-                error = nothing
             await self._finish(
                 job,
                 _legacy_terminal_state(error, loaded.rejected),
@@ -1361,13 +1358,24 @@ class Worker:
             from psycopg.rows import dict_row
 
             with psycopg.connect(dsn, row_factory=dict_row, autocommit=True) as connection:
-                return self._load_fenced(connection, job, outcome.records, whole=whole)
+                return self._load_fenced(
+                    connection,
+                    job,
+                    outcome.records,
+                    whole=whole,
+                    stock_trends_enabled=self.settings.stock_trends_enabled,
+                )
 
         return await asyncio.to_thread(load)
 
     @staticmethod
     def _load_fenced(
-        connection: Any, job: queue.ClaimedJob, records: Any, *, whole: bool
+        connection: Any,
+        job: queue.ClaimedJob,
+        records: Any,
+        *,
+        whole: bool,
+        stock_trends_enabled: bool = False,
     ) -> postgres.SourceReport:
         """Keep token replacement out of the material catalogue transaction."""
         with connection.transaction():
@@ -1383,7 +1391,14 @@ class Worker:
             if owned is None:
                 raise RuntimeError("job execution token was lost before catalogue load")
             postgres.ensure_staging(connection)
-            return postgres.load_source(connection, job.source_id, records, whole=whole, run_id=None)
+            return postgres.load_source(
+                connection,
+                job.source_id,
+                records,
+                whole=whole,
+                run_id=None,
+                stock_trends_enabled=stock_trends_enabled,
+            )
 
     async def _finish(
         self,
@@ -1607,6 +1622,28 @@ def _legacy_terminal_state(error: str | None, rejected: int) -> str:
     if error:
         return "failed"
     return "degraded" if rejected else "succeeded"
+
+
+def _legacy_load_plan(
+    summary: dict[str, Any], write_status: str,
+) -> tuple[bool, str | None, str | None]:
+    """Plan retirement and failure together for the legacy worker path.
+
+    A barren result used to be classified only after `_load`, which allowed an
+    empty replacement artifact to retire every active product before the job
+    was finally marked failed. The failure classification is therefore part of
+    the load plan: failed zero-record outcomes are always adds-only.
+    """
+    error = None
+    if summary.get("error_count") and not summary.get("records"):
+        error = _first_error(summary) or "source collected no records after errors"
+    elif nothing := run_source_barren(summary):
+        error = nothing
+
+    whole, why_not = postgres.may_retire(write_status, summary.get("truncated"))
+    if error is not None:
+        return False, "zero-record outcome failed validation", error
+    return whole, why_not, None
 
 
 def _fingerprint(value: Any) -> str:

@@ -7,7 +7,7 @@
 	import SurfaceLockup from '$lib/components/SurfaceLockup.svelte';
 	import { page } from '$app/state';
 
-	let { children } = $props();
+	let { children, data } = $props();
 
 	let theme: 'light' | 'dark' | null = $state(null);
 
@@ -49,12 +49,15 @@
 	 * rather than a tab inside it - but it belongs in the same row, because to the
 	 * reader it is one of four places to be.
 	 */
-	const TABS = [
+	const TABS = $derived([
 		{ href: '/', label: 'Overview', short: 'Overview', exact: true },
 		{ href: '/explore', label: 'Explore', short: 'Explore', exact: false },
 		{ href: '/compare', label: 'Compare', short: 'Compare', exact: false },
+		...(data.trendsEnabled
+			? [{ href: '/trends', label: 'Trends', short: 'Trends', exact: false }]
+			: []),
 		{ href: '/ops', label: 'Operations', short: 'Ops', exact: false }
-	];
+	]);
 
 	const here = $derived((entry: (typeof TABS)[number]) =>
 		entry.exact ? page.url.pathname === entry.href : page.url.pathname.startsWith(entry.href)

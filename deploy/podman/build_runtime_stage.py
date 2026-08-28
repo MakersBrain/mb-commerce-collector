@@ -15,8 +15,12 @@ from urllib.parse import quote
 HERE = Path(__file__).resolve().parent
 TOKEN = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 PASSWORD = TOKEN
+OTLP_ACCESS_VALUE = re.compile(r"^[\x21-\x7e]{16,512}$")
 MAX_PROVIDER_SECRET_BYTES = 1_048_576
 WEBSHARE_GATEWAY_EXPORT = "catalogue/proxy/WEBSHARE_GATEWAY_V2_JSON"
+OTLP_ACCESS_CLIENT_ID_EXPORT = "observability/OTLP_TRACES_ACCESS_CLIENT_ID"
+OTLP_ACCESS_CLIENT_SECRET_EXPORT = "observability/OTLP_TRACES_ACCESS_CLIENT_SECRET"
+OTLP_TRACES_ENDPOINT = "https://otlp-makersbrain.mazenet.org/v1/traces"
 DB_ROLES: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "service": ("catalogue_service", "CATALOGUE_SERVICE_DB_PASSWORD", ()),
     "control": (
@@ -65,6 +69,7 @@ def _validate_existing_stage(output: Path) -> None:
     allowed_files = {
         *(Path("config") / f"{process}.env" for process in DB_ROLES),
         Path("config/explorer.env"),
+        Path("config/tracked-products.json"),
         *(Path("secrets") / f"nats-{role}-credentials.json" for role in NATS_ROLES),
         Path("secrets/nats-server.conf"),
         Path("secrets/webshare-gateway/webshare-gateway.json"),
@@ -176,7 +181,7 @@ def build(values_path: Path, secret_root: Path, output: Path) -> None:
     assert render_spec and render_spec.loader
     render = importlib.util.module_from_spec(render_spec)
     render_spec.loader.exec_module(render)
-    render.load_values(values_path)
+    values = render.load_values(values_path)
 
     config = output / "config"
     secrets = output / "secrets"
@@ -186,6 +191,34 @@ def build(values_path: Path, secret_root: Path, output: Path) -> None:
     port = values["postgres_port"]
     database = values["postgres_database"]
     common = "CATALOGUE_LOG_JSON=true\n"
+    trace_processes = set(values["otlp_trace_processes"])
+    trace_environment = ""
+    if values["otlp_traces_enabled"]:
+        access_id = _secret(secret_root, OTLP_ACCESS_CLIENT_ID_EXPORT, OTLP_ACCESS_VALUE)
+        access_secret = _secret(secret_root, OTLP_ACCESS_CLIENT_SECRET_EXPORT, OTLP_ACCESS_VALUE)
+        headers = (
+            "CF-Access-Client-Id=" + quote(access_id, safe="")
+            + ",CF-Access-Client-Secret=" + quote(access_secret, safe="")
+        )
+        trace_environment = "".join(
+            f"{name}={value}\n"
+            for name, value in (
+                ("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", OTLP_TRACES_ENDPOINT),
+                ("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf"),
+                ("OTEL_EXPORTER_OTLP_TRACES_HEADERS", headers),
+                ("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT", "5"),
+                ("OTEL_TRACES_SAMPLER", "parentbased_traceidratio"),
+                ("OTEL_TRACES_SAMPLER_ARG", "0.01"),
+                (
+                    "OTEL_RESOURCE_ATTRIBUTES",
+                    f"deployment.environment={values['environment']}",
+                ),
+                ("OTEL_BSP_MAX_QUEUE_SIZE", "512"),
+                ("OTEL_BSP_MAX_EXPORT_BATCH_SIZE", "64"),
+                ("OTEL_BSP_SCHEDULE_DELAY", "5000"),
+                ("OTEL_BSP_EXPORT_TIMEOUT", "5000"),
+            )
+        )
     for process, (role, password_name, extra_env) in DB_ROLES.items():
         password = _secret(secret_root, f"catalogue/database/{password_name}", TOKEN)
         dsn = (
@@ -194,6 +227,14 @@ def build(values_path: Path, secret_root: Path, output: Path) -> None:
         )
         additions = "CATALOGUE_DSN=" + dsn + "\n"
         additions += "".join(f"{entry}\n" for entry in extra_env)
+        if process in {"worker", "worker-browser"}:
+            additions += (
+                "CATALOGUE_STOCK_TRENDS_ENABLED="
+                + str(values["stock_trends_enabled"]).lower()
+                + "\n"
+            )
+        if process in trace_processes:
+            additions += trace_environment
         _write(config / f"{process}.env", common + additions)
 
     control_token = _secret(secret_root, "catalogue/application/CATALOGUE_CONTROL_TOKEN", TOKEN)
@@ -202,8 +243,15 @@ def build(values_path: Path, secret_root: Path, output: Path) -> None:
         _write(path, path.read_text(encoding="utf-8") + f"CATALOGUE_CONTROL_TOKEN={control_token}\n")
     _write(
         config / "explorer.env",
-        f"CATALOGUE_CONTROL_TOKEN={control_token}\nHOST=0.0.0.0\nPORT=3000\n",
+        f"CATALOGUE_CONTROL_TOKEN={control_token}\nHOST=0.0.0.0\nPORT=3000\n"
+        f"CATALOGUE_EXPLORER_TRENDS_ENABLED={str(values['explorer_trends_enabled']).lower()}\n"
+        "CATALOGUE_TRACKED_PRODUCTS_FILE=/srv/config/tracked-products.json\n",
     )
+    tracked_products = HERE.parents[1] / "catalogue-explorer/config/tracked-products.json"
+    parsed_products = json.loads(tracked_products.read_text(encoding="utf-8"))
+    if not isinstance(parsed_products, dict) or not isinstance(parsed_products.get("products"), list):
+        raise ValueError("tracked-products.json must contain a products array")
+    _write(config / "tracked-products.json", json.dumps(parsed_products, indent=2) + "\n")
 
     # Control receives this dedicated directory writable for atomic generation
     # replacement; workers receive the same directory read-only. It contains no

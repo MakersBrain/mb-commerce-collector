@@ -17,6 +17,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from mb_ceramics_catalogue import __version__
+from mb_ceramics_catalogue.config.settings import Settings
 from mb_ceramics_catalogue.config.sources import SourcesFile, default_path
 from mb_ceramics_catalogue.observability import logging as obs
 from mb_ceramics_catalogue.storage import db, postgres
@@ -49,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
 def run(options: argparse.Namespace) -> int:
     obs.configure(options.log_level)
     sources = SourcesFile.load(options.sources_file or default_path())
+    settings = Settings()
 
     plans, skipped = postgres.plan_load(options.data)
     if options.complete_only:
@@ -100,6 +102,7 @@ def run(options: argparse.Namespace) -> int:
             described,
             keep_stale=options.keep_stale,
             run_id=options.run_id,
+            stock_trends_enabled=settings.stock_trends_enabled,
         )
 
     print(f"\nimport run {report.run_id}")

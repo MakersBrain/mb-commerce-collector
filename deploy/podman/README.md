@@ -13,6 +13,28 @@ containers never receive the NATS administrator credential. `release.py`
 verifies the signed record and every image, stages immutable content and
 atomically selects the Quadlet bundle with rollback on activation failure.
 
+OTLP/HTTP trace export is a separate, fail-closed rollout. Public values must
+carry a strict `otlp_traces_enabled` boolean and an `otlp_trace_processes`
+list. Disabled means an empty list and no trace credentials are read. Enabled
+requires a non-empty unique subset of `worker` and `worker-browser`; these are
+the only deployed processes that currently initialize tracing. The runtime
+stage then reads `observability/OTLP_TRACES_ACCESS_CLIENT_ID` and
+`observability/OTLP_TRACES_ACCESS_CLIENT_SECRET`, URL-encodes them into the
+standard signal-specific headers, and writes the endpoint, HTTP/protobuf
+protocol, 1% parent-based sampler, deployment environment, and bounded batch
+and export timeouts only to the selected mode-0600 process environment files.
+Service, control and dispatcher receive neither trace settings nor trace
+credentials.
+
+Price/stock history has two independent public release booleans:
+`stock_trends_enabled` injects `CATALOGUE_STOCK_TRENDS_ENABLED` only into both
+worker modes, and `explorer_trends_enabled` injects
+`CATALOGUE_EXPLORER_TRENDS_ENABLED` only into Explorer. Both default false in
+the example values. The reviewed `catalogue-explorer/config/tracked-products.json`
+is copied into the runtime stage and mounted read-only at
+`/srv/config/tracked-products.json`; it contains identifiers and purchase
+references, not credentials.
+
 The optional Infisical export
 `catalogue/proxy/WEBSHARE_GATEWAY_V2_JSON` is copied byte-for-byte into the
 private runtime stage as `secrets/webshare-gateway/webshare-gateway.json`.

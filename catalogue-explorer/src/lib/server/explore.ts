@@ -443,7 +443,8 @@ export async function productDetail(id: string): Promise<ProductDetail> {
 			select observed_at, price::float8 as price, currency, price_text, vat_status,
 			       quantity::float8 as quantity, unit,
 			       unit_price::float8 as unit_price, unit_price_per,
-			       availability, attributes
+			       availability, stock_quantity::float8 as stock_quantity,
+			       stock_quantity_kind, context_version, attributes
 			from catalogue.offer_observations
 			where source_product_id = ${id}
 			order by observed_at desc, id desc
@@ -451,6 +452,24 @@ export async function productDetail(id: string): Promise<ProductDetail> {
 		`
 	]);
 	if (!product) return { product: null, source: null, offers: [] };
+
+	// Context-v1 observations predate stock quantities, while the current
+	// source-product document may already contain the exact value imported with
+	// that same latest offer. Surface that one current reading without inventing
+	// quantities for the older timeline; new context-v2 observations carry their
+	// own qualified quantity and never use this compatibility path.
+	const attributes = product.attributes as Record<string, unknown> | null;
+	const legacyStock = attributes?.stock_quantity;
+	const current = offers[0];
+	if (
+		current?.context_version === 1 &&
+		(typeof legacyStock === 'number' || typeof legacyStock === 'string')
+	) {
+		const quantity = Number(legacyStock);
+		if (Number.isSafeInteger(quantity) && quantity >= 0) {
+			offers[0] = { ...current, stock_quantity: quantity, stock_quantity_kind: 'exact' };
+		}
+	}
 
 	// The joined source columns are lifted out of the product row so the panel
 	// can show "the shop" and "the product" as the two separate things they are.

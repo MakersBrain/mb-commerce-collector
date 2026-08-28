@@ -1287,6 +1287,8 @@ class TestSchemaMigration:
         assert await storage_db.apply_schema(db) == [
             storage_db.PROXY_PROVIDER_INTEGRITY_MIGRATION,
             storage_db.PROXY_PROFILE_SECRET_INTENT_MIGRATION,
+            storage_db.OFFER_STOCK_TRENDS_MIGRATION,
+            storage_db.PURCHASED_PRODUCT_CURATION_MIGRATION,
         ]
         assert await storage_db.apply_schema(db) == []
         migrated = await rows(
@@ -1333,7 +1335,9 @@ class TestSchemaMigration:
         await self.install_before(db, storage_db.PROXY_PROFILE_SECRET_INTENT_MIGRATION)
 
         assert await storage_db.apply_schema(db) == [
-            storage_db.PROXY_PROFILE_SECRET_INTENT_MIGRATION
+            storage_db.PROXY_PROFILE_SECRET_INTENT_MIGRATION,
+            storage_db.OFFER_STOCK_TRENDS_MIGRATION,
+            storage_db.PURCHASED_PRODUCT_CURATION_MIGRATION,
         ]
         assert await storage_db.apply_schema(db) == []
         relation = await rows(
@@ -1360,6 +1364,43 @@ class TestSchemaMigration:
             "operation_id", "provider", "profile_id", "logical_name", "cycle_start",
             "expected_generation", "target_generation", "created_profile", "state",
             "error_code", "created_at", "updated_at", "installed_at", "completed_at",
+        }
+
+    async def test_offer_stock_trends_migration_is_ordered_and_idempotent(self, db):
+        await self.install_before(db, storage_db.OFFER_STOCK_TRENDS_MIGRATION)
+
+        assert await storage_db.apply_schema(db) == [
+            storage_db.OFFER_STOCK_TRENDS_MIGRATION,
+            storage_db.PURCHASED_PRODUCT_CURATION_MIGRATION,
+        ]
+        assert await storage_db.apply_schema(db) == []
+        columns = await rows(
+            db,
+            """select column_name, data_type, column_default
+                 from information_schema.columns
+                where table_schema = 'catalogue'
+                  and table_name = 'offer_observations'
+                  and column_name in (
+                    'stock_quantity', 'stock_quantity_kind', 'context_version'
+                  )
+                order by column_name""",
+        )
+        assert [row["column_name"] for row in columns] == [
+            "context_version",
+            "stock_quantity",
+            "stock_quantity_kind",
+        ]
+        constraints = await rows(
+            db,
+            """select conname from pg_constraint
+                where conrelid = 'catalogue.offer_observations'::regclass
+                  and conname like 'offer_observations_%stock%'
+                order by conname""",
+        )
+        assert {row["conname"] for row in constraints} == {
+            "offer_observations_stock_quantity_check",
+            "offer_observations_stock_quantity_kind_check",
+            "offer_observations_stock_quantity_pair_check",
         }
 
     async def test_profile_secret_intent_constraints_bind_every_durable_identity(self, db):

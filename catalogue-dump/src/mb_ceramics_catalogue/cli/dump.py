@@ -286,14 +286,17 @@ async def run(options: argparse.Namespace) -> int:
 def main() -> int:
     options = build_parser().parse_args()
     try:
-        return asyncio.run(run(options))
-    except KeyboardInterrupt:  # pragma: no cover - the signal handler normally wins
-        return 130
-    except ValueError as error:
-        # An unknown source, or a sources.json that does not validate. Both are
-        # the operator's input, so they get a message rather than a traceback.
-        print(f"catalogue-dump: {error}", file=sys.stderr)
-        return 2
+        try:
+            return asyncio.run(run(options))
+        except KeyboardInterrupt:  # pragma: no cover - the signal handler normally wins
+            return 130
+        except ValueError as error:
+            # An unknown source, or a sources.json that does not validate. Both are
+            # the operator's input, so they get a message rather than a traceback.
+            print(f"catalogue-dump: {error}", file=sys.stderr)
+            return 2
+    finally:
+        tracing.shutdown()
 
 
 if __name__ == "__main__":

@@ -71,3 +71,39 @@ def test_render_rejects_oversized_worker_count(tmp_path: Path) -> None:
     source.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ValueError, match="one to three"):
         render.render(source, tmp_path / "rendered")
+
+
+@pytest.mark.parametrize("flag", ["stock_trends_enabled", "explorer_trends_enabled"])
+def test_render_rejects_non_boolean_trend_flags(tmp_path: Path, flag: str) -> None:
+    document = values()
+    document[flag] = "false"
+    source = tmp_path / "values.json"
+    source.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=flag):
+        render.render(source, tmp_path / "rendered")
+
+
+@pytest.mark.parametrize(
+    ("enabled", "processes"),
+    [
+        ("true", []),
+        (False, ["worker"]),
+        (True, []),
+        (True, ["service"]),
+        (True, ["worker", "worker"]),
+        (True, [{}]),
+    ],
+)
+def test_render_rejects_incoherent_trace_rollout(
+    tmp_path: Path,
+    enabled: object,
+    processes: list[object],
+) -> None:
+    document = values()
+    document["otlp_traces_enabled"] = enabled
+    document["otlp_trace_processes"] = processes
+    source = tmp_path / "values.json"
+    source.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="otlp_trace"):
+        render.render(source, tmp_path / "rendered")

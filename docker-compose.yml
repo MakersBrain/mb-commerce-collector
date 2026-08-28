@@ -351,6 +351,7 @@ services:
       # explicitly enabled. The entrypoint stages the file but never changes
       # this setting.
       CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED: ${CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED:-false}
+      CATALOGUE_STOCK_TRENDS_ENABLED: ${CATALOGUE_STOCK_TRENDS_ENABLED:-false}
     volumes:
       # Shared, so a replay works across workers and a run's artifacts are all
       # in one place. The cache is sharded per host and the dumps are namespaced
@@ -420,6 +421,7 @@ services:
       CATALOGUE_PROXY_ENABLED: ${CATALOGUE_PROXY_ENABLED:-false}
       CATALOGUE_PROXY_SECRET_FILE: /run/proxy-secrets/profiles.json
       CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED: ${CATALOGUE_PROXY_WEBSHARE_DATA_PLANE_ENABLED:-false}
+      CATALOGUE_STOCK_TRENDS_ENABLED: ${CATALOGUE_STOCK_TRENDS_ENABLED:-false}
     volumes:
       - cache:/var/lib/catalogue/cache
       - dumps:/var/lib/catalogue/dumps
@@ -491,8 +493,11 @@ services:
       CATALOGUE_OPERATOR_VIEWERS: ${CATALOGUE_OPERATOR_VIEWERS:-}
       CATALOGUE_OPERATOR_ASSERTION_PRIVATE_KEY_FILE: /run/operator-secrets/operator-private-key.pem
       CATALOGUE_OPERATOR_ASSERTION_KEY_ID: ${CATALOGUE_OPERATOR_ASSERTION_KEY_ID:-current}
+      CATALOGUE_EXPLORER_TRENDS_ENABLED: ${CATALOGUE_EXPLORER_TRENDS_ENABLED:-false}
+      CATALOGUE_TRACKED_PRODUCTS_FILE: /srv/config/tracked-products.json
     volumes:
       - operator-secrets:/run/operator-secrets:ro
+      - ./catalogue-explorer/config/tracked-products.json:/srv/config/tracked-products.json:ro
     restart: unless-stopped
 
   # The public edge: an outbound-only connector publishing the explorer at

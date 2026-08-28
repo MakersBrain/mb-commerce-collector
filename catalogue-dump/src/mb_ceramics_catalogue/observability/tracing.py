@@ -9,24 +9,22 @@ The span hierarchy mirrors the domain: `run` -> `job` (one per source) ->
 `http.request`, the last of which
 `opentelemetry-instrumentation-httpx` produces without `Fetcher` being touched.
 
-**Being honest about scope: there is no collector to send these to.** Nothing in
-`makersbrain-infra` runs one. So the exporter is off unless
-`OTEL_EXPORTER_OTLP_ENDPOINT` is set, and what ships today is the `trace_id`
-stamped onto `catalogue.jobs` and included in every log line. The correlation
-therefore exists in the data from day one, and a collector added later reads
-history rather than starting from zero. The instrumentation is cheap; the
-retrofit would not be.
+The exporter is off unless the standard signal-specific
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (preferred) or generic
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set. Configuration and export are deliberately
+fail-open: losing observability must never lose catalogue work.
 """
 
 from __future__ import annotations
 
 import os
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import Any
 
 _enabled = False
 _tracer: Any = None
+_provider: Any = None
 
 
 def enabled() -> bool:
@@ -40,9 +38,15 @@ def configure(service_name: str = "catalogue", *, force: bool = False) -> bool:
     no-op recording rather than a branch at every call site, and `trace_id()`
     still returns a real id for the job row and the logs.
     """
-    global _enabled, _tracer
+    global _enabled, _provider, _tracer
 
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    if _provider is not None:
+        return _enabled
+
+    endpoint = (
+        os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "").strip()
+        or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    )
     try:
         from opentelemetry import trace
         from opentelemetry.sdk.resources import Resource
@@ -59,13 +63,30 @@ def configure(service_name: str = "catalogue", *, force: bool = False) -> bool:
     )
 
     if endpoint or force:
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        protocol = (
+            os.environ.get("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "").strip()
+            or os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf").strip()
+        )
+        if protocol == "http/protobuf":
+            try:
+                from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                    OTLPSpanExporter,
+                )
+                from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
-        _enabled = True
+                # The exporter reads the signal-specific headers and timeout;
+                # the processor reads the standard OTEL_BSP_* queue, batch,
+                # delay and export-timeout bounds. In particular, the SDK
+                # URL-decodes OTEL_EXPORTER_OTLP_TRACES_HEADERS as required by
+                # the OTLP environment-variable specification.
+                exporter = OTLPSpanExporter(endpoint=endpoint or None)
+                provider.add_span_processor(BatchSpanProcessor(exporter))
+                _enabled = True
+            except Exception:  # noqa: BLE001 - tracing must never fail application startup
+                _enabled = False
 
     trace.set_tracer_provider(provider)
+    _provider = provider
     _tracer = trace.get_tracer("mb_ceramics_catalogue")
 
     try:
@@ -76,6 +97,22 @@ def configure(service_name: str = "catalogue", *, force: bool = False) -> bool:
         pass
 
     return _enabled
+
+
+def shutdown() -> None:
+    """Flush and stop the configured provider without failing application exit."""
+    global _enabled, _provider, _tracer
+
+    provider, _provider = _provider, None
+    _enabled = False
+    _tracer = None
+    if provider is None:
+        return
+    with suppress(Exception):
+        # BatchSpanProcessor.shutdown drains its bounded queue using the
+        # configured OTEL_BSP_EXPORT_TIMEOUT. Exporter errors remain internal
+        # to the SDK and this final guard preserves the application's exit.
+        provider.shutdown()
 
 
 @contextmanager

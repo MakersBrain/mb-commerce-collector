@@ -2224,11 +2224,13 @@ class TruncationTests(unittest.IsolatedAsyncioTestCase):
             result = await scraper.scrape()
 
         # `record.is_valid` refuses a priced row with no price, so the variant
-        # is dropped rather than published as a bare number — and the source
-        # says why, which is what turns an empty result into a diagnosis. The
-        # job then fails on `runner.barren` rather than reporting a green zero.
+        # is dropped rather than published as a bare number. The currency
+        # request is also a retryable enumeration failure: an exhausted worker
+        # attempt stays adds-only instead of retiring the last good catalogue.
         self.assertEqual([], result.records)
         self.assertEqual(1, result.discovered)
+        self.assertEqual(1, len(result.errors))
+        self.assertTrue(result.truncated)
         self.assertTrue(
             any("currency could not be read" in note for note in result.notes), result.notes
         )
