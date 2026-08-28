@@ -41,6 +41,15 @@ def test_webshare_data_plane_is_separately_default_off() -> None:
     )
 
 
+def test_stock_trends_are_default_off_and_strictly_parsed(monkeypatch) -> None:
+    assert Settings().stock_trends_enabled is False
+    assert Settings(stock_trends_enabled=True).stock_trends_enabled is True
+
+    monkeypatch.setenv("CATALOGUE_STOCK_TRENDS_ENABLED", "not-a-boolean")
+    with pytest.raises(ValidationError, match="stock_trends_enabled"):
+        Settings()
+
+
 def test_role_scoped_nats_clients_do_not_provision(tmp_path) -> None:
     publish_token = tmp_path / "publish-token"
     consume_token = tmp_path / "consume-token"

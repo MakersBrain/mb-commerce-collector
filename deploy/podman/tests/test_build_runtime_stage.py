@@ -110,9 +110,11 @@ def test_builds_scoped_environments_and_credentials(tmp_path: Path) -> None:
             + f"CATALOGUE_CONTROL_TOKEN={'t' * 40}\n"
         ),
         "worker": database_env("catalogue_worker")
-        + "".join(f"{entry}\n" for entry in WORKER_ENV),
+        + "".join(f"{entry}\n" for entry in WORKER_ENV)
+        + "CATALOGUE_STOCK_TRENDS_ENABLED=false\n",
         "worker-browser": database_env("catalogue_worker")
-        + "".join(f"{entry}\n" for entry in WORKER_ENV),
+        + "".join(f"{entry}\n" for entry in WORKER_ENV)
+        + "CATALOGUE_STOCK_TRENDS_ENABLED=false\n",
     }
     assert "catalogue_service" in service
     assert "sslmode=verify-full" in service
@@ -124,6 +126,13 @@ def test_builds_scoped_environments_and_credentials(tmp_path: Path) -> None:
     assert "CATALOGUE_CACHE_DIR=" not in dispatcher
     assert "CATALOGUE_CONTROL_TOKEN=" not in worker
     assert "CATALOGUE_CONTROL_TOKEN=" in (output / "config/explorer.env").read_text()
+    assert "CATALOGUE_STOCK_TRENDS_ENABLED=false" in worker
+    assert "CATALOGUE_STOCK_TRENDS_ENABLED=false" in worker_browser
+    explorer = (output / "config/explorer.env").read_text()
+    assert "CATALOGUE_EXPLORER_TRENDS_ENABLED=false" in explorer
+    assert "CATALOGUE_TRACKED_PRODUCTS_FILE=/srv/config/tracked-products.json" in explorer
+    tracked = json.loads((output / "config/tracked-products.json").read_text())
+    assert len(tracked["products"]) == 29
     assert (output / "secrets/nats-server.conf").stat().st_mode & 0o777 == 0o400
     stats = json.loads((output / "secrets/nats-stats-credentials.json").read_text())
     assert stats["user"] == "catalogue-stats"

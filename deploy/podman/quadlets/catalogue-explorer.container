@@ -12,6 +12,7 @@ UserNS=keep-id:uid=10001,gid=10001
 EnvironmentFile=/etc/makersbrain/catalogue/explorer.env
 Environment=CATALOGUE_CONTROL_URL=http://catalogue-control:8687
 Environment=CATALOGUE_SERVICE_URL=http://catalogue-service:8686
+Volume=/etc/makersbrain/catalogue/tracked-products.json:/srv/config/tracked-products.json:ro
 HealthCmd=node -e "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)})"
 HealthInterval=15s
 HealthStartPeriod=20s

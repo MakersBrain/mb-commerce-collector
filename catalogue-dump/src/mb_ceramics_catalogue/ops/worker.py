@@ -1358,13 +1358,24 @@ class Worker:
             from psycopg.rows import dict_row
 
             with psycopg.connect(dsn, row_factory=dict_row, autocommit=True) as connection:
-                return self._load_fenced(connection, job, outcome.records, whole=whole)
+                return self._load_fenced(
+                    connection,
+                    job,
+                    outcome.records,
+                    whole=whole,
+                    stock_trends_enabled=self.settings.stock_trends_enabled,
+                )
 
         return await asyncio.to_thread(load)
 
     @staticmethod
     def _load_fenced(
-        connection: Any, job: queue.ClaimedJob, records: Any, *, whole: bool
+        connection: Any,
+        job: queue.ClaimedJob,
+        records: Any,
+        *,
+        whole: bool,
+        stock_trends_enabled: bool = False,
     ) -> postgres.SourceReport:
         """Keep token replacement out of the material catalogue transaction."""
         with connection.transaction():
@@ -1380,7 +1391,14 @@ class Worker:
             if owned is None:
                 raise RuntimeError("job execution token was lost before catalogue load")
             postgres.ensure_staging(connection)
-            return postgres.load_source(connection, job.source_id, records, whole=whole, run_id=None)
+            return postgres.load_source(
+                connection,
+                job.source_id,
+                records,
+                whole=whole,
+                run_id=None,
+                stock_trends_enabled=stock_trends_enabled,
+            )
 
     async def _finish(
         self,

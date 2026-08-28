@@ -26,6 +26,15 @@ and export timeouts only to the selected mode-0600 process environment files.
 Service, control and dispatcher receive neither trace settings nor trace
 credentials.
 
+Price/stock history has two independent public release booleans:
+`stock_trends_enabled` injects `CATALOGUE_STOCK_TRENDS_ENABLED` only into both
+worker modes, and `explorer_trends_enabled` injects
+`CATALOGUE_EXPLORER_TRENDS_ENABLED` only into Explorer. Both default false in
+the example values. The reviewed `catalogue-explorer/config/tracked-products.json`
+is copied into the runtime stage and mounted read-only at
+`/srv/config/tracked-products.json`; it contains identifiers and purchase
+references, not credentials.
+
 The optional Infisical export
 `catalogue/proxy/WEBSHARE_GATEWAY_V2_JSON` is copied byte-for-byte into the
 private runtime stage as `secrets/webshare-gateway/webshare-gateway.json`.

@@ -47,6 +47,9 @@ def load_values(path: Path) -> dict:
         or len(workers) != len(set(workers))
     ):
         raise ValueError("worker_instances must contain one to three unique integers from 1 to 9")
+    for flag in ("stock_trends_enabled", "explorer_trends_enabled"):
+        if not isinstance(values.get(flag), bool):
+            raise ValueError(f"{flag} must be a boolean")
     traces_enabled = values.get("otlp_traces_enabled")
     if not isinstance(traces_enabled, bool):
         raise ValueError("otlp_traces_enabled must be a boolean")

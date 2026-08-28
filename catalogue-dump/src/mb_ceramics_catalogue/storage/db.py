@@ -132,6 +132,8 @@ PROXY_ATTEMPT_AUTHORIZATION_MIGRATION = "catalogue-proxy-attempt-authorization-v
 PROXY_AUDIT_ROLE_MIGRATION = "catalogue-proxy-audit-role-v1.sql"
 PROXY_PROVIDER_INTEGRITY_MIGRATION = "catalogue-proxy-provider-integrity-v1.sql"
 PROXY_PROFILE_SECRET_INTENT_MIGRATION = "catalogue-proxy-profile-secret-intent-v1.sql"
+OFFER_STOCK_TRENDS_MIGRATION = "catalogue-offer-stock-trends-v1.sql"
+PURCHASED_PRODUCT_CURATION_MIGRATION = "catalogue-purchased-product-curation-v1.sql"
 
 SCHEMA_FILES = (
     BASELINE,
@@ -141,6 +143,8 @@ SCHEMA_FILES = (
     PROXY_AUDIT_ROLE_MIGRATION,
     PROXY_PROVIDER_INTEGRITY_MIGRATION,
     PROXY_PROFILE_SECRET_INTENT_MIGRATION,
+    OFFER_STOCK_TRENDS_MIGRATION,
+    PURCHASED_PRODUCT_CURATION_MIGRATION,
 )
 
 #: The table added by the last file that went into the baseline. Its presence

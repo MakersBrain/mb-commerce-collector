@@ -23,6 +23,7 @@ WORKDIR /srv
 COPY --from=build /src/build ./build
 COPY --from=build /src/node_modules ./node_modules
 COPY --from=build /src/package.json ./
+COPY --from=build /src/config ./config
 
 RUN useradd --system --uid 10001 explorer
 USER explorer

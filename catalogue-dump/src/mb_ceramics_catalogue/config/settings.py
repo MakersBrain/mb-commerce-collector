@@ -240,6 +240,10 @@ class Settings(BaseSettings):
     cache_dir: Path = Path(".cache")
     #: Where NDJSON artifacts are written, namespaced `<run-id>/<job-id>/`.
     dumps_dir: Path = Path("dumps")
+    #: Persist trustworthy stock quantities into offer history. Raw catalogue
+    #: records retain the published value regardless; this gate controls only
+    #: the new queryable trend columns during the staged rollout.
+    stock_trends_enabled: bool = False
     #: Identifies this worker's build in `catalogue.workers.version`.
     worker_capabilities: tuple[str, ...] = ()
     #: Exit cleanly after this many completed jobs, letting the restart policy

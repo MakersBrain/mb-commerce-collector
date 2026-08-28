@@ -57,6 +57,15 @@ def at(row: dict, stamp: str, *, price: float | None = None) -> dict:
     return changed
 
 
+def stocked(row: dict, quantity: int | None) -> dict:
+    changed = {**row}
+    changed["stock_quantity"] = quantity
+    changed["availability"] = (
+        "https://schema.org/OutOfStock" if quantity == 0 else "https://schema.org/InStock"
+    )
+    return changed
+
+
 @pytest.fixture
 def sync_db(db):
     """A synchronous connection to the schema the async `db` fixture built.
@@ -78,6 +87,146 @@ def active_products(connection) -> dict[str, bool]:
 
 
 class TestLoadSource:
+    def test_stock_history_gate_preserves_raw_value_without_publishing_it(self, sync_db):
+        postgres.ensure_staging(sync_db)
+        row = stocked(record("stock-gated", "Stock gated"), 9)
+
+        postgres.load_source(sync_db, "ceradel", [row], whole=True)
+
+        with sync_db.cursor() as cursor:
+            cursor.execute(
+                "select stock_quantity, stock_quantity_kind from catalogue.offer_observations"
+            )
+            assert cursor.fetchone() == {
+                "stock_quantity": None,
+                "stock_quantity_kind": "unknown",
+            }
+            cursor.execute("select record->>'stock_quantity' value from catalogue.raw_records")
+            assert cursor.fetchone()["value"] == "9"
+
+    def test_stock_change_appends_combined_offer_state(self, sync_db):
+        postgres.ensure_staging(sync_db)
+        first = stocked(record("stock-change", "Stock change", 10), 7)
+        second = stocked(at(first, "2026-08-09T00:00:00Z"), 3)
+
+        postgres.load_source(
+            sync_db, "ceradel", [first], whole=True, stock_trends_enabled=True
+        )
+        postgres.load_source(
+            sync_db, "ceradel", [second], whole=True, stock_trends_enabled=True
+        )
+
+        with sync_db.cursor() as cursor:
+            cursor.execute(
+                "select price::float8 price, stock_quantity, stock_quantity_kind, context_version "
+                "from catalogue.offer_observations order by observed_at"
+            )
+            assert cursor.fetchall() == [
+                {
+                    "price": 10.0,
+                    "stock_quantity": 7,
+                    "stock_quantity_kind": "exact",
+                    "context_version": 2,
+                },
+                {
+                    "price": 10.0,
+                    "stock_quantity": 3,
+                    "stock_quantity_kind": "exact",
+                    "context_version": 2,
+                },
+            ]
+
+    def test_non_exact_stock_kind_is_preserved_not_promoted(self, sync_db):
+        postgres.ensure_staging(sync_db)
+        row = stocked(record("stock-lower-bound", "Stock lower bound"), 12)
+        row["stock_quantity_kind"] = "lower_bound"
+
+        postgres.load_source(
+            sync_db, "ceradel", [row], whole=True, stock_trends_enabled=True
+        )
+
+        with sync_db.cursor() as cursor:
+            cursor.execute(
+                "select stock_quantity, stock_quantity_kind "
+                "from catalogue.offer_observations"
+            )
+            assert cursor.fetchone() == {
+                "stock_quantity": 12,
+                "stock_quantity_kind": "lower_bound",
+            }
+
+    def test_unchanged_stock_extends_interval_and_exact_zero_is_retained(self, sync_db):
+        postgres.ensure_staging(sync_db)
+        first = stocked(record("stock-zero", "Stock zero"), 0)
+        again = at(first, "2026-08-09T00:00:00Z")
+
+        for row in (first, again):
+            postgres.load_source(
+                sync_db, "ceradel", [row], whole=True, stock_trends_enabled=True
+            )
+
+        with sync_db.cursor() as cursor:
+            cursor.execute(
+                "select count(*) n, min(stock_quantity) stock, "
+                "min(stock_quantity_kind) kind, max(last_seen_at) last_seen "
+                "from catalogue.offer_observations"
+            )
+            offer = cursor.fetchone()
+        assert offer["n"] == 1
+        assert offer["stock"] == 0
+        assert offer["kind"] == "exact"
+        assert str(offer["last_seen"]).startswith("2026-08-09")
+
+    def test_context_v1_unknown_stock_does_not_create_deployment_duplicate(self, sync_db):
+        postgres.ensure_staging(sync_db)
+        first = record("context-v1", "Context v1")
+        postgres.load_source(sync_db, "ceradel", [first], whole=True)
+        with sync_db.cursor() as cursor:
+            cursor.execute(
+                "update catalogue.offer_observations set context_version=1, "
+                "context_sha256=decode(repeat('00', 32), 'hex')"
+            )
+
+        postgres.load_source(
+            sync_db,
+            "ceradel",
+            [at(first, "2026-08-09T00:00:00Z")],
+            whole=True,
+            stock_trends_enabled=True,
+        )
+
+        with sync_db.cursor() as cursor:
+            cursor.execute(
+                "select count(*) n, min(context_version) version, max(last_seen_at) last_seen "
+                "from catalogue.offer_observations"
+            )
+            offer = cursor.fetchone()
+        assert offer["n"] == 1
+        assert offer["version"] == 1
+        assert str(offer["last_seen"]).startswith("2026-08-09")
+
+    def test_context_v1_gains_a_real_row_when_numeric_stock_begins(self, sync_db):
+        postgres.ensure_staging(sync_db)
+        first = record("context-stock", "Context stock")
+        postgres.load_source(sync_db, "ceradel", [first], whole=True)
+        with sync_db.cursor() as cursor:
+            cursor.execute("update catalogue.offer_observations set context_version=1")
+
+        current = stocked(at(first, "2026-08-09T00:00:00Z"), 4)
+        postgres.load_source(
+            sync_db, "ceradel", [current], whole=True, stock_trends_enabled=True
+        )
+
+        with sync_db.cursor() as cursor:
+            cursor.execute(
+                "select context_version, stock_quantity from catalogue.offer_observations "
+                "order by observed_at"
+            )
+            assert cursor.fetchall() == [
+                {"context_version": 1, "stock_quantity": None},
+                {"context_version": 2, "stock_quantity": 4},
+            ]
+
     def test_concurrent_first_observation_creates_one_raw_and_offer_row(self, sync_db):
         postgres.ensure_staging(sync_db)
         dsn = postgres_dsn()

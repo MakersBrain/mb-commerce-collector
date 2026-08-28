@@ -69,6 +69,7 @@ def _validate_existing_stage(output: Path) -> None:
     allowed_files = {
         *(Path("config") / f"{process}.env" for process in DB_ROLES),
         Path("config/explorer.env"),
+        Path("config/tracked-products.json"),
         *(Path("secrets") / f"nats-{role}-credentials.json" for role in NATS_ROLES),
         Path("secrets/nats-server.conf"),
         Path("secrets/webshare-gateway/webshare-gateway.json"),
@@ -226,6 +227,12 @@ def build(values_path: Path, secret_root: Path, output: Path) -> None:
         )
         additions = "CATALOGUE_DSN=" + dsn + "\n"
         additions += "".join(f"{entry}\n" for entry in extra_env)
+        if process in {"worker", "worker-browser"}:
+            additions += (
+                "CATALOGUE_STOCK_TRENDS_ENABLED="
+                + str(values["stock_trends_enabled"]).lower()
+                + "\n"
+            )
         if process in trace_processes:
             additions += trace_environment
         _write(config / f"{process}.env", common + additions)
@@ -236,8 +243,15 @@ def build(values_path: Path, secret_root: Path, output: Path) -> None:
         _write(path, path.read_text(encoding="utf-8") + f"CATALOGUE_CONTROL_TOKEN={control_token}\n")
     _write(
         config / "explorer.env",
-        f"CATALOGUE_CONTROL_TOKEN={control_token}\nHOST=0.0.0.0\nPORT=3000\n",
+        f"CATALOGUE_CONTROL_TOKEN={control_token}\nHOST=0.0.0.0\nPORT=3000\n"
+        f"CATALOGUE_EXPLORER_TRENDS_ENABLED={str(values['explorer_trends_enabled']).lower()}\n"
+        "CATALOGUE_TRACKED_PRODUCTS_FILE=/srv/config/tracked-products.json\n",
     )
+    tracked_products = HERE.parents[1] / "catalogue-explorer/config/tracked-products.json"
+    parsed_products = json.loads(tracked_products.read_text(encoding="utf-8"))
+    if not isinstance(parsed_products, dict) or not isinstance(parsed_products.get("products"), list):
+        raise ValueError("tracked-products.json must contain a products array")
+    _write(config / "tracked-products.json", json.dumps(parsed_products, indent=2) + "\n")
 
     # Control receives this dedicated directory writable for atomic generation
     # replacement; workers receive the same directory read-only. It contains no

@@ -3,7 +3,7 @@ from mb_ceramics_catalogue.storage import db
 
 
 def test_secret_intent_migration_is_registered_after_provider_integrity():
-    assert db.SCHEMA_FILES[-2:] == (
+    assert db.SCHEMA_FILES[-4:-2] == (
         db.PROXY_PROVIDER_INTEGRITY_MIGRATION,
         db.PROXY_PROFILE_SECRET_INTENT_MIGRATION,
     )

@@ -443,7 +443,8 @@ export async function productDetail(id: string): Promise<ProductDetail> {
 			select observed_at, price::float8 as price, currency, price_text, vat_status,
 			       quantity::float8 as quantity, unit,
 			       unit_price::float8 as unit_price, unit_price_per,
-			       availability, attributes
+			       availability, stock_quantity::float8 as stock_quantity,
+			       stock_quantity_kind, context_version, attributes
 			from catalogue.offer_observations
 			where source_product_id = ${id}
 			order by observed_at desc, id desc
