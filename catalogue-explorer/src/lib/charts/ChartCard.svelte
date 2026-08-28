@@ -6,7 +6,8 @@
 		subtitle,
 		note,
 		chart,
-		table
+		table,
+		tableAlwaysVisible = false
 	}: {
 		title: string;
 		subtitle?: string;
@@ -14,6 +15,8 @@
 		chart: Snippet;
 		/** Every chart ships a table view, so no value is reachable only by hover. */
 		table?: Snippet;
+		/** Comparison screens can keep the table visible instead of using disclosure. */
+		tableAlwaysVisible?: boolean;
 	} = $props();
 </script>
 
@@ -32,13 +35,19 @@
 	{/if}
 
 	{#if table}
-		<details class="mt-3 text-sm">
-			<summary class="cursor-pointer text-xs" style="color: var(--text-secondary)">
-				Table view
-			</summary>
-			<div class="mt-2 overflow-x-auto">
+		{#if tableAlwaysVisible}
+			<div class="mt-4 overflow-x-auto">
 				{@render table()}
 			</div>
-		</details>
+		{:else}
+			<details class="mt-3 text-sm">
+				<summary class="cursor-pointer text-xs" style="color: var(--text-secondary)">
+					Table view
+				</summary>
+				<div class="mt-2 overflow-x-auto">
+					{@render table()}
+				</div>
+			</details>
+		{/if}
 	{/if}
 </section>

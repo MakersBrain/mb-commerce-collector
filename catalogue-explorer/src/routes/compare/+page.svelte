@@ -2,9 +2,7 @@
 	import { BANDS, bandOf } from '$lib/bands';
 	import BarChart from '$lib/charts/BarChart.svelte';
 	import ChartCard from '$lib/charts/ChartCard.svelte';
-	import ProductDetail from '$lib/grid/ProductDetail.svelte';
 	import SupplierDetail from '$lib/grid/SupplierDetail.svelte';
-	import type { ProductSeed } from '$lib/catalogue';
 	import { trim } from '$lib/format';
 	import type { PageData } from './$types';
 
@@ -13,32 +11,12 @@
 	/**
 	 * The comparison answers "who is cheapest"; the next question is always "and
 	 * what is it, exactly" — the pack, the firing range, whether that price has
-	 * moved. Both panels already existed for the grid on /explore and neither was
-	 * reachable from here, so a reader who found a code had to go and look it up
-	 * again somewhere else.
+	 * moved. Product names now link to the same first-class detail page used by
+	 * Explore, so the record and its history have a stable, shareable address.
 	 */
-	let openedProduct = $state<ProductSeed | null>(null);
 	let openedSupplier = $state<{ id: string; label?: string } | null>(null);
 
 	type Row = PageData['groups'][number]['offers'][number];
-
-	/**
-	 * An Offer carries what a comparison needs, which is less than a grid row.
-	 * The panel fetches the rest by id; these are only the fields it paints
-	 * before that lands.
-	 */
-	function seed(offer: Row): ProductSeed {
-		return {
-			id: offer.id,
-			name: offer.name,
-			url: offer.url,
-			brand: offer.brand,
-			code: offer.code,
-			supplier_label: offer.supplier,
-			country: null,
-			image_url: null
-		};
-	}
 
 	const euros = (value: number) => `EUR ${value.toFixed(2)}`;
 
@@ -54,9 +32,35 @@
 	 * per-litre pricing is not linear in pack size, so that comparison would
 	 * always crown the biggest pack.
 	 */
-	function stocked(offer: PageData['groups'][number]['offers'][number]) {
-		if (!offer.availability) return null;
-		return offer.availability.endsWith('InStock');
+	function stockState(offer: Row): 'in' | 'out' | 'unknown' {
+		if (offer.stock_quantity_kind === 'exact' && offer.stock_quantity !== null) {
+			return offer.stock_quantity === 0 ? 'out' : 'in';
+		}
+		const state = offer.availability?.split('/').at(-1);
+		if (state === 'InStock' || state === 'LimitedAvailability') return 'in';
+		if (state === 'OutOfStock' || state === 'SoldOut') return 'out';
+		return 'unknown';
+	}
+
+	function stockLabel(offer: Row) {
+		if (offer.stock_quantity !== null) {
+			const quantity = trim(offer.stock_quantity);
+			switch (offer.stock_quantity_kind) {
+				case 'exact':
+					return offer.stock_quantity === 0 ? '0 · out of stock' : `${quantity} in stock`;
+				case 'lower_bound':
+					return `at least ${quantity}`;
+				case 'upper_bound':
+					return `up to ${quantity}`;
+				case 'order_limit':
+					return `order limit ${quantity}`;
+			}
+		}
+		const state = offer.availability?.split('/').at(-1);
+		if (state === 'InStock') return 'in stock';
+		if (state === 'LimitedAvailability') return 'limited availability';
+		if (state === 'OutOfStock' || state === 'SoldOut') return 'out of stock';
+		return 'unknown';
 	}
 
 	function banded(offers: PageData['groups'][number]['offers']) {
@@ -75,7 +79,7 @@
 							? ''
 							: ` (listed ${offer.price.toFixed(2)} ${offer.currency})`) +
 						` - ${offer.vat_status ?? 'VAT basis unknown'}` +
-						(stocked(offer) === false ? ' - out of stock' : '')
+						(stockState(offer) === 'out' ? ' - out of stock' : '')
 				}))
 		})).filter((entry) => entry.bars.length > 0);
 	}
@@ -128,6 +132,7 @@
 			subtitle="{group.suppliers} supplier{group.suppliers === 1 ? '' : 's'}, {group.offers
 				.length} offers{group.family ? ` - ${group.family}` : ''}"
 			note="Unit prices are computed from the observed pack price and converted at the ECB reference rate, which is indicative rather than a transaction rate. VAT basis, stock and shipping differ between storefronts, so the cheapest bar is not automatically the cheapest purchase."
+			tableAlwaysVisible
 		>
 			{#snippet chart()}
 				{#if panels.length}
@@ -163,13 +168,14 @@
 							<th class="py-1 pr-4 text-right">Price (EUR)</th>
 							<th class="py-1 pr-4">Listed</th>
 							<th class="py-1 pr-4">VAT</th>
-							<th class="py-1 pr-4">Stock</th>
+							<th class="py-1 pr-4">Stock / quantity</th>
 							<th class="py-1 pr-4 text-right">Unit price (EUR)</th>
 							<th class="py-1">Source</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each group.offers as offer}
+							{@const state = stockState(offer)}
 							<tr>
 								<td class="py-1 pr-4">
 									<button
@@ -182,14 +188,13 @@
 									</button>
 								</td>
 								<td class="py-1 pr-4">
-									<button
-										type="button"
+									<a
+										href="/products/{offer.id}"
 										class="text-left underline decoration-dotted underline-offset-2"
 										style="color: var(--primary)"
-										onclick={() => (openedProduct = seed(offer))}
 									>
 										{offer.name}
-									</button>
+									</a>
 								</td>
 								<td class="py-1 pr-4">{pack(offer.quantity, offer.unit)}</td>
 								<td class="py-1 pr-4 text-right tabular-nums">
@@ -201,16 +206,15 @@
 								</td>
 								<td class="py-1 pr-4">{offer.vat_status ?? '-'}</td>
 								<td class="py-1 pr-4 whitespace-nowrap">
-									{#if stocked(offer) === null}
-										-
-									{:else}
-										<span aria-hidden="true" style={stocked(offer) ? 'color: var(--good)' : ''}
-											>{stocked(offer) ? '\u25CF' : '\u25CB'}</span
-										>
-										<span style={stocked(offer) ? '' : 'color: var(--text-muted)'}
-											>{stocked(offer) ? 'in stock' : 'out of stock'}</span
-										>
-									{/if}
+									<span
+										aria-hidden="true"
+										style={state === 'in'
+											? 'color: var(--good)'
+											: state === 'out'
+												? 'color: var(--critical)'
+												: 'color: var(--text-muted)'}>{state === 'in' ? '\u25CF' : state === 'out' ? '\u25CB' : '\u2014'}</span
+									>
+									<span style={state === 'unknown' ? 'color: var(--text-muted)' : ''}>{stockLabel(offer)}</span>
 								</td>
 								<td class="py-1 pr-4 text-right tabular-nums">
 									{offer.unit_price_eur
@@ -234,5 +238,4 @@
 	{/each}
 </div>
 
-<ProductDetail row={openedProduct} onClose={() => (openedProduct = null)} />
 <SupplierDetail supplier={openedSupplier} onClose={() => (openedSupplier = null)} />

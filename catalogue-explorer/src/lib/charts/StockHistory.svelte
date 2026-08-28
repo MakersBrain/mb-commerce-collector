@@ -1,7 +1,11 @@
 <script lang="ts">
-	import type { TrendObservation } from '$lib/trends';
+	type StockPoint = {
+		observed_at: string;
+		stock_quantity: number | null;
+		stock_quantity_kind: 'exact' | 'lower_bound' | 'upper_bound' | 'order_limit' | 'unknown';
+	};
 
-	let { points, height = 96 }: { points: TrendObservation[]; height?: number } = $props();
+	let { points, height = 96 }: { points: StockPoint[]; height?: number } = $props();
 	const width = 460;
 	const pad = 5;
 	const runs = $derived.by(() => {
@@ -57,6 +61,9 @@
 	>
 		<line x1="0" x2={width} y1={height - pad} y2={height - pad} stroke="var(--hairline)" />
 		<path d={path} fill="none" stroke="var(--primary)" stroke-width="2" vector-effect="non-scaling-stroke" />
+		{#each exact as point}
+			<circle cx={scale.x(point.at)} cy={scale.y(point.value)} r="3" fill="var(--primary)" vector-effect="non-scaling-stroke" />
+		{/each}
 	</svg>
 {:else}
 	<p class="text-muted-foreground text-sm">This provider does not publish exact inventory.</p>

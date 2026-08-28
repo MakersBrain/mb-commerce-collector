@@ -15,16 +15,12 @@
 	} from '$lib/columns';
 	import { SCHENGEN, countryName } from '$lib/countries';
 	import { count, eur, firing, listedPrice as price, size, stock } from '$lib/format';
-	import ProductDetail from '$lib/grid/ProductDetail.svelte';
 	import ProductGrid from '$lib/grid/ProductGrid.svelte';
-	import { readSort, type Product, type Sort } from '$lib/catalogue';
+	import { readSort, type Sort } from '$lib/catalogue';
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
-
-	/** The row whose detail panel is open, or null. */
-	let opened = $state<Product | null>(null);
 
 	/**
 	 * What the sheet sends with every block request. It is this page's own query
@@ -690,7 +686,7 @@
 			{sort}
 			onSort={sorted}
 			onArrange={arranged}
-			onOpen={(row) => (opened = row)}
+			onOpen={(row) => goto(`/products/${row.id}`)}
 		/>
 	</div>
 {:else}
@@ -736,22 +732,7 @@
 	     Capped at five: past that the eye has to track too far to compare two. -->
 	<div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
 	{#each data.rows as row (row.id)}
-		<!-- Clicking a card opens the same detail panel a row in the sheet does.
-		     A plain div rather than an article, because this is a control now and
-		     saying so is what puts it in the tab order and on the Enter key. -->
-		<div
-			class="viz-surface flex cursor-pointer gap-3 rounded-xl p-3 text-left"
-			role="button"
-			tabindex="0"
-			aria-label="Details for {row.name}"
-			onclick={() => (opened = row)}
-			onkeydown={(event) => {
-				if (event.key === 'Enter' || event.key === ' ') {
-					event.preventDefault();
-					opened = row;
-				}
-			}}
-		>
+		<article class="viz-surface flex gap-3 rounded-xl p-3 text-left">
 			{#if row.image_url}
 				<img
 					src={row.image_url}
@@ -764,13 +745,8 @@
 				/>
 			{/if}
 			<div class="min-w-0">
-				<!-- The links inside the card go where they say; only the card
-				     itself opens the detail panel. -->
 				<a
-					href={row.url}
-					target="_blank"
-					rel="noreferrer noopener"
-					onclick={(event) => event.stopPropagation()}
+					href="/products/{row.id}"
 					class="line-clamp-2 text-sm font-medium"
 					style="color: var(--text-primary)">{row.name}</a
 				>
@@ -778,7 +754,6 @@
 					{#if row.code}
 						<a
 							href="/compare?q={encodeURIComponent(row.code)}"
-							onclick={(event) => event.stopPropagation()}
 							class="rounded px-1.5 py-0.5 tabular-nums"
 							style="background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--text-primary)"
 							>{row.code}</a
@@ -825,8 +800,9 @@
 						{stock(row)!.label}
 					</div>
 				{/if}
+				<a href={row.url} target="_blank" rel="noreferrer noopener" class="mt-2 inline-block text-xs underline-offset-4 hover:underline" style="color: var(--primary)">Open storefront ↗</a>
 			</div>
-		</div>
+		</article>
 	{/each}
 	</div>
 
@@ -857,5 +833,3 @@
 	</div>
 {/if}
 </div>
-
-<ProductDetail row={opened} onClose={() => (opened = null)} />
