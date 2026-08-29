@@ -15,7 +15,7 @@
 <svelte:head><title>Request failed · Ceramics catalogue</title></svelte:head>
 
 	<section class="mx-auto max-w-xl py-12">
-	<p class="eyebrow">Error {page.status}</p>
+	<p class="mb-eyebrow">Error {page.status}</p>
 	<h1 class="mt-2 text-xl font-semibold">
 		{page.error?.title ?? 'The request could not be completed'}
 	</h1>

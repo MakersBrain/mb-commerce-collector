@@ -1,8 +1,11 @@
 <script lang="ts">
-	import { BANDS, bandOf } from '$lib/bands';
+	import { BANDS, bandOf, measureOf, type Measure } from '$lib/bands';
 	import BarChart from '$lib/charts/BarChart.svelte';
 	import ChartCard from '$lib/charts/ChartCard.svelte';
 	import SupplierDetail from '$lib/grid/SupplierDetail.svelte';
+	import { PageHeader } from '@makersbrain/ui/svelte';
+	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
 	import { trim } from '$lib/format';
 	import type { PageData } from './$types';
 
@@ -25,13 +28,6 @@
 		return `${trim(quantity)} ${unit}`;
 	}
 
-	/**
-	 * One chart per pack band, cheapest first. Prices convert to EUR at the ECB
-	 * reference rate so a USD listing takes part instead of being dropped from
-	 * the comparison, and a gallon is never ranked against a jar:
-	 * per-litre pricing is not linear in pack size, so that comparison would
-	 * always crown the biggest pack.
-	 */
 	function stockState(offer: Row): 'in' | 'out' | 'unknown' {
 		if (offer.stock_quantity_kind === 'exact' && offer.stock_quantity !== null) {
 			return offer.stock_quantity === 0 ? 'out' : 'in';
@@ -63,36 +59,54 @@
 		return 'unknown';
 	}
 
+	/** "packs" for a jar of glaze, "bags" for a box of clay. */
+	const packWord = (measure: Measure) => (measure === 'mass' ? 'bags' : 'packs');
+
+	/**
+	 * One chart per size band, cheapest first. Prices convert to EUR at the ECB
+	 * reference rate so a USD listing takes part instead of being dropped from
+	 * the comparison, and a gallon is never ranked against a jar: unit pricing is
+	 * not linear in pack size, so that comparison would always crown the biggest
+	 * pack. Nor is a litre ranked against a kilogram - the two measures are
+	 * different questions, and each gets its own panels.
+	 */
 	function banded(offers: PageData['groups'][number]['offers']) {
-		const plottable = offers.filter((offer) => offer.unit_price_eur && offer.unit_price_per === 'l');
-		return BANDS.map((entry) => ({
-			band: entry,
-			bars: plottable
-				.filter((offer) => bandOf(offer.litres)?.id === entry.id)
-				.sort((a, b) => (a.unit_price_eur ?? 0) - (b.unit_price_eur ?? 0))
-				.map((offer) => ({
-					label: `${offer.supplier} - ${pack(offer.quantity, offer.unit)}`,
-					value: offer.unit_price_eur ?? 0,
-					note:
-						`${euros(offer.price_eur ?? offer.price)} per pack` +
-						(offer.currency === 'EUR'
-							? ''
-							: ` (listed ${offer.price.toFixed(2)} ${offer.currency})`) +
-						` - ${offer.vat_status ?? 'VAT basis unknown'}` +
-						(stockState(offer) === 'out' ? ' - out of stock' : '')
-				}))
-		})).filter((entry) => entry.bars.length > 0);
+		const measures: Measure[] = ['volume', 'mass'];
+		return measures.flatMap((measure) => {
+			// A group can hold both: the same code sold as a 500 ml bottle by one
+			// storefront and a 5 kg sack by another. They are not comparable, so
+			// they get separate panels rather than separate bars.
+			const plottable = offers.filter(
+				(offer) => offer.unit_price_eur && measureOf(offer.unit_price_per) === measure
+			);
+			return BANDS[measure].map((entry) => ({
+				id: `${measure}:${entry.id}`,
+				label: `${entry.label} ${packWord(measure)}`,
+				bars: plottable
+					.filter((offer) => bandOf(measure, offer.pack_size)?.id === entry.id)
+					.sort((a, b) => (a.unit_price_eur ?? 0) - (b.unit_price_eur ?? 0))
+					.map((offer) => ({
+						label: `${offer.supplier} - ${pack(offer.quantity, offer.unit)}`,
+						value: offer.unit_price_eur ?? 0,
+						note:
+							`${euros(offer.price_eur ?? offer.price)} per pack` +
+							(offer.currency === 'EUR'
+								? ''
+								: ` (listed ${offer.price.toFixed(2)} ${offer.currency})`) +
+							` - ${offer.vat_status ?? 'VAT basis unknown'}` +
+							(stockState(offer) === 'out' ? ' - out of stock' : '')
+					}))
+			}));
+		}).filter((entry) => entry.bars.length > 0);
 	}
 </script>
 
-<h1 class="text-xl font-semibold sm:text-2xl" style="color: var(--text-primary)">
-	Compare suppliers
-</h1>
-<p class="measure mt-1 text-sm" style="color: var(--text-secondary)">
-	Search a manufacturer code (<code>PC-20</code>, <code>CG-1013</code>, <code>UG51</code>) or a
-	product name.
-</p>
-<p class="measure mt-1 text-xs" style="color: var(--text-muted)">
+<PageHeader
+	title="Compare suppliers"
+	description="Search a manufacturer code (PC-20, CG-1013, UG51) or a product name."
+/>
+
+<p class="text-muted-foreground measure text-xs">
 	Every price is converted to EUR at the ECB reference rate{data.fx.date
 		? ` of ${data.fx.date}`
 		: ''}{data.fx.stale ? ' (last stored rates - the ECB was unreachable)' : ''}; the listed
@@ -100,31 +114,26 @@
 </p>
 
 <form method="GET" class="mt-6 flex gap-2">
-	<input
+	<Input
 		type="search"
 		name="q"
 		value={data.query}
 		placeholder="PC-20"
 		autocomplete="off"
 		aria-label="Manufacturer code or product name"
-		class="min-w-0 flex-1 rounded-lg px-3 py-2 text-sm sm:w-72 sm:flex-none"
-		style="background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--hairline)"
+		class="min-w-0 flex-1 sm:w-72 sm:flex-none"
 	/>
-	<button
-		type="submit"
-		class="shrink-0 rounded-lg px-4 py-2 text-sm font-medium"
-		style="background: var(--primary); color: var(--primary-foreground)">Search</button
-	>
+	<Button type="submit">Search</Button>
 </form>
 
 {#if data.query && !data.groups.length}
-	<p class="mt-8 text-sm" style="color: var(--text-muted)">
+	<p class="text-muted-foreground mt-8 text-sm">
 		Nothing matched "{data.query}". Only products carrying a manufacturer code are comparable
 		across suppliers.
 	</p>
 {/if}
 
-<div class="mt-6 flex flex-col gap-4">
+<div class="mt-8 grid gap-8">
 	{#each data.groups as group (group.code)}
 		{@const panels = banded(group.offers)}
 		<ChartCard
@@ -137,10 +146,10 @@
 			{#snippet chart()}
 				{#if panels.length}
 					<div class="flex flex-col gap-5">
-						{#each panels as panel (panel.band.id)}
+						{#each panels as panel (panel.id)}
 							<div>
-								<div class="mb-2 text-xs" style="color: var(--text-muted)">
-									{panel.band.label} packs
+								<div class="text-muted-foreground mb-2 text-xs">
+									{panel.label}
 								</div>
 								<BarChart
 									items={panel.bars}
@@ -152,14 +161,14 @@
 						{/each}
 					</div>
 				{:else}
-					<p class="text-sm" style="color: var(--text-muted)">
-						No EUR offer in this group normalises to a price per litre. The table below has the raw
-						observations.
+					<p class="text-muted-foreground text-sm">
+						No EUR offer in this group normalises to a price per litre or per kilogram. The table
+						below has the raw observations.
 					</p>
 				{/if}
 			{/snippet}
 			{#snippet table()}
-				<table class="w-full min-w-[46rem] text-xs" style="color: var(--text-secondary)">
+				<table class="text-muted-foreground w-full min-w-[46rem] text-xs">
 					<thead>
 						<tr class="text-left">
 							<th class="py-1 pr-4">Supplier</th>
@@ -180,8 +189,7 @@
 								<td class="py-1 pr-4">
 									<button
 										type="button"
-										class="text-left underline decoration-dotted underline-offset-2"
-										style="color: var(--primary)"
+										class="text-primary text-left underline decoration-dotted underline-offset-2"
 										onclick={() => (openedSupplier = { id: offer.supplier })}
 									>
 										{offer.supplier}
@@ -190,8 +198,7 @@
 								<td class="py-1 pr-4">
 									<a
 										href="/products/{offer.id}"
-										class="text-left underline decoration-dotted underline-offset-2"
-										style="color: var(--primary)"
+										class="text-primary text-left underline decoration-dotted underline-offset-2"
 									>
 										{offer.name}
 									</a>
@@ -226,7 +233,7 @@
 										href={offer.url}
 										target="_blank"
 										rel="noreferrer noopener"
-										style="color: var(--primary)">open</a
+										class="text-primary">open</a
 									>
 								</td>
 							</tr>

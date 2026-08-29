@@ -88,14 +88,14 @@
 					</div>
 					<div class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
 						<div>
-							<span class="eyebrow block">Provider</span>{bytes(cycle.provider_reported_bytes)}
+							<span class="mb-eyebrow block">Provider</span>{bytes(cycle.provider_reported_bytes)}
 						</div>
-						<div><span class="eyebrow block">Application</span>{bytes(cycle.application_bytes)}</div>
+						<div><span class="mb-eyebrow block">Application</span>{bytes(cycle.application_bytes)}</div>
 						<div>
-							<span class="eyebrow block">Reserved</span>{bytes(cycle.active_reserved_bytes)}
+							<span class="mb-eyebrow block">Reserved</span>{bytes(cycle.active_reserved_bytes)}
 						</div>
 						<div>
-							<span class="eyebrow block">Headroom</span>{bytes(cycle.remaining_operational_bytes)}
+							<span class="mb-eyebrow block">Headroom</span>{bytes(cycle.remaining_operational_bytes)}
 						</div>
 					</div>
 					<p class="text-muted-foreground mt-2 text-xs">

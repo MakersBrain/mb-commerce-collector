@@ -4,7 +4,7 @@
 	import { relative, duration, count, stateTone } from '$lib/ops/format';
 	import * as Table from '$lib/components/ui/table';
 	import { Card, CardHeader, CardTitle, CardContent } from '$lib/components/ui/card';
-	import { Metric } from '$lib/components/ui/metric';
+	import { Metric } from '@makersbrain/ui/svelte';
 	import { StatusBadge } from '$lib/components/ui/status-badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -86,7 +86,7 @@
 
 	<div class="mb-6 grid gap-4 lg:grid-cols-3">
 		<Card size="sm">
-			<CardHeader><CardTitle class="eyebrow">Collection</CardTitle></CardHeader>
+			<CardHeader><CardTitle class="mb-eyebrow">Collection</CardTitle></CardHeader>
 			<CardContent class="grid gap-1 text-sm">
 				<dl class="grid grid-cols-2 gap-x-3 gap-y-1">
 					<dt class="text-muted-foreground">records</dt>
@@ -104,7 +104,7 @@
 		</Card>
 
 		<Card size="sm">
-			<CardHeader><CardTitle class="eyebrow">Artifact</CardTitle></CardHeader>
+			<CardHeader><CardTitle class="mb-eyebrow">Artifact</CardTitle></CardHeader>
 			<CardContent class="grid gap-1 text-sm">
 				{#if job.artifact_path}
 					<p class="break-all font-mono text-xs">{job.artifact_path}</p>
@@ -121,7 +121,7 @@
 		</Card>
 
 		<Card size="sm">
-			<CardHeader><CardTitle class="eyebrow">In flight</CardTitle></CardHeader>
+			<CardHeader><CardTitle class="mb-eyebrow">In flight</CardTitle></CardHeader>
 			<CardContent class="grid gap-1 text-sm">
 				{#if (job.in_flight ?? []).length}
 					<ul class="space-y-1">
@@ -141,7 +141,7 @@
 
 	<section class="mb-6">
 		<div class="mb-2 flex flex-wrap items-baseline gap-2">
-			<h2 class="eyebrow">Changes since previous scrape</h2>
+			<h2 class="mb-eyebrow">Changes since previous scrape</h2>
 			{#if changes}
 				<a
 					class="text-accent-foreground text-xs underline-offset-4 hover:underline"
@@ -158,9 +158,9 @@
 			     one box where added-green and changed-violet sat edge to edge with
 			     no rule between them. -->
 			<div class="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-				<Metric label="Added" value={count(changes.added)} tone="text-success" />
-				<Metric label="Removed" value={count(changes.removed)} tone="text-destructive" />
-				<Metric label="Changed" value={count(changes.changed)} tone="text-warning" />
+				<Metric label="Added" value={count(changes.added)} tone="good" />
+				<Metric label="Removed" value={count(changes.removed)} tone="bad" />
+				<Metric label="Changed" value={count(changes.changed)} tone="warn" />
 				<Metric label="Unchanged" value={count(changes.unchanged)} />
 			</div>
 
@@ -251,7 +251,7 @@
 
 	{#if coverage.length}
 		<section class="mb-6">
-			<h2 class="eyebrow mb-2">
+			<h2 class="mb-eyebrow mb-2">
 				Field coverage
 				<span class="text-muted-foreground/70 ml-1 font-normal tracking-normal normal-case">
 					— rows carrying each field, so a thin scraper is visible
@@ -276,7 +276,7 @@
 
 	{#if errors.length}
 		<section class="mb-6">
-			<h2 class="eyebrow mb-2">Errors</h2>
+			<h2 class="mb-eyebrow mb-2">Errors</h2>
 			<Card size="sm">
 				<CardContent>
 					<ul class="grid gap-2 text-xs">
@@ -296,7 +296,7 @@
 
 	<section>
 		<form method="GET" class="mb-2 flex flex-wrap items-center gap-2">
-			<h2 class="eyebrow mr-2">Log</h2>
+			<h2 class="mb-eyebrow mr-2">Log</h2>
 			<NativeSelect name="level" class="h-7 text-xs" fit value={data.level ?? ''}>
 				<option value="">all levels</option>
 				<option value="error">error</option>

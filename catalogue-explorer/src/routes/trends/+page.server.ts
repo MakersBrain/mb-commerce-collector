@@ -15,12 +15,6 @@ export const load: PageServerLoad = async ({ url }) => {
 	const queryRange = trendRange(String(Math.max(range.days, 30)));
 	const configured = await trackedProductsConfig();
 	const products = await productTrends(configured, queryRange);
-	const requested = url.searchParams.get('product');
-	const selected = products.find((product) => product.canonical_product_id === requested) ?? products[0] ?? null;
-	const requestedProvider = url.searchParams.get('provider');
-	const provider = selected?.providers.some((entry) => entry.source_product_id === requestedProvider)
-		? requestedProvider
-		: null;
 
-	return { products, selected, provider, range, configEmpty: configured.length === 0 };
+	return { products, range, configEmpty: configured.length === 0 };
 };

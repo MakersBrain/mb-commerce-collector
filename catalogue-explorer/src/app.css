@@ -3,21 +3,27 @@
  *
  * Two systems meet here, on purpose:
  *
- *   - The interface is shadcn-svelte, the component set `packages/ui` carries
- *     in the makersbrain repo, dressed by the `@makersbrain/ui` adapter.
+ *   - The interface is `@makersbrain/ui`: its tokens, its `patterns.css`
+ *     component layer, and the shadcn-svelte controls its adapter dresses.
+ *     `patterns.css` is taken rather than `ui.css` because that file styles
+ *     elements -- `table`, `code`, `a` -- and those rules would land on top of
+ *     Tailwind's preflight and ag-grid's own stylesheet. `patterns.css` is
+ *     single-class and `mb-` prefixed, so it composes instead of competing.
  *     `lib/theme/palette.css` carries only this product's measured overrides.
  *   - The charts and the grid keep their own palette, which was validated for
  *     colour-blind separation against these surfaces and is not the brand's to
  *     override. See the block at the bottom.
  *
- * Import order is load-bearing: tokens and fonts, the shared shadcn bridge,
- * then this product's independently measured data/status palette.
+ * Import order is load-bearing: tokens and fonts, the shared pattern layer and
+ * shadcn bridge, then this product's independently measured data/status
+ * palette.
  */
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn-svelte/tailwind.css';
 @import '@makersbrain/ui/tokens.css';
 @import '@makersbrain/ui/fonts.css';
+@import '@makersbrain/ui/patterns.css';
 @import '@makersbrain/ui/adapters/shadcn.css';
 @import './lib/theme/palette.css';
 
@@ -134,25 +140,6 @@
 		}
 	}
 
-	/**
-	 * The brand's eyebrow: uppercase, tracked, micro.
-	 *
-	 * Named here because it recurs on every ops page as a section heading, and
-	 * six copies of the same five utilities is how one of them ends up a
-	 * different size. `font-sans` is explicit and load-bearing: these are
-	 * usually marked up as `h2` for the document outline, and the base layer
-	 * puts Bitter on every `h2` - this is a label, not a heading, and wants the
-	 * interface face.
-	 */
-	.eyebrow {
-		font-family: var(--mb-font-ui);
-		font-size: 0.6875rem;
-		font-weight: 600;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--muted-foreground);
-	}
-
 	/* Identifiers read character by character and compared against something
 	   pasted from elsewhere: SKUs, lot codes, supplier references. Tabular so
 	   a column of them lines up and 0/O cannot be confused at a glance. */
@@ -177,6 +164,27 @@
    around it has grown. */
 .measure {
 	max-width: 62ch;
+}
+
+/**
+ * The shared components, on this product's status colours.
+ *
+ * `@makersbrain/ui` tones a metric with the brand's sage, kiln and danger. This
+ * app cannot take the kiln one: `warn` here is violet, and that is the whole
+ * point of it -- against this green, amber separates by dE 2.4 under
+ * deuteranopia, which is below the floor where a full-colour reader can tell
+ * them apart. So the three tones are re-pointed at the measured trio rather
+ * than the brand's, which is the same override `lib/theme/palette.css` makes
+ * for shadcn's semantic slots.
+ */
+.mb-metric-value.good {
+	color: var(--good);
+}
+.mb-metric-value.warn {
+	color: var(--warning-data);
+}
+.mb-metric-value.bad {
+	color: var(--critical);
 }
 
 /**

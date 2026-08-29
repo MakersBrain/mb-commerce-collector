@@ -2,7 +2,7 @@
 	import AvailabilityBand from '$lib/charts/AvailabilityBand.svelte';
 	import PriceHistory from '$lib/charts/PriceHistory.svelte';
 	import StockHistory from '$lib/charts/StockHistory.svelte';
-	import PageHeader from '$lib/components/ui/page-header/page-header.svelte';
+	import { PageHeader } from '@makersbrain/ui/svelte';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import type { Observation } from '$lib/catalogue';
 	import type { PageData } from './$types';
