@@ -467,7 +467,7 @@ services:
 
   explorer:
     profiles: ["ui"]
-    # The build installs @makersbrain/brand from GitHub Packages. The credential
+    # The build installs @makersbrain/ui from GitHub Packages. The credential
     # is handed to BuildKit as a secret rather than baked in, so it is mounted
     # only for the `npm ci` layer. It comes from the developer's own ~/.npmrc;
     # set NPMRC to point somewhere else.

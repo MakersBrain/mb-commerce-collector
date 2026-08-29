@@ -18,7 +18,7 @@
 	 *
 	 * IF THIS PATTERN SPREADS, IT BELONGS UPSTREAM. The moment a second ceramics
 	 * surface wants the same cue, this should become a cut in
-	 * `MakersBrain/brand` - where the generator can guarantee every derivation
+	 * `MakersBrain/mb-ui` - where the generator can guarantee every derivation
 	 * stays on the same geometry - rather than a second hand-rolled badge.
 	 *
 	 * The glyph is a ring, not a disc: a thrown vessel seen from above is the one
@@ -26,7 +26,7 @@
 	 * mush. It is drawn on a disc of the page ground because the mark's clay
 	 * strand occupies exactly this corner, and clay on clay is no cue at all.
 	 */
-	import { BrandMark, BrandWordmark } from '@makersbrain/brand/svelte';
+	import { BrandMark, BrandWordmark } from '@makersbrain/ui/svelte';
 
 	let {
 		product = undefined,
