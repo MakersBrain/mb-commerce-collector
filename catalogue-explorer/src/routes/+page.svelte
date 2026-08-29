@@ -42,7 +42,9 @@
 		}))
 	);
 
-	const bandLabel = $derived(data.bands.find((entry) => entry.id === data.bandId)?.label ?? '');
+	const bandLabel = $derived(data.bandLabel);
+	/** "packs" for a jar of glaze, "bags" for a box of clay. */
+	const packWord = $derived(data.measure === 'mass' ? 'bags' : 'packs');
 </script>
 
 <h1 class="text-xl font-semibold sm:text-2xl" style="color: var(--text-primary)">
@@ -90,7 +92,9 @@
 	style="color: var(--text-secondary)"
 >
 	<div class="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-		<label for="band" class="text-xs whitespace-nowrap sm:text-sm">Pack size</label>
+		<label for="band" class="text-xs whitespace-nowrap sm:text-sm">
+			{data.measure === 'mass' ? 'Bag size' : 'Pack size'}
+		</label>
 		<select
 			id="band"
 			name="band"
@@ -144,8 +148,8 @@
 	{/if}
 
 	<span class="measure col-span-2 text-xs" style="color: var(--text-muted)">
-		the pack size scopes both price panels: a small jar always costs more per litre than a large pot,
-		so suppliers are only compared inside one band
+		the size scopes both price panels: a small jar always costs more per {data.measureWord} than a
+		large one, so suppliers are only compared inside one band
 	</span>
 	<noscript><button type="submit" class="rounded-lg px-3 py-1.5">Apply</button></noscript>
 </form>
@@ -207,10 +211,10 @@
 		</ChartCard>
 
 		<ChartCard
-			title="Median {data.pricedFamily} price per litre"
-			subtitle="{bandLabel} packs, EUR offers only{data.family
+			title="Median {data.pricedFamily ?? 'unit'} price per {data.measureWord}"
+			subtitle="{bandLabel} {packWord}, EUR offers only{data.family
 				? ''
-				: ' - glaze unless another type is chosen'}"
+				: ` - ${data.pricedFamily ?? 'no priced type'} unless another type is chosen`}"
 			note="Medians over the latest offer per product. Prices are supplier observations that can be VAT-inclusive or exclusive, and non-EUR listings are converted at the ECB reference rate."
 		>
 			{#snippet chart()}
@@ -221,7 +225,7 @@
 					<thead>
 						<tr class="text-left">
 							<th class="py-1 pr-4">Supplier</th>
-							<th class="py-1 pr-4 text-right">Median EUR/L</th>
+							<th class="py-1 pr-4 text-right">Median EUR/{data.unit}</th>
 							<th class="py-1 text-right">Offers</th>
 						</tr>
 					</thead>
@@ -243,7 +247,7 @@
 <div class="mt-4">
 	<ChartCard
 		title="Widest price spread between suppliers"
-		subtitle="{bandLabel} packs sold by three or more suppliers, EUR per litre{data.family
+		subtitle="{bandLabel} {packWord} sold by three or more suppliers, EUR per {data.measureWord}{data.family
 			? ` - ${data.family} only`
 			: ''}"
 		note="A similar name does not prove two products are equivalent. These rows share a manufacturer code and a pack band; VAT basis and shipping still differ between suppliers."
@@ -253,7 +257,7 @@
 				<RangeChart items={spreadRows} />
 			{:else}
 				<p class="text-sm" style="color: var(--text-muted)">
-					No product in this pack band is sold by three or more suppliers in EUR.
+					No product in this size band is sold by three or more suppliers in EUR.
 				</p>
 			{/if}
 		{/snippet}

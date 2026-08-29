@@ -1,21 +1,46 @@
-import { band } from '$lib/bands';
+import { band, measureUnit, type Measure } from '$lib/bands';
 import { sql } from './db';
 import { eurRate, fxRates, type Rates } from './fx';
 
-// Every price shown as EUR per litre comes through catalogue.offer_comparison,
-// which is the latest offer per source product and only exists for rows that
-// carry a manufacturer code — the only honest cross-supplier key.
+// Every unit price shown here comes through catalogue.offer_comparison, which
+// is the latest offer per source product and only exists for rows that carry a
+// manufacturer code — the only honest cross-supplier key.
 //
-// Pack size is normalised to litres here rather than in the view because the
-// view keeps the supplier's own unit. A 59 ml jar always costs more per litre
-// than a 473 ml pot, so anything that compares suppliers compares inside one
-// pack band and never across bands.
-const litres = sql`
-	quantity / nullif(
-		case unit
-			when 'ml' then 1000 when 'l' then 1 when 'cl' then 100
-			when 'fl oz' then 33.814 when 'pint' then 2.113 when 'gallon' then 0.2642
-		end, 0)
+// Pack size is normalised here rather than in the view because the view keeps
+// the supplier's own unit. A 59 ml jar always costs more per litre than a 473
+// ml pot, and a 1 kg tub more per kilogram than a 25 kg sack, so anything that
+// compares suppliers compares inside one pack band and never across bands.
+//
+// There are two normalisations because the schema quotes unit prices per litre
+// or per kilogram, and only the liquid families are priced by volume. Which one
+// applies is decided by the row's own `unit_price_per`, never guessed from the
+// unit: a stain listed in grams and priced per kilogram must not be measured
+// into litres and then banded against jars.
+const PER_LITRE = sql`
+	case unit
+		when 'ml' then 1000 when 'l' then 1 when 'cl' then 100
+		when 'fl oz' then 33.814 when 'pint' then 2.113 when 'gallon' then 0.2642
+	end
+`;
+
+const PER_KILOGRAM = sql`
+	case unit
+		when 'g' then 1000 when 'gr' then 1000 when 'gram' then 1000 when 'grams' then 1000
+		when 'kg' then 1 when 'lb' then 2.2046 when 'oz' then 35.274
+	end
+`;
+
+/** Pack size in the base unit of one measure: litres, or kilograms. */
+function packSize(measure: Measure) {
+	return sql`quantity / nullif(${measure === 'mass' ? PER_KILOGRAM : PER_LITRE}, 0)`;
+}
+
+/** The same, for a query whose rows can be either measure. */
+const packSizeOfRow = sql`
+	case when unit_price_per = 'kg'
+		then quantity / nullif(${PER_KILOGRAM}, 0)
+		else quantity / nullif(${PER_LITRE}, 0)
+	end
 `;
 
 export { BANDS, band } from '$lib/bands';
@@ -121,25 +146,56 @@ export async function familyMix(brand: string | null = null, keep = 6) {
 	return head;
 }
 
-/** Median EUR per litre per supplier, inside one pack band, for one family. */
+/**
+ * The families that actually carry a comparable unit price, with the measure
+ * they are quoted in and how many offers there are.
+ *
+ * This is what replaced a hard-coded default of `glaze`. Glaze is the type most
+ * suppliers publish a unit price for, so it is what this returns first today -
+ * but it returns it because the data says so, and a catalogue that grows a
+ * thousand priced clay bodies moves the default without an edit here.
+ */
+export async function pricedFamilies(brand: string | null = null, minOffers = 5) {
+	const rows = await sql<{ family: string; unit: string; offers: number }[]>`
+		select family, unit_price_per as unit, count(*)::int as offers
+		from catalogue.offer_comparison
+		where unit_price > 0
+		  and unit_price_per in ('l', 'kg')
+		  and quantity is not null
+		  and family is not null
+		  and ${brandFilter(brand)}
+		group by 1, 2
+		having count(*) >= ${minOffers}
+		order by 3 desc
+	`;
+	return rows.map((row) => ({
+		family: row.family,
+		measure: (row.unit === 'kg' ? 'mass' : 'volume') as Measure,
+		offers: row.offers
+	}));
+}
+
+/** Median EUR per litre or per kilogram per supplier, in one band and family. */
 export async function medianUnitPrice(
 	bandId: string,
-	brand: string | null = null,
-	family = 'glaze',
+	brand: string | null,
+	family: string,
+	measure: Measure,
 	minOffers = 5,
 	rates: Rates | null = null
 ) {
-	const chosen = band(bandId);
+	const chosen = band(measure, bandId);
 	const fx = eurRate(rates ?? (await fxRates()));
 	return sql<{ supplier: string; median: number; offers: number }[]>`
 		with priced as (
-			select source_id, family, (unit_price / ${fx})::float8 as unit_price, ${litres} as litres
+			select source_id, family, (unit_price / ${fx})::float8 as unit_price,
+			       ${packSize(measure)} as size
 			from catalogue.offer_comparison
 			-- Strictly positive, not merely present. A 0.00 listing is a
 			-- storefront saying "ask us", not a price of nothing, and a median
 			-- that counts it reports a shop as cheaper than it is.
 			where unit_price > 0
-			  and unit_price_per = 'l' and quantity is not null
+			  and unit_price_per = ${measureUnit(measure)} and quantity is not null
 			  and ${fx} is not null
 			  and ${brandFilter(brand)}
 		)
@@ -147,7 +203,7 @@ export async function medianUnitPrice(
 		       (percentile_cont(0.5) within group (order by unit_price))::float8 as median,
 		       count(*)::int as offers
 		from priced
-		where litres >= ${chosen.low} and litres < ${chosen.high} and family = ${family}
+		where size >= ${chosen.low} and size < ${chosen.high} and family = ${family}
 		group by 1
 		having count(*) >= ${minOffers}
 		order by 2
@@ -157,13 +213,14 @@ export async function medianUnitPrice(
 /** Products several suppliers sell in the same pack band, widest gap first. */
 export async function widestSpread(
 	bandId: string,
-	brand: string | null = null,
-	family: string | null = null,
+	brand: string | null,
+	family: string | null,
+	measure: Measure,
 	limit = 12,
 	minSuppliers = 3,
 	rates: Rates | null = null
 ) {
-	const chosen = band(bandId);
+	const chosen = band(measure, bandId);
 	const fx = eurRate(rates ?? (await fxRates()));
 	return sql<
 		{
@@ -178,13 +235,13 @@ export async function widestSpread(
 	>`
 		with priced as (
 			select upper(manufacturer_sku) as code, source_id, name, family,
-			       (unit_price / ${fx})::float8 as unit_price, ${litres} as litres
+			       (unit_price / ${fx})::float8 as unit_price, ${packSize(measure)} as size
 			from catalogue.offer_comparison
 			-- As above, and here it is also what keeps the ratio finite: a group
 			-- whose cheapest listing is 0.00 divides by zero and reports a null
 			-- spread, which is not a wider spread but an absent one.
 			where unit_price > 0
-			  and unit_price_per = 'l' and quantity is not null
+			  and unit_price_per = ${measureUnit(measure)} and quantity is not null
 			  and ${fx} is not null
 			  and ${brandFilter(brand)}
 			  and ${familyFilter(family)}
@@ -197,7 +254,7 @@ export async function widestSpread(
 		       max(unit_price)::float8 as high,
 		       (max(unit_price) / nullif(min(unit_price), 0))::float8 as ratio
 		from priced
-		where litres >= ${chosen.low} and litres < ${chosen.high}
+		where size >= ${chosen.low} and size < ${chosen.high}
 		group by code
 		having count(distinct source_id) >= ${minSuppliers}
 		order by ratio desc, suppliers desc
@@ -227,7 +284,8 @@ export type Offer = {
 	unit_price: number | null;
 	unit_price_eur: number | null;
 	unit_price_per: string | null;
-	litres: number | null;
+	/** The pack in the base unit of its own measure: litres, or kilograms. */
+	pack_size: number | null;
 	observed_at: Date;
 };
 
@@ -268,7 +326,7 @@ export async function searchOffers(query: string, limit = 200, rates: Rates | nu
 		       o.quantity::float8 as quantity, o.unit,
 		       o.unit_price::float8 as unit_price, o.unit_price_per,
 		       (o.unit_price / ${fx})::float8 as unit_price_eur,
-		       (${litres})::float8 as litres,
+		       (${packSizeOfRow})::float8 as pack_size,
 		       o.observed_at
 		from catalogue.source_products p
 		join matched m on m.code = upper(p.manufacturer_sku)

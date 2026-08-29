@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { BANDS, bandOf } from '$lib/bands';
+	import { BANDS, bandOf, measureOf, type Measure } from '$lib/bands';
 	import BarChart from '$lib/charts/BarChart.svelte';
 	import ChartCard from '$lib/charts/ChartCard.svelte';
 	import SupplierDetail from '$lib/grid/SupplierDetail.svelte';
@@ -25,13 +25,6 @@
 		return `${trim(quantity)} ${unit}`;
 	}
 
-	/**
-	 * One chart per pack band, cheapest first. Prices convert to EUR at the ECB
-	 * reference rate so a USD listing takes part instead of being dropped from
-	 * the comparison, and a gallon is never ranked against a jar:
-	 * per-litre pricing is not linear in pack size, so that comparison would
-	 * always crown the biggest pack.
-	 */
 	function stockState(offer: Row): 'in' | 'out' | 'unknown' {
 		if (offer.stock_quantity_kind === 'exact' && offer.stock_quantity !== null) {
 			return offer.stock_quantity === 0 ? 'out' : 'in';
@@ -63,25 +56,45 @@
 		return 'unknown';
 	}
 
+	/** "packs" for a jar of glaze, "bags" for a box of clay. */
+	const packWord = (measure: Measure) => (measure === 'mass' ? 'bags' : 'packs');
+
+	/**
+	 * One chart per size band, cheapest first. Prices convert to EUR at the ECB
+	 * reference rate so a USD listing takes part instead of being dropped from
+	 * the comparison, and a gallon is never ranked against a jar: unit pricing is
+	 * not linear in pack size, so that comparison would always crown the biggest
+	 * pack. Nor is a litre ranked against a kilogram - the two measures are
+	 * different questions, and each gets its own panels.
+	 */
 	function banded(offers: PageData['groups'][number]['offers']) {
-		const plottable = offers.filter((offer) => offer.unit_price_eur && offer.unit_price_per === 'l');
-		return BANDS.map((entry) => ({
-			band: entry,
-			bars: plottable
-				.filter((offer) => bandOf(offer.litres)?.id === entry.id)
-				.sort((a, b) => (a.unit_price_eur ?? 0) - (b.unit_price_eur ?? 0))
-				.map((offer) => ({
-					label: `${offer.supplier} - ${pack(offer.quantity, offer.unit)}`,
-					value: offer.unit_price_eur ?? 0,
-					note:
-						`${euros(offer.price_eur ?? offer.price)} per pack` +
-						(offer.currency === 'EUR'
-							? ''
-							: ` (listed ${offer.price.toFixed(2)} ${offer.currency})`) +
-						` - ${offer.vat_status ?? 'VAT basis unknown'}` +
-						(stockState(offer) === 'out' ? ' - out of stock' : '')
-				}))
-		})).filter((entry) => entry.bars.length > 0);
+		const measures: Measure[] = ['volume', 'mass'];
+		return measures.flatMap((measure) => {
+			// A group can hold both: the same code sold as a 500 ml bottle by one
+			// storefront and a 5 kg sack by another. They are not comparable, so
+			// they get separate panels rather than separate bars.
+			const plottable = offers.filter(
+				(offer) => offer.unit_price_eur && measureOf(offer.unit_price_per) === measure
+			);
+			return BANDS[measure].map((entry) => ({
+				id: `${measure}:${entry.id}`,
+				label: `${entry.label} ${packWord(measure)}`,
+				bars: plottable
+					.filter((offer) => bandOf(measure, offer.pack_size)?.id === entry.id)
+					.sort((a, b) => (a.unit_price_eur ?? 0) - (b.unit_price_eur ?? 0))
+					.map((offer) => ({
+						label: `${offer.supplier} - ${pack(offer.quantity, offer.unit)}`,
+						value: offer.unit_price_eur ?? 0,
+						note:
+							`${euros(offer.price_eur ?? offer.price)} per pack` +
+							(offer.currency === 'EUR'
+								? ''
+								: ` (listed ${offer.price.toFixed(2)} ${offer.currency})`) +
+							` - ${offer.vat_status ?? 'VAT basis unknown'}` +
+							(stockState(offer) === 'out' ? ' - out of stock' : '')
+					}))
+			}));
+		}).filter((entry) => entry.bars.length > 0);
 	}
 </script>
 
@@ -137,10 +150,10 @@
 			{#snippet chart()}
 				{#if panels.length}
 					<div class="flex flex-col gap-5">
-						{#each panels as panel (panel.band.id)}
+						{#each panels as panel (panel.id)}
 							<div>
 								<div class="mb-2 text-xs" style="color: var(--text-muted)">
-									{panel.band.label} packs
+									{panel.label}
 								</div>
 								<BarChart
 									items={panel.bars}
@@ -153,8 +166,8 @@
 					</div>
 				{:else}
 					<p class="text-sm" style="color: var(--text-muted)">
-						No EUR offer in this group normalises to a price per litre. The table below has the raw
-						observations.
+						No EUR offer in this group normalises to a price per litre or per kilogram. The table
+						below has the raw observations.
 					</p>
 				{/if}
 			{/snippet}
