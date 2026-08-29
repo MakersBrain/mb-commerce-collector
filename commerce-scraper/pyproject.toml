@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Extensible, dataset-neutral commerce collection library"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
-license = {text = "Proprietary"}
+license = "AGPL-3.0-only"
 dependencies = ["pydantic>=2.9,<3"]
 
 [project.optional-dependencies]
