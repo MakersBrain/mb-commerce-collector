@@ -28,7 +28,7 @@
 	},
 	"dependencies": {
 		"@lucide/svelte": "^1.31.0",
-		"@makersbrain/ui": "0.1.0",
+		"@makersbrain/ui": "^0.2.0",
 		"@types/d3-scale": "^4.0.9",
 		"ag-grid-community": "^36.1.0",
 		"bits-ui": "^2.18.1",

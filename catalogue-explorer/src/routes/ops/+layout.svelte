@@ -2,9 +2,9 @@
 	import { page } from '$app/state';
 	import { invalidateAll } from '$app/navigation';
 	import { onMount, setContext } from 'svelte';
+	import { Tabs, StatusBadge } from '@makersbrain/ui/svelte';
 	import { OpsStream } from '$lib/ops/stream.svelte';
 	import ConnectionBadge from '$lib/ops/ConnectionBadge.svelte';
-	import { StatusBadge } from '$lib/components/ui/status-badge';
 
 	let { children } = $props();
 
@@ -20,7 +20,7 @@
 	});
 
 	const tabs = [
-		{ href: '/ops', label: 'Overview' },
+		{ href: '/ops', label: 'Overview', exact: true },
 		{ href: '/ops/runs', label: 'Runs' },
 		{ href: '/ops/sources', label: 'Sources' },
 		{ href: '/ops/notifications', label: 'Notifications' },
@@ -28,7 +28,6 @@
 		{ href: '/ops/proxies', label: 'Proxies' }
 	];
 
-	const current = $derived(page.url.pathname);
 	const unacknowledged = $derived(stream.unacknowledged.length);
 	const busy = $derived(stream.workers.filter((w) => w.status === 'busy').length);
 	const activeJobs = $derived(
@@ -37,57 +36,30 @@
 </script>
 
 <!--
-	A slightly sunken ground, as this section always had. It is the one visual
-	cue that operations is a different place from the catalogue, and mapping the
-	old translucent tint to a flat `bg-background` had quietly removed it.
+	Operations used to declare a header of its own: a second brand row, a second
+	tab idiom, and a sunken ground, so crossing the nav from the catalogue was
+	crossing a seam between two applications. It is one application. What is left
+	here is the second level of navigation - which view of operations - and the
+	two live figures that only exist while the stream is connected.
 -->
-<div class="bg-muted/40 min-h-dvh">
-	<header class="border-border bg-card border-b">
-		<!-- The breadcrumb and the worker count are the first things to go on a
-		     phone: the tabs and the connection state are what this header is for. -->
-		<div class="mx-auto flex max-w-(--shell) items-center gap-3 px-3 py-2 sm:gap-4 sm:px-4 sm:py-3">
-			<a href="/" class="text-muted-foreground hover:text-foreground shrink-0 text-sm">
-				<span class="hidden sm:inline">catalogue</span>
-				<span class="sm:hidden">&larr;</span>
-			</a>
-			<span class="text-muted-foreground/60 hidden sm:inline">/</span>
-			<span class="hidden font-semibold sm:inline">operations</span>
+<div class="mb-6 flex flex-wrap items-center gap-x-4 gap-y-1">
+	<Tabs items={tabs} current={page.url.pathname} label="Operations sections" class="flex-1">
+		{#snippet badge(tab)}
+			{#if tab.href === '/ops/notifications' && unacknowledged > 0}
+				<StatusBadge tone="warn" class="tabular-nums">
+					{unacknowledged}
+					<span class="sr-only">unacknowledged</span>
+				</StatusBadge>
+			{/if}
+		{/snippet}
+	</Tabs>
 
-			<!-- Five tabs plus a breadcrumb and a badge do not fit until about 900px,
-			     so the strip keeps its own scroll container up to `lg`. Releasing it at
-			     `sm` let the header overflow its box between 640 and 900. -->
-			<nav
-				class="-mx-1 flex min-w-0 flex-1 gap-1 overflow-x-auto px-1 lg:ml-4 lg:flex-none [scrollbar-width:none]"
-			>
-				{#each tabs as tab (tab.href)}
-					<a
-						href={tab.href}
-						class="rounded px-2.5 py-1 text-sm whitespace-nowrap transition-colors sm:px-3
-						{current === tab.href || (tab.href !== '/ops' && current.startsWith(tab.href))
-							? 'bg-primary text-primary-foreground'
-							: 'hover:bg-muted'}"
-					>
-						{tab.label}
-						{#if tab.href === '/ops/notifications' && unacknowledged > 0}
-							<StatusBadge tone="warn" class="ml-1 px-1.5 py-0 tabular-nums">
-								{unacknowledged}
-								<span class="sr-only">unacknowledged</span>
-							</StatusBadge>
-						{/if}
-					</a>
-				{/each}
-			</nav>
-
-			<div class="ml-auto flex shrink-0 items-center gap-3 text-sm">
-				<span class="text-muted-foreground hidden lg:inline">
-					{busy}/{stream.workers.length} workers busy · {activeJobs} active jobs
-				</span>
-				<ConnectionBadge state={stream.connection} />
-			</div>
-		</div>
-	</header>
-
-	<main class="mx-auto max-w-(--shell) px-3 py-5 sm:px-4 sm:py-6">
-		{@render children()}
-	</main>
+	<div class="text-muted-foreground flex shrink-0 items-center gap-3 text-xs">
+		<span class="hidden lg:inline">
+			{busy}/{stream.workers.length} workers busy · {activeJobs} active jobs
+		</span>
+		<ConnectionBadge state={stream.connection} />
+	</div>
 </div>
+
+{@render children()}
