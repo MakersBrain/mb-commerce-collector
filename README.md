@@ -89,7 +89,7 @@ build on drift, and a test asserts the read API's document contains no operation
 other than `get`.
 
 **The design system is a dependency, not a copy.** Colour, type, the component
-layer and the mark all come from `@makersbrain/brand`, which is its own
+layer and the mark all come from `@makersbrain/ui`, which is its own
 repository and its own package. Nothing here regenerates any of it — a change to
 the system is a version bump, and `package-lock.json` records which one this app
 is on.

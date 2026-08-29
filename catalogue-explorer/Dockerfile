@@ -7,7 +7,7 @@
 FROM node:22-slim AS build
 
 WORKDIR /src
-# .npmrc carries the registry mapping for @makersbrain/brand and no credential.
+# .npmrc carries the registry mapping for @makersbrain/ui and no credential.
 # The credential arrives as a BuildKit secret mounted only for this RUN, so it
 # never lands in a layer or in the pushed image.
 COPY package.json package-lock.json .npmrc ./

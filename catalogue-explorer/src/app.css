@@ -4,29 +4,28 @@
  * Two systems meet here, on purpose:
  *
  *   - The interface is shadcn-svelte, the component set `packages/ui` carries
- *     in the makersbrain repo, dressed in the `@makersbrain/brand` tokens.
- *     `lib/theme/palette.css` is the join.
+ *     in the makersbrain repo, dressed by the `@makersbrain/ui` adapter.
+ *     `lib/theme/palette.css` carries only this product's measured overrides.
  *   - The charts and the grid keep their own palette, which was validated for
  *     colour-blind separation against these surfaces and is not the brand's to
  *     override. See the block at the bottom.
  *
- * Import order is load-bearing. `tokens.css` has to arrive before
- * `palette.css`, which is a stylesheet of `var(--mb-*)` references and resolves
- * to nothing without it; and both have to arrive before `@theme inline`, which
- * maps them onto Tailwind's utility names.
+ * Import order is load-bearing: tokens and fonts, the shared shadcn bridge,
+ * then this product's independently measured data/status palette.
  */
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn-svelte/tailwind.css';
-@import '@makersbrain/brand/tokens.css';
-@import './lib/theme/fonts.css';
+@import '@makersbrain/ui/tokens.css';
+@import '@makersbrain/ui/fonts.css';
+@import '@makersbrain/ui/adapters/shadcn.css';
 @import './lib/theme/palette.css';
 
 /* Tailwind only scans what it is pointed at, and `node_modules` is not in that
    set: without this the classes written inside the brand's Svelte components
    are absent from the build and the header lockup renders unstyled. It fails
    silently, which is why it is worth a line. */
-@source '../node_modules/@makersbrain/brand/src/svelte';
+@source '../node_modules/@makersbrain/ui/src/svelte';
 
 /**
  * Dark mode, three-state.
@@ -255,7 +254,7 @@
 	   tell them apart. Violet clears every check on both surfaces (worst
 	   adjacent dE 24.4 protan, 12.7 tritan). The word beside it carries the
 	   meaning; the hue only has to be distinguishable. */
-	--warning: #7a5cd6;
+	--warning-data: #7a5cd6;
 }
 
 /**

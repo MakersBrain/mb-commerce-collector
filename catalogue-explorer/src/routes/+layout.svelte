@@ -3,7 +3,7 @@
 	// The chop rather than the plain weave: several MakersBrain surfaces are
 	// usually open at once, and a tab is the one place the wordmark beside the
 	// mark is too small to say which of them a tab belongs to.
-	import favicon from '@makersbrain/brand/logo/chop.svg';
+	import favicon from '@makersbrain/ui/logo/chop.svg';
 	import SurfaceLockup from '$lib/components/SurfaceLockup.svelte';
 	import { page } from '$app/state';
 

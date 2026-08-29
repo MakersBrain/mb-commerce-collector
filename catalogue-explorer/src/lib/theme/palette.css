@@ -1,93 +1,15 @@
 /**
- * The shadcn semantic layer, sourced from the MakersBrain brand tokens.
+ * Catalogue-specific overrides to @makersbrain/ui/adapters/shadcn.css.
  *
- * The component set this app uses is shadcn-svelte, the same one `packages/ui`
- * carries in the makersbrain repo, so the components expect shadcn's token
- * names: `--background`, `--primary`, `--border`, `--ring` and the rest. The
- * *values* come from `@makersbrain/brand`, which is the design direction this
- * repository committed to. This file is the whole join between the two.
- *
- * ONE BLOCK, NOT THREE. Every value here is a `var(--mb-*)` reference, and
- * `tokens.css` already re-points those under both dark conditions -- the
- * `prefers-color-scheme` media query and an explicit `[data-theme="dark"]`.
- * So the mapping is written once and inherits the three-state behaviour for
- * free. Adding a `.dark` copy of this block would not just be redundant, it
- * would be a second place for the two to drift.
- *
- * That is also why `@theme inline` is used in app.css rather than plain
- * `@theme`: these are runtime `var()` references, and a build-time resolve
- * would freeze the light palette into every utility class.
+ * Interface neutrals and ordinary semantic mappings come from the shared UI
+ * package. The status trio below remains local because it was measured for
+ * colour-blind separation beside the catalogue's fixed chart series. This is a
+ * product data-visualization constraint, not a second brand palette.
  */
-
 :root {
-	/* ---- Ground and ink ------------------------------------------------
-	 * `--background` is the page and `--card` is what sits on it. The brand
-	 * grounds are warm (#F7F3EE over #FFFFFF in light), which is the single
-	 * most visible difference from the neutral greys this app used before.
-	 */
-	--background: var(--mb-bg);
-	--foreground: var(--mb-text);
-	--card: var(--mb-surface);
-	--card-foreground: var(--mb-text);
-	--popover: var(--mb-surface);
-	--popover-foreground: var(--mb-text);
-
-	/* ---- Interactive ---------------------------------------------------
-	 * clay-600, not clay-500. The brand is explicit that these are different
-	 * colours and not interchangeable: brand tone is for marks, and white on
-	 * it lands at 4.25:1, which fails AA. `--mb-accent` is the interactive
-	 * tone and clears it at 5.7:1. The mark in the header still reads
-	 * `--mb-brand` and is the only thing that does.
-	 */
-	--primary: var(--mb-accent);
-	--primary-foreground: var(--mb-text-on-accent);
-
-	--secondary: var(--mb-surface-2);
-	--secondary-foreground: var(--mb-text);
-
-	--muted: var(--mb-surface-sunken);
-	--muted-foreground: var(--mb-text-muted);
-
-	/* shadcn's `--accent` is NOT a brand accent -- it is the tint a control
-	   takes on hover and when a menu item is highlighted. Mapping it to the
-	   clay accent itself would paint solid clay behind every hovered row.
-	   It gets the tint, and the accent text tone rides on top of it. */
-	--accent: var(--mb-accent-tint);
-	--accent-foreground: var(--mb-accent-text);
-
-	/* ---- Lines and focus ----------------------------------------------
-	 * `--border` is the hairline between things; `--input` is deliberately
-	 * heavier, because a control has to announce that it is a control. The
-	 * brand measures the strong line at 3.33:1 on the page ground for that
-	 * reason. Focus is clay-500: it never has text on it, so the brand tone
-	 * is correct here and the accent tone is not.
-	 */
-	--border: var(--mb-line);
-	--input: var(--mb-line-strong);
-	--ring: var(--mb-focus);
-
-	/* ---- Status --------------------------------------------------------
-	 * These are the one place the brand palette is deliberately NOT used.
-	 * The trio below was tuned for colour-blind separation on this app's
-	 * surfaces -- notably violet rather than the usual amber, because amber
-	 * against this green separates by only dE 2.4 under deuteranopia. The
-	 * brand's sage/kiln/danger have not been through that check, and a
-	 * status colour that reads as "fine" to one operator and "unclear" to
-	 * another is a worse failure than a warm palette with a cool warning.
-	 *
-	 * They are theme-invariant on purpose: a state must not change colour
-	 * when someone flips to dark. Defined in app.css alongside the chart
-	 * palette they were validated against; mapped to shadcn's names here.
-	 */
 	--destructive: var(--critical);
 	--destructive-foreground: var(--mb-text-on-accent);
 	--success: var(--good);
-	/* --warning is already the validated violet under its own name. */
-
-	/* ---- Shape ---------------------------------------------------------
-	 * The brand calls its radii "deliberately modest" and says the chop mark
-	 * carries the roundness, so the scale is driven from the brand's medium
-	 * step rather than shadcn's stock 0.625rem.
-	 */
+	--warning: var(--warning-data);
 	--radius: var(--mb-radius-md);
 }
