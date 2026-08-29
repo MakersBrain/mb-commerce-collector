@@ -2,14 +2,13 @@
 	import { getContext } from 'svelte';
 	import { onMount } from 'svelte';
 	import { enhance } from '$app/forms';
+	import { DataList, Metric, Panel, SectionHeader, TableWrap } from '@makersbrain/ui/svelte';
 	import type { OpsStream } from '$lib/ops/stream.svelte';
 	import type { QueueStatus } from '$lib/ops/types';
 	import WorkerCard from '$lib/ops/WorkerCard.svelte';
 	import Unavailable from '$lib/ops/Unavailable.svelte';
 	import { compact, count, relative, duration, stateTone } from '$lib/ops/format';
 	import * as Table from '$lib/components/ui/table';
-	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
-	import { Metric } from '$lib/components/ui/metric';
 	import { StatusBadge } from '$lib/components/ui/status-badge';
 	import { Button } from '$lib/components/ui/button';
 	import { NativeSelect } from '$lib/components/ui/native-select';
@@ -40,15 +39,13 @@
 		cloudflare: 'Cloudflare Queues'
 	} as const;
 	const providerLabel = $derived(
-		queueStats?.broker?.provider
-			? providerLabels[queueStats.broker.provider]
-			: 'delivery provider'
+		queueStats?.broker?.provider ? providerLabels[queueStats.broker.provider] : 'delivery provider'
 	);
 	const lastRun = $derived((data.runs ?? [])[0]);
 	const nextFire = $derived(
-		(data.schedules ?? []).filter((s: any) => s.enabled && s.next_fire_at).sort((a: any, b: any) =>
-			a.next_fire_at.localeCompare(b.next_fire_at)
-		)[0]
+		(data.schedules ?? [])
+			.filter((s: any) => s.enabled && s.next_fire_at)
+			.sort((a: any, b: any) => a.next_fire_at.localeCompare(b.next_fire_at))[0]
 	);
 
 	function bytes(value: number | null | undefined): string {
@@ -74,6 +71,55 @@
 	function age(value: { value?: number | null }): string {
 		return value.value == null ? '—' : compact(value.value);
 	}
+
+	const jobFacts = $derived(
+		queueStats
+			? [
+					{ term: 'Eligible', value: count(queueStats.eligible) },
+					{ term: 'Leased', value: count(queueStats.jobs.leased ?? 0) },
+					{ term: 'Running', value: count(queueStats.jobs.running ?? 0) },
+					{ term: 'Oldest wait', value: compact(queueStats.oldest_queued_age_seconds ?? 0) }
+				]
+			: []
+	);
+
+	const outboxFacts = $derived(
+		queueStats
+			? [
+					{ term: 'Ready', value: count(queueStats.outbox.ready) },
+					{ term: 'Delayed', value: count(queueStats.outbox.delayed) },
+					{ term: 'With errors', value: count(queueStats.outbox.errored) },
+					{ term: 'Published 1h', value: count(queueStats.outbox.published_last_hour) }
+				]
+			: []
+	);
+
+	const brokerFacts = $derived.by(() => {
+		const broker = queueStats?.broker;
+		if (!broker) return [];
+		const facts = [
+			{
+				term: 'Backlog',
+				value: `${quality(broker.backlog_messages)}${count(measured(broker.backlog_messages))}`,
+				title: broker.backlog_messages.accuracy
+			},
+			{ term: 'In flight', value: count(brokerInFlight) },
+			{ term: 'Consumers', value: count(measured(broker.consumer_count)) },
+			{
+				term: 'Storage',
+				value: `${quality(broker.backlog_bytes)}${bytes(measured(broker.backlog_bytes))}`,
+				title: broker.backlog_bytes.accuracy
+			}
+		];
+		if (broker.recovery_dlq) {
+			facts.push({
+				term: 'Recovery DLQ',
+				value: `${quality(broker.recovery_dlq.backlog_messages)}${count(measured(broker.recovery_dlq.backlog_messages))}`,
+				title: broker.recovery_dlq.backlog_messages.accuracy
+			});
+		}
+		return facts;
+	});
 
 	onMount(() => {
 		let live = true;
@@ -103,8 +149,9 @@
 {#if data.unavailable}
 	<Unavailable reason={data.unavailable} />
 {:else}
-	<div class="grid gap-6">
-		<section class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+	<div class="grid gap-8">
+		<!-- The state of the section in four numbers, ruled rather than boxed. -->
+		<section class="mb-metrics mb-metrics-ruled">
 			<Metric
 				label="Queue"
 				value={queued}
@@ -116,7 +163,7 @@
 			<Metric
 				label="Last run"
 				value={lastRun ? lastRun.status : '—'}
-				tone={lastRun ? undefined : 'text-muted-foreground/70'}
+				tone={lastRun ? undefined : 'quiet'}
 				detail={lastRun
 					? `${relative(lastRun.created_at)} · ${lastRun.succeeded}/${lastRun.jobs} ok`
 					: undefined}
@@ -128,131 +175,156 @@
 				detail={nextFire?.id ?? 'no schedule enabled'}
 			/>
 
+			<!-- The one metric that is also a place to go: an unacknowledged count
+			     is only useful beside the page that clears it. -->
 			<Metric
 				label="Unacknowledged"
 				value={stream.unacknowledged.length}
-				tone={stream.unacknowledged.length ? 'text-warning' : undefined}
-			>
-				{#snippet children()}
-					<div
-						class="font-heading text-2xl leading-tight font-semibold tabular-nums {stream
-							.unacknowledged.length
-							? 'text-warning'
-							: ''}"
-					>
-						{stream.unacknowledged.length}
-					</div>
-					<a
-						class="text-accent-foreground text-xs underline-offset-4 hover:underline"
-						href="/ops/notifications">notifications</a
-					>
-				{/snippet}
-			</Metric>
+				tone={stream.unacknowledged.length ? 'warn' : undefined}
+				detail="notifications"
+				href="/ops/notifications"
+			/>
 		</section>
 
-		<Card>
-			<CardHeader class="border-b">
-				<div class="flex flex-wrap items-center justify-between gap-2">
+		<!--
+			One subject, three columns, and the per-route detail under them. It was a
+			bordered card holding three hand-built definition grids, and the grids are
+			now the shared `DataList` -- the same two columns, right-aligned and
+			tabular, that the console builds by hand on its own status page.
+		-->
+		<Panel
+			title="Queue delivery"
+			subtitle="PostgreSQL authority → transactional outbox → {providerLabel}"
+		>
+			{#snippet actions()}
+				<StatusBadge tone={queueStats?.broker?.available ? 'good' : 'bad'}>
+					{queueStats?.broker?.available ? providerLabel : 'provider unavailable'}
+				</StatusBadge>
+			{/snippet}
+
+			{#if queueStats}
+				<div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
 					<div>
-						<CardTitle>Queue delivery</CardTitle>
-						<p class="text-muted-foreground mt-1 text-xs">
-							PostgreSQL authority → transactional outbox → {providerLabel}
-						</p>
+						<h3 class="mb-eyebrow">Jobs</h3>
+						<DataList items={jobFacts} />
 					</div>
-					<StatusBadge tone={queueStats?.broker?.available ? 'good' : 'bad'}>
-						{queueStats?.broker?.available ? providerLabel : 'provider unavailable'}
-					</StatusBadge>
-				</div>
-			</CardHeader>
-			<CardContent>
-				{#if queueStats}
-					<div class="grid gap-5 lg:grid-cols-3">
-						<div>
-							<h3 class="eyebrow mb-2">Jobs</h3>
-							<dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-								<dt class="text-muted-foreground">Eligible</dt><dd class="text-right tabular-nums">{count(queueStats.eligible)}</dd>
-								<dt class="text-muted-foreground">Leased</dt><dd class="text-right tabular-nums">{count(queueStats.jobs.leased ?? 0)}</dd>
-								<dt class="text-muted-foreground">Running</dt><dd class="text-right tabular-nums">{count(queueStats.jobs.running ?? 0)}</dd>
-								<dt class="text-muted-foreground">Oldest wait</dt><dd class="text-right tabular-nums">{compact(queueStats.oldest_queued_age_seconds ?? 0)}</dd>
-							</dl>
-						</div>
 
-						<div>
-							<h3 class="eyebrow mb-2">Outbox</h3>
-							<dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-								<dt class="text-muted-foreground">Ready</dt><dd class="text-right tabular-nums">{count(queueStats.outbox.ready)}</dd>
-								<dt class="text-muted-foreground">Delayed</dt><dd class="text-right tabular-nums">{count(queueStats.outbox.delayed)}</dd>
-								<dt class="text-muted-foreground">With errors</dt><dd class="text-right tabular-nums">{count(queueStats.outbox.errored)}</dd>
-								<dt class="text-muted-foreground">Published 1h</dt><dd class="text-right tabular-nums">{count(queueStats.outbox.published_last_hour)}</dd>
-							</dl>
-						</div>
+					<div>
+						<h3 class="mb-eyebrow">Outbox</h3>
+						<DataList items={outboxFacts} />
+					</div>
 
-						<div>
-							<h3 class="eyebrow mb-2">{providerLabel}</h3>
-							{#if queueStats.broker}
-								<dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-									<dt class="text-muted-foreground">Backlog</dt><dd class="text-right tabular-nums">{quality(queueStats.broker.backlog_messages)}{count(measured(queueStats.broker.backlog_messages))}</dd>
-									<dt class="text-muted-foreground">In flight</dt><dd class="text-right tabular-nums">{count(brokerInFlight)}</dd>
-									<dt class="text-muted-foreground">Consumers</dt><dd class="text-right tabular-nums">{count(measured(queueStats.broker.consumer_count))}</dd>
-									<dt class="text-muted-foreground">Storage</dt><dd class="text-right tabular-nums">{quality(queueStats.broker.backlog_bytes)}{bytes(measured(queueStats.broker.backlog_bytes))}</dd>
-									{#if queueStats.broker.recovery_dlq}
-										<dt class="text-muted-foreground">Recovery DLQ</dt><dd class="text-right tabular-nums">{quality(queueStats.broker.recovery_dlq.backlog_messages)}{count(measured(queueStats.broker.recovery_dlq.backlog_messages))}</dd>
-									{/if}
-								</dl>
-								{#if queueStats.broker.error}
-									<p class="text-destructive mt-2 text-xs">{queueStats.broker.error}</p>
-								{/if}
-							{:else}
-								<p class="text-destructive text-sm">{queueStats.broker_error ?? 'No broker snapshot.'}</p>
+					<div>
+						<h3 class="mb-eyebrow">{providerLabel}</h3>
+						{#if queueStats.broker}
+							<DataList items={brokerFacts} />
+							{#if queueStats.broker.error}
+								<p class="text-destructive mt-2 text-xs">{queueStats.broker.error}</p>
+							{:else if queueStats.broker.last_success_at}
+								<p class="text-muted-foreground mt-2 text-xs">
+									snapshot {relative(queueStats.broker.last_success_at)}
+								</p>
 							{/if}
-						</div>
+						{:else}
+							<p class="text-destructive text-sm">
+								{queueStats.broker_error ?? 'No broker snapshot.'}
+							</p>
+						{/if}
 					</div>
+				</div>
 
-					{#if queueStats.broker}
-						<div class="mt-5 overflow-hidden rounded-lg border">
-							<Table.Root>
-								<Table.Header>
+				{#if queueStats.broker}
+					<TableWrap class="mt-6">
+						<Table.Root>
+							<Table.Header>
+								<Table.Row>
+									<Table.Head>Route</Table.Head>
+									<Table.Head class="text-right">Ready</Table.Head>
+									<Table.Head class="text-right">In flight</Table.Head>
+									<Table.Head class="text-right">Redelivered</Table.Head>
+									<Table.Head class="text-right">Delivered</Table.Head>
+									<Table.Head class="text-right">Oldest</Table.Head>
+								</Table.Row>
+							</Table.Header>
+							<Table.Body>
+								{#each queueStats.broker.routes as route (route.route)}
 									<Table.Row>
-										<Table.Head>Route</Table.Head>
-										<Table.Head class="text-right">Ready</Table.Head>
-										<Table.Head class="text-right">In flight</Table.Head>
-										<Table.Head class="text-right">Redelivered</Table.Head>
-										<Table.Head class="text-right">Delivered</Table.Head>
-										<Table.Head class="text-right">Oldest</Table.Head>
+										<Table.Cell><code>{route.route}</code></Table.Cell>
+										<Table.Cell class="text-right tabular-nums" title={route.ready.accuracy}
+											>{quality(route.ready)}{count(measured(route.ready))}</Table.Cell
+										>
+										<Table.Cell class="text-right tabular-nums" title={route.in_flight.accuracy}
+											>{quality(route.in_flight)}{count(measured(route.in_flight))}</Table.Cell
+										>
+										<Table.Cell class="text-right tabular-nums" title={route.redelivered.accuracy}
+											>{quality(route.redelivered)}{count(measured(route.redelivered))}</Table.Cell
+										>
+										<Table.Cell class="text-right tabular-nums" title={route.delivered.accuracy}
+											>{quality(route.delivered)}{count(measured(route.delivered))}</Table.Cell
+										>
+										<Table.Cell
+											class="text-right tabular-nums"
+											title={route.oldest_age_seconds.accuracy}
+											>{quality(route.oldest_age_seconds)}{age(route.oldest_age_seconds)}</Table.Cell
+										>
 									</Table.Row>
-								</Table.Header>
-								<Table.Body>
-									{#each queueStats.broker.routes as route (route.route)}
-										<Table.Row>
-											<Table.Cell><code>{route.route}</code></Table.Cell>
-											<Table.Cell class="text-right tabular-nums" title={route.ready.accuracy}>{quality(route.ready)}{count(measured(route.ready))}</Table.Cell>
-											<Table.Cell class="text-right tabular-nums" title={route.in_flight.accuracy}>{quality(route.in_flight)}{count(measured(route.in_flight))}</Table.Cell>
-											<Table.Cell class="text-right tabular-nums" title={route.redelivered.accuracy}>{quality(route.redelivered)}{count(measured(route.redelivered))}</Table.Cell>
-											<Table.Cell class="text-right tabular-nums" title={route.delivered.accuracy}>{quality(route.delivered)}{count(measured(route.delivered))}</Table.Cell>
-											<Table.Cell class="text-right tabular-nums" title={route.oldest_age_seconds.accuracy}>{quality(route.oldest_age_seconds)}{age(route.oldest_age_seconds)}</Table.Cell>
-										</Table.Row>
-									{/each}
-								</Table.Body>
-							</Table.Root>
-						</div>
-					{/if}
-					<p class="text-muted-foreground mt-3 text-xs">
-						Updated {relative(queueStats.at)} · refreshes every 5s
-						{#if queueStats.broker?.last_success_at} · provider snapshot {relative(queueStats.broker.last_success_at)}{/if}
-						{#if queueRefreshError} · refresh failed: {queueRefreshError}{/if}
-					</p>
-				{:else}
-					<p class="text-muted-foreground text-sm">Queue details are loading.</p>
+								{/each}
+							</Table.Body>
+						</Table.Root>
+					</TableWrap>
 				{/if}
-			</CardContent>
-		</Card>
 
-		<Card>
-			<CardContent>
+				<p class="text-muted-foreground mt-3 text-xs">
+					Updated {relative(queueStats.at)} · refreshes every 5s
+					{#if queueRefreshError} · refresh failed: {queueRefreshError}{/if}
+				</p>
+			{:else}
+				<p class="text-muted-foreground text-sm">Queue details are loading.</p>
+			{/if}
+		</Panel>
+
+		<Panel title="Run now" subtitle="Start a collection across every source, or a chosen few">
+			{#snippet actions()}
+				<Button variant="ghost" size="xs" onclick={() => (picking = !picking)}>
+					{picking ? 'all sources' : 'pick sources'}
+				</Button>
+			{/snippet}
+
+			<form method="POST" action="?/run" use:enhance class="grid gap-3">
+				{#if picking}
+					<div
+						class="border-border grid max-h-56 grid-cols-2 gap-1 overflow-y-auto rounded-md border p-2 sm:grid-cols-3 lg:grid-cols-4"
+					>
+						{#each data.sources ?? [] as source (source.source_id)}
+							<label class="flex items-center gap-2 text-sm">
+								<!-- A native input, not `<Checkbox>`: see `checkboxClass`. -->
+								<input
+									type="checkbox"
+									class={checkboxClass}
+									name="sources"
+									value={source.source_id}
+									bind:group={chosen}
+								/>
+								<span class="truncate" title={source.label}>{source.source_id}</span>
+							</label>
+						{/each}
+					</div>
+				{/if}
+
 				<div class="flex flex-wrap items-center gap-3">
-					<h2 class="font-heading text-base font-semibold">Run now</h2>
-					<Button variant="ghost" size="xs" onclick={() => (picking = !picking)}>
-						{picking ? 'all sources' : 'pick sources'}
+					<label class="flex items-center gap-2 text-sm">
+						<span class="text-muted-foreground">cache</span>
+						<NativeSelect name="cache_mode" class="h-8 text-xs" fit>
+							<!-- refresh first and by default: a run under `auto` with a
+							     stale max age replays yesterday's pages and reports
+							     success while changing no prices. -->
+							<option value="refresh">refresh (fetch everything)</option>
+							<option value="auto">auto (use what is fresh)</option>
+							<option value="replay">replay (offline, no network)</option>
+						</NativeSelect>
+					</label>
+					<Button size="sm" type="submit">
+						Run {picking && chosen.length ? `${chosen.length} sources` : 'all sources'}
 					</Button>
 					{#if form?.error}
 						<span class="text-destructive text-sm">{form.error}</span>
@@ -265,55 +337,17 @@
 						</a>
 					{/if}
 				</div>
-
-				<form method="POST" action="?/run" use:enhance class="mt-2 grid gap-3">
-					{#if picking}
-						<div
-							class="border-border grid max-h-56 grid-cols-2 gap-1 overflow-y-auto rounded border p-2 sm:grid-cols-3 lg:grid-cols-4"
-						>
-							{#each data.sources ?? [] as source (source.source_id)}
-								<label class="flex items-center gap-2 text-sm">
-									<!-- A native input, not `<Checkbox>`: see `checkboxClass`. -->
-									<input
-										type="checkbox"
-										class={checkboxClass}
-										name="sources"
-										value={source.source_id}
-										bind:group={chosen}
-									/>
-									<span class="truncate" title={source.label}>{source.source_id}</span>
-								</label>
-							{/each}
-						</div>
-					{/if}
-
-					<div class="flex flex-wrap items-center gap-3">
-						<label class="flex items-center gap-2 text-sm">
-							<span class="text-muted-foreground">cache</span>
-							<NativeSelect name="cache_mode" class="h-8 text-xs" fit>
-								<!-- refresh first and by default: a run under `auto` with a
-								     stale max age replays yesterday's pages and reports
-								     success while changing no prices. -->
-								<option value="refresh">refresh (fetch everything)</option>
-								<option value="auto">auto (use what is fresh)</option>
-								<option value="replay">replay (offline, no network)</option>
-							</NativeSelect>
-						</label>
-						<Button size="sm" type="submit">
-							Run {picking && chosen.length ? `${chosen.length} sources` : 'all sources'}
-						</Button>
-					</div>
-				</form>
-			</CardContent>
-		</Card>
+			</form>
+		</Panel>
 
 		<section>
-			<h2 class="eyebrow mb-3">Workers</h2>
+			<SectionHeader title="Workers" description="{workers.length} registered" />
 			{#if workers.length === 0}
 				<p class="text-muted-foreground text-sm">
 					No workers have registered. Start one with <code>catalogue-worker</code>.
 				</p>
 			{:else}
+				<!-- Cards here, and only here: a worker is an object, not a section. -->
 				<div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
 					{#each workers as worker (worker.worker_id)}
 						<WorkerCard {worker} {stream} />
@@ -323,14 +357,12 @@
 		</section>
 
 		<section>
-			<div class="mb-3 flex items-center justify-between">
-				<h2 class="eyebrow">Recent runs</h2>
-				<a
-					class="text-accent-foreground text-sm underline-offset-4 hover:underline"
-					href="/ops/runs">all runs</a
-				>
-			</div>
-			<div class="bg-card overflow-hidden rounded-lg border">
+			<SectionHeader title="Recent runs">
+				{#snippet actions()}
+					<a class="text-sm underline-offset-4 hover:underline" href="/ops/runs">all runs</a>
+				{/snippet}
+			</SectionHeader>
+			<TableWrap>
 				<Table.Root>
 					<Table.Header>
 						<Table.Row>
@@ -345,13 +377,14 @@
 						{#each data.runs ?? [] as run (run.id)}
 							<Table.Row>
 								<Table.Cell>
-									<a
-										class="text-accent-foreground underline-offset-4 hover:underline"
-										href="/ops/runs/{run.id}">{relative(run.created_at)}</a
+									<a class="underline-offset-4 hover:underline" href="/ops/runs/{run.id}"
+										>{relative(run.created_at)}</a
 									>
 								</Table.Cell>
 								<Table.Cell>{run.kind}</Table.Cell>
-								<Table.Cell><StatusBadge tone={stateTone(run.status)}>{run.status}</StatusBadge></Table.Cell>
+								<Table.Cell
+									><StatusBadge tone={stateTone(run.status)}>{run.status}</StatusBadge></Table.Cell
+								>
 								<Table.Cell>
 									{run.succeeded}/{run.jobs}{run.failed ? ` · ${run.failed} failed` : ''}
 								</Table.Cell>
@@ -364,7 +397,7 @@
 						{/each}
 					</Table.Body>
 				</Table.Root>
-			</div>
+			</TableWrap>
 		</section>
 	</div>
 {/if}

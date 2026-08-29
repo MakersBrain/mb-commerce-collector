@@ -1,8 +1,7 @@
 <script lang="ts">
-	import StatTile from '$lib/components/StatTile.svelte';
 	import { productSlug } from '$lib/product-slug.js';
 	import EmptyState from '$lib/components/ui/empty-state/empty-state.svelte';
-	import PageHeader from '$lib/components/ui/page-header/page-header.svelte';
+	import { Metric, PageHeader } from '@makersbrain/ui/svelte';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import {
 		Table,
@@ -98,12 +97,16 @@
 		description="Add reviewed canonical product IDs to config/tracked-products.json, rebuild Explorer, and this page will start with the history already collected by the catalogue."
 	/>
 {:else}
-	<div class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-		<StatTile label="Tracked products" value={String(data.products.length)} />
-		<StatTile label="Provider price drops" value={String(drops)} note={`${data.range.days}-day range`} />
-		<StatTile label="Newly out of stock" value={String(out)} note={`${data.range.days}-day range`} />
-		<StatTile label="Restocked" value={String(restocked)} note={`${data.range.days}-day range`} />
-		<StatTile label="Stale providers" value={String(staleProviders)} note="No observation in 36 hours" />
+	<div class="mb-metrics mb-metrics-ruled mt-6">
+		<Metric label="Tracked products" value={data.products.length} />
+		<Metric label="Provider price drops" value={drops} detail="{data.range.days}-day range" />
+		<Metric label="Newly out of stock" value={out} detail="{data.range.days}-day range" />
+		<Metric label="Restocked" value={restocked} detail="{data.range.days}-day range" />
+		<Metric
+			label="Stale providers"
+			value={staleProviders}
+			detail="no observation in 36 hours"
+		/>
 	</div>
 
 	<Card class="mt-6">

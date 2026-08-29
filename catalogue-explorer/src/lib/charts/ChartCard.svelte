@@ -1,13 +1,29 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { Panel } from '@makersbrain/ui/svelte';
 
+	/**
+	 * A chart, what it is about, and the same numbers as a table.
+	 *
+	 * The chrome is the shared `Panel`: a hairline above and a title, rather than
+	 * a bordered card. A page of these reads as one page with five parts instead
+	 * of five objects to sort, and it stops a card from ever being nested inside
+	 * another card.
+	 *
+	 * The plot itself keeps `.viz-surface`, and that is not an oversight. The
+	 * chart palette was measured for colour-blind separation against that exact
+	 * ground; the brand's card colour is a different, warmer one, and moving the
+	 * marks onto it would quietly invalidate the measurement. So the panel is on
+	 * the page and the plot is on its own island.
+	 */
 	let {
 		title,
 		subtitle,
 		note,
 		chart,
 		table,
-		tableAlwaysVisible = false
+		tableAlwaysVisible = false,
+		class: className = ''
 	}: {
 		title: string;
 		subtitle?: string;
@@ -17,21 +33,17 @@
 		table?: Snippet;
 		/** Comparison screens can keep the table visible instead of using disclosure. */
 		tableAlwaysVisible?: boolean;
+		class?: string;
 	} = $props();
 </script>
 
-<section class="viz-surface rounded-xl p-4 sm:p-5">
-	<header class="mb-4">
-		<h2 class="text-base font-semibold" style="color: var(--text-primary)">{title}</h2>
-		{#if subtitle}
-			<p class="mt-0.5 text-sm" style="color: var(--text-secondary)">{subtitle}</p>
-		{/if}
-	</header>
-
-	{@render chart()}
+<Panel {title} {subtitle} class={className}>
+	<div class="viz-surface rounded-lg p-3 sm:p-4">
+		{@render chart()}
+	</div>
 
 	{#if note}
-		<p class="mt-4 text-xs leading-relaxed" style="color: var(--text-muted)">{note}</p>
+		<p class="mb-panel-note">{note}</p>
 	{/if}
 
 	{#if table}
@@ -40,14 +52,12 @@
 				{@render table()}
 			</div>
 		{:else}
-			<details class="mt-3 text-sm">
-				<summary class="cursor-pointer text-xs" style="color: var(--text-secondary)">
-					Table view
-				</summary>
+			<details class="mt-3">
+				<summary class="text-muted-foreground cursor-pointer text-xs">Table view</summary>
 				<div class="mt-2 overflow-x-auto">
 					{@render table()}
 				</div>
 			</details>
 		{/if}
 	{/if}
-</section>
+</Panel>

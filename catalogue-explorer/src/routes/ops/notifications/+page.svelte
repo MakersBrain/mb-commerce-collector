@@ -65,7 +65,7 @@
 	{/if}
 
 	<section class="mb-8">
-		<h2 class="eyebrow mb-2">
+		<h2 class="mb-eyebrow mb-2">
 			Needs attention ({open.length})
 		</h2>
 		{#if open.length === 0}
@@ -130,7 +130,7 @@
 	</section>
 
 	<section>
-		<h2 class="eyebrow mb-2">
+		<h2 class="mb-eyebrow mb-2">
 			Resolved and acknowledged
 		</h2>
 		<div class="bg-card overflow-hidden rounded-lg border">
