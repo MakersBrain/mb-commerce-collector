@@ -1,5 +1,6 @@
 <script lang="ts">
 	import StatTile from '$lib/components/StatTile.svelte';
+	import { productSlug } from '$lib/product-slug.js';
 	import EmptyState from '$lib/components/ui/empty-state/empty-state.svelte';
 	import PageHeader from '$lib/components/ui/page-header/page-header.svelte';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -118,7 +119,7 @@
 						{@const currentProviders = product.providers.filter((provider: ProviderTrend) => provider.current)}
 						{@const last = currentProviders.map((provider: ProviderTrend) => provider.current!.last_seen_at).sort().at(-1)}
 						<TableRow>
-							<TableCell><a class="font-medium underline-offset-4 hover:underline" href="/trends/{product.canonical_product_id}?days={data.range.days}">{product.label}</a><div class="text-muted-foreground text-xs">{product.providers.length} provider variants</div></TableCell>
+							<TableCell><a class="font-medium underline-offset-4 hover:underline" href="/trends/{productSlug(product.label)}?days={data.range.days}">{product.label}</a><div class="text-muted-foreground text-xs">{product.providers.length} provider variants</div></TableCell>
 							<TableCell class="tabular-nums">{best(product)}</TableCell>
 							<TableCell class="tabular-nums">{productDelta(product, 7)}</TableCell>
 							<TableCell class="tabular-nums">{productDelta(product, 30)}</TableCell>

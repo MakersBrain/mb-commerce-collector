@@ -1,4 +1,5 @@
 import { error } from '@sveltejs/kit';
+import { productSlug } from '$lib/product-slug.js';
 import {
 	productTrends,
 	trackedProductsConfig,
@@ -11,7 +12,11 @@ export const load: PageServerLoad = async ({ params, url }) => {
 	if (!trendsEnabled()) error(404, 'Price and stock trends are not enabled');
 
 	const configured = await trackedProductsConfig();
-	const tracked = configured.find((product) => product.canonical_product_id === params.id);
+	const tracked = configured.find(
+		(product) =>
+			product.canonical_product_id === params.id ||
+			productSlug(product.label) === productSlug(params.id)
+	);
 	if (!tracked) error(404, 'No such tracked product');
 
 	const range = trendRange(url.searchParams.get('days'));

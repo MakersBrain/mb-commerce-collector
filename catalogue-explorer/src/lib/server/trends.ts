@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { env } from '$env/dynamic/private';
+import { productSlug } from '$lib/product-slug.js';
 import { sql } from '$lib/server/db';
 import type {
 	ProductTrend,
@@ -82,6 +83,7 @@ export async function trackedProductsConfig(
 	}
 
 	const seen = new Set<string>();
+	const seenSlugs = new Set<string>();
 	return parsed.products.map((entry, index) => {
 		if (!object(entry)) throw new Error(`Tracked product ${index + 1} must be an object`);
 		const id = entry.canonical_product_id;
@@ -94,6 +96,10 @@ export async function trackedProductsConfig(
 		if (typeof label !== 'string' || label.trim() === '') {
 			throw new Error(`Tracked product ${id} must have a non-empty label`);
 		}
+		const slug = productSlug(label.trim());
+		if (slug === '') throw new Error(`Tracked product ${id} label cannot form a URL slug`);
+		if (seenSlugs.has(slug)) throw new Error(`Duplicate tracked product slug: ${slug}`);
+		seenSlugs.add(slug);
 		const references = entry.purchase_references ?? [];
 		if (
 			!Array.isArray(references) ||
